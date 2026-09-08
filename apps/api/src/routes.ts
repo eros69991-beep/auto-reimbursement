@@ -4,6 +4,7 @@ import { extname } from 'node:path';
 import { Router } from 'express';
 import multer from 'multer';
 
+import { getApiStatus } from './ai/openai-compatible.js';
 import type { Config } from './config.js';
 import type { Store } from './db.js';
 import { confirmDistinct } from './duplicates.js';
@@ -29,6 +30,10 @@ export class HttpError extends Error {
 
 export function createRouter(store: Store, config: Config): Router {
   const router = Router();
+
+  router.get('/ai/status', (_request, response) => {
+    response.json(getApiStatus(config));
+  });
 
   // Multer keeps each image in memory. A 50-file maximum-size upload can
   // therefore require substantial local RAM, bounded to 50 x 20 MiB.

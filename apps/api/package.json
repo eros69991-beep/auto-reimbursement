@@ -11,7 +11,8 @@
     "@auto-reimbursement/contracts": "workspace:*",
     "express": "^5.1.0",
     "multer": "^2.3.0",
-    "sharp": "^0.35.4"
+    "sharp": "^0.35.4",
+    "zod": "^4.5.4"
   },
   "devDependencies": {
     "@types/express": "^5.0.3",

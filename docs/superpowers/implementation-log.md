@@ -53,3 +53,19 @@ Implementation — `storeImage` retains bounded metadata and complete raw decodi
 Scope review — changes are limited to the Task 5 allowlist and this log. Task 4's full decode, zero multipart-field limit, exclusive-write ownership cleanup, immutable original bytes, and indexed image access remain covered. No AI adapter, recognition queue, decision engine, learning module, schema change, refund behavior, or later-task functionality was added. The no-subagent instruction prevented dispatching the review skill's reviewer, so the BigInt/hash validation, deterministic order, cleanup paths, concurrent transaction window, historical immutability, response shape, and HTTP mapping review was performed locally.
 
 Commit — `feat: block duplicate receipts across history`; its immutable SHA is recorded in the Task 5 report immediately after Git creates the commit.
+
+## Task 6: Replaceable multimodal recognition and strict payment extraction
+
+RED — `pnpm --filter @auto-reimbursement/api test test/ai.test.ts` exited 1 before production edits because Vitest could not resolve the expected missing `../src/ai/openai-compatible.js` module.
+
+GREEN — after adding the provider-neutral interfaces, strict Zod validator, prompt, OpenAI-compatible adapter and safe status route, `pnpm --filter @auto-reimbursement/api test test/ai.test.ts` exited 0 with 15/15 tests. The suite uses only a fetch-boundary fake with complete real `Response` objects and asserts adapter outputs, errors, endpoint joining, request headers/body, image data URLs and response decoding.
+
+Coverage — validation tests cover the exact ten-category enum, shared `parseFen` money rules and overflow, leap-day-aware calendar dates, finite inclusive confidence bounds, ambiguous/null consistency, field and array caps, root/nested unknown keys and non-object inputs. Adapter tests cover configured and unconfigured status, trailing-slash endpoint joining, model/temperature/messages/data URL payloads, upstream-only Authorization, string versus unknown content forms, terminal missing-config/401/403 behavior, and retryability for 429, 5xx, network, timeout, malformed transport JSON, malformed content JSON and schema-invalid JSON. Error and status assertions verify that credentials, model, URL details and upstream bodies are never exposed.
+
+Implementation — `ReceiptAnalyzer` and `AiImage` depend only on shared `Analysis`/`ImageRef` contracts. Vendor response traversal remains private to the one adapter. Successful content is parsed as strict JSON and validated without coercing categories, amounts or dates. The adapter uses `AbortSignal.timeout(45000)`, maps failures to code-only `AiError` values, and never reads error bodies. `GET /api/ai/status` returns only `{configured,provider}` with the constant provider label `openai-compatible`; receipt uploads remain unchanged and never invoke analysis.
+
+Verification — the final focused command exited 0 with 15/15 tests. `pnpm test` exited 0 with 75/75 workspace tests (contracts 25, API 49, web 1), and `pnpm typecheck` exited 0 for all three workspace packages. `git diff --check` exited 0 with only informational Windows line-ending notices.
+
+Scope review — changes are limited to the Task 6 allowlist and this log: AI types/prompt/validation/adapter code, the status route, the AI test suite, Zod manifest/lockfile changes, and this implementation record. No analyzer call was added to upload, and no queue, decision, learning, persistence schema, refund or UI behavior was implemented. The explicit no-subagent instruction required local review of vendor isolation, URL joining, auth secrecy, schema/date strictness, error mapping and status response shape.
+
+Commit — `feat: add replaceable receipt analysis adapter`; its immutable SHA is recorded in the Task 6 report immediately after Git creates the commit.
