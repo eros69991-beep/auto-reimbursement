@@ -13,7 +13,61 @@ import { join, relative } from 'node:path';
 import type { Receipt } from '@auto-reimbursement/contracts';
 import sharp from 'sharp';
 import request from 'supertest';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+const fsFaults = vi.hoisted(() => ({
+  failExclusiveWrite: false,
+  simulateExclusiveCollision: false,
+}));
+
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs/promises')>();
+  const actualOpen = actual.open as (...args: any[]) => Promise<any>;
+  const actualWriteFile = actual.writeFile as (...args: any[]) => Promise<void>;
+
+  return {
+    ...actual,
+    open: async (...args: any[]) => {
+      if (fsFaults.simulateExclusiveCollision && args[1] === 'wx') {
+        await actualWriteFile(args[0], Buffer.from('pre-existing'), {
+          flag: 'wx',
+        });
+        throw Object.assign(new Error('EEXIST'), { code: 'EEXIST' });
+      }
+      const handle = await actualOpen(...args);
+      if (!fsFaults.failExclusiveWrite || args[1] !== 'wx') {
+        return handle;
+      }
+      const writeFile = handle.writeFile.bind(handle);
+      return new Proxy(handle, {
+        get(target, property) {
+          if (property === 'writeFile') {
+            return async (data: Buffer) => {
+              await writeFile(data.subarray(0, Math.min(8, data.length)));
+              throw new Error('INJECTED_WRITE_FAILURE');
+            };
+          }
+          const value = Reflect.get(target, property, target);
+          return typeof value === 'function' ? value.bind(target) : value;
+        },
+      });
+    },
+    writeFile: async (...args: any[]) => {
+      const options = args[2] as { flag?: string } | undefined;
+      if (!fsFaults.failExclusiveWrite || options?.flag !== 'wx') {
+        return actualWriteFile(...args);
+      }
+      const handle = await actual.open(args[0], 'wx');
+      try {
+        const data = args[1] as Buffer;
+        await handle.writeFile(data.subarray(0, Math.min(8, data.length)));
+      } finally {
+        await handle.close();
+      }
+      throw new Error('INJECTED_WRITE_FAILURE');
+    },
+  };
+});
 
 import { createApp } from '../src/app.js';
 import { loadConfig, type Config } from '../src/config.js';
@@ -35,6 +89,8 @@ describe('ordered receipt image upload', () => {
   });
 
   afterEach(async () => {
+    fsFaults.failExclusiveWrite = false;
+    fsFaults.simulateExclusiveCollision = false;
     try {
       store.close();
     } catch {
@@ -137,6 +193,22 @@ describe('ordered receipt image upload', () => {
     }
   });
 
+  it('rejects multipart text fields without processing accompanying files', async () => {
+    const png = await pixelPng('#102030');
+    let upload = request(createApp({ store, config })).post(
+      '/api/receipts/upload',
+    );
+    for (let index = 0; index < 100; index += 1) {
+      upload = upload.field(`unexpected-${index}`, 'x');
+    }
+    const response = await upload.attach('files', png, 'receipt.png');
+
+    expect(response.status).toBe(413);
+    expect(response.body).not.toHaveProperty('stack');
+    expect(store.list('receipts')).toEqual([]);
+    expect(await filesUnder(temp)).toEqual([]);
+  });
+
   it('uses decoded image format instead of the claimed MIME type or extension', async () => {
     const png = await pixelPng('#445566');
     const response = await request(createApp({ store, config }))
@@ -155,6 +227,32 @@ describe('ordered receipt image upload', () => {
     expect(response.body.accepted[0].original.mime).toBe('image/png');
     expect(response.body.accepted[0].uploadOrder).toBe(1);
     expect(response.body.rejected).toEqual([{ index: 0, code: 'INVALID_IMAGE' }]);
+    expect(store.list('files')).toHaveLength(1);
+  });
+
+  it('partially rejects a truncated PNG whose metadata still parses', async () => {
+    const png = await sharp({
+      create: { width: 64, height: 64, channels: 3, background: '#135724' },
+    })
+      .png()
+      .toBuffer();
+    const truncated = png.subarray(0, png.length - 13);
+    await expect(sharp(truncated).metadata()).resolves.toMatchObject({
+      format: 'png',
+      width: 64,
+      height: 64,
+    });
+    await expect(sharp(truncated).raw().toBuffer()).rejects.toThrow();
+
+    const response = await request(createApp({ store, config }))
+      .post('/api/receipts/upload')
+      .attach('files', truncated, 'truncated.png')
+      .attach('files', png, 'complete.png');
+
+    expect(response.status).toBe(201);
+    expect(response.body.rejected).toEqual([{ index: 0, code: 'INVALID_IMAGE' }]);
+    expect(response.body.accepted).toHaveLength(1);
+    expect(response.body.accepted[0].uploadOrder).toBe(1);
     expect(store.list('files')).toHaveLength(1);
   });
 
@@ -198,6 +296,43 @@ describe('ordered receipt image upload', () => {
       }),
     ).rejects.toThrow('INVALID_IMAGE');
     expect(await filesUnder(temp)).toEqual([]);
+  });
+
+  it('removes a partially written file after an owned exclusive write fails', async () => {
+    const png = await pixelPng('#246813');
+    const sentinel = join(temp, 'keep.txt');
+    await writeFile(sentinel, 'keep');
+    fsFaults.failExclusiveWrite = true;
+
+    await expect(
+      storeImage(config, '2026-09', 'originals', {
+        name: 'partial.png',
+        mime: 'image/png',
+        bytes: png,
+      }),
+    ).rejects.toThrow('INJECTED_WRITE_FAILURE');
+
+    fsFaults.failExclusiveWrite = false;
+    expect(await readFile(sentinel, 'utf8')).toBe('keep');
+    expect(await filesUnder(temp)).toEqual([sentinel]);
+  });
+
+  it('never removes a pre-existing path when exclusive creation collides', async () => {
+    const png = await pixelPng('#abcdef');
+    fsFaults.simulateExclusiveCollision = true;
+
+    await expect(
+      storeImage(config, '2026-09', 'originals', {
+        name: 'collision.png',
+        mime: 'image/png',
+        bytes: png,
+      }),
+    ).rejects.toMatchObject({ code: 'EEXIST' });
+
+    fsFaults.simulateExclusiveCollision = false;
+    const files = await filesUnder(temp);
+    expect(files).toHaveLength(1);
+    expect(await readFile(files[0]!, 'utf8')).toBe('pre-existing');
   });
 
   it('rejects an empty multipart upload and keeps health-only app isolated', async () => {

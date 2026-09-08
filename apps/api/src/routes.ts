@@ -13,7 +13,7 @@ const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
 
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { files: 50, fileSize: MAX_IMAGE_BYTES },
+  limits: { fields: 0, files: 50, fileSize: MAX_IMAGE_BYTES },
 });
 
 export class HttpError extends Error {

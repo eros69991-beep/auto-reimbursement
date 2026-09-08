@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, open, unlink } from 'node:fs/promises';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
 
 import type { ImageRef } from '@auto-reimbursement/contracts';
@@ -73,6 +73,11 @@ export async function storeImage(
     metadata = await sharp(input.bytes, {
       limitInputPixels: MAX_IMAGE_PIXELS,
     }).metadata();
+    await sharp(input.bytes, {
+      limitInputPixels: MAX_IMAGE_PIXELS,
+    })
+      .raw()
+      .toBuffer();
   } catch {
     throw new Error('INVALID_IMAGE');
   }
@@ -89,14 +94,37 @@ export async function storeImage(
   const format = imageFormats[metadata.format as keyof typeof imageFormats];
   const id = randomUUID();
   const path = `${month}/${kind}/${id}.${format.extension}`;
+  const absolutePath = safePath(config.dataDir, path);
+  const sha256 = createHash('sha256').update(input.bytes).digest('hex');
   await ensureMonthDirs(config.dataDir, month);
-  await writeFile(safePath(config.dataDir, path), input.bytes, { flag: 'wx' });
+
+  let handle;
+  try {
+    handle = await open(absolutePath, 'wx');
+    await handle.writeFile(input.bytes);
+    await handle.close();
+    handle = undefined;
+  } catch (error) {
+    if (handle !== undefined) {
+      try {
+        await handle.close();
+      } catch {
+        // Continue with exact-path cleanup after a close failure.
+      }
+      try {
+        await unlink(absolutePath);
+      } catch {
+        // Preserve the original write/close failure.
+      }
+    }
+    throw error;
+  }
 
   return {
     id,
     path,
     mime: format.mime,
-    sha256: createHash('sha256').update(input.bytes).digest('hex'),
+    sha256,
     perceptualHash: '',
     bytes: input.bytes.length,
     width: metadata.width,

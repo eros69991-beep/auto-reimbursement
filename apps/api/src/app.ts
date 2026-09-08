@@ -28,7 +28,9 @@ export function createApp(deps?: AppDependencies): express.Express {
     ) => {
       if (
         error instanceof MulterError &&
-        (error.code === 'LIMIT_FILE_SIZE' || error.code === 'LIMIT_FILE_COUNT')
+        (error.code === 'LIMIT_FILE_SIZE' ||
+          error.code === 'LIMIT_FILE_COUNT' ||
+          error.code === 'LIMIT_FIELD_COUNT')
       ) {
         response.status(413).json({
           code: 'UPLOAD_LIMIT',
