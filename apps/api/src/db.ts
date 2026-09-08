@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { backup, DatabaseSync } from 'node:sqlite';
+import { types as utilTypes } from 'node:util';
 
 import type { Table, Tables } from '@auto-reimbursement/contracts';
 
@@ -100,6 +101,9 @@ class SqliteStore implements Store {
   transact<T>(fn: () => T): T {
     if (this.transactionActive) {
       throw new Error('NESTED_TRANSACTION');
+    }
+    if (utilTypes.isAsyncFunction(fn)) {
+      throw new Error('ASYNC_TRANSACTION');
     }
 
     this.database.exec('BEGIN IMMEDIATE');

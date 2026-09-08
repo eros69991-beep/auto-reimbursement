@@ -259,6 +259,9 @@ export function netFen(
 ): number {
   if (
     receipt.paidFen === null ||
+    !Number.isSafeInteger(receipt.paidFen) ||
+    receipt.paidFen < 0 ||
+    receipt.paidFen > 999999999999 ||
     !Number.isSafeInteger(receipt.refundFen) ||
     receipt.refundFen < 0 ||
     receipt.refundFen > receipt.paidFen

@@ -49,4 +49,19 @@ describe('exact money helpers', () => {
   it('allows a full refund to net to zero', () => {
     expect(netFen({ paidFen: 1000, refundFen: 1000 })).toBe(0);
   });
+
+  it.each([1.5, Number.NaN, Number.POSITIVE_INFINITY, 1000000000000])(
+    'rejects invalid paid fen %s before calculating net',
+    (paidFen) => {
+      expect(() => netFen({ paidFen, refundFen: 0 })).toThrow(
+        'INVALID_REFUND',
+      );
+    },
+  );
+
+  it('allows the maximum paid fen boundary', () => {
+    expect(netFen({ paidFen: 999999999999, refundFen: 0 })).toBe(
+      999999999999,
+    );
+  });
 });

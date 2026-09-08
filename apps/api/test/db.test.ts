@@ -67,15 +67,36 @@ describe('SQLite store', () => {
     }
   });
 
-  it('rejects asynchronous transaction callbacks before committing', () => {
+  it('does not invoke a declared async transaction callback', async () => {
     const store = openStore(':memory:');
     try {
       expect(() =>
         store.transact(async () => {
-          store.put('receipts', sampleReceipt());
+          await Promise.resolve();
+          store.put(
+            'receipts',
+            sampleReceipt({ uploadOrder: store.nextOrder() }),
+          );
         }),
       ).toThrow('ASYNC_TRANSACTION');
-      expect(store.get('receipts', 'receipt-1')).toBeNull();
+      await Promise.resolve();
+      expect(store.list('receipts')).toEqual([]);
+      expect(store.nextOrder()).toBe(1);
+    } finally {
+      store.close();
+    }
+  });
+
+  it('rolls back when a non-async callback returns a promise', () => {
+    const store = openStore(':memory:');
+    try {
+      expect(() =>
+        store.transact(() => {
+          store.put('receipts', sampleReceipt());
+          return Promise.resolve();
+        }),
+      ).toThrow('ASYNC_TRANSACTION');
+      expect(store.list('receipts')).toEqual([]);
     } finally {
       store.close();
     }
