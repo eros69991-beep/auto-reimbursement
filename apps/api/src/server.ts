@@ -1,7 +1,9 @@
 import { app } from './app.js';
+import { loadConfig } from './config.js';
+import { resolve } from 'node:path';
 
-const port = Number(process.env.PORT ?? 3000);
+const config = loadConfig(process.env, resolve(process.cwd(), '../..'));
 
-app.listen(port, () => {
-  console.log(`API listening on port ${port}`);
+app.listen(config.port, config.host, () => {
+  console.log(`API listening on ${config.host}:${config.port}`);
 });

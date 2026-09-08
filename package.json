@@ -3,7 +3,12 @@
   "private": true,
   "version": "0.0.0",
   "packageManager": "pnpm@11.19.0",
+  "engines": {
+    "node": ">=24 <25"
+  },
   "scripts": {
+    "dev:api": "pnpm --filter @auto-reimbursement/api exec node --env-file-if-exists=../../.env --import tsx src/server.ts",
+    "dev:web": "pnpm --filter @auto-reimbursement/web dev",
     "test": "pnpm -r run test",
     "typecheck": "pnpm -r run typecheck"
   }
