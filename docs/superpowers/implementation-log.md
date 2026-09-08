@@ -21,3 +21,19 @@ GREEN — `pnpm --filter @auto-reimbursement/contracts test` exited 0 with 20/20
 Verification — `pnpm test` exited 0 with 31/31 tests (contracts 20, API 10, web 1) and no warnings or failures. `pnpm typecheck` exited 0 for contracts, API, and web. `git diff --check` exited 0; Git reported only informational Windows line-ending conversion notices.
 
 Commit — `feat: persist reimbursement records in sqlite`; its immutable SHA is recorded in the Task 3 report immediately after Git creates the commit.
+
+## Task 4: Ordered image upload and immutable local storage
+
+RED — `pnpm --filter @auto-reimbursement/api test test/upload.test.ts` exited 1 before production edits because Vitest could not resolve the expected missing `../src/receipts.js` module. No upload production module or route existed at that point.
+
+GREEN — `pnpm --filter @auto-reimbursement/api test test/upload.test.ts` exited 0 with 9/9 tests. The first implementation run exposed and then fixed an image response header bug: Express treated the slash-containing indexed relative path as a literal content type; using only its trusted generated extension made the focused suite pass.
+
+Coverage — the focused suite uses real Sharp-generated/decoded pixels, real Multer multipart parsing, real Supertest requests, a real in-memory SQLite Store, and real temporary-disk bytes. It verifies byte-for-byte preservation and SHA-256, multipart/SQLite order, exact 50-file acceptance and 51-file HTTP 413 rejection, decoded format over claimed MIME/extension, malformed per-item rejection without consuming order, a greater-than-20-MiB limit, a greater-than-40-million-pixel limit, browser-name traversal irrelevance, zero-file rejection, health-only `createApp()`, the 1 MiB JSON limit, same-transaction Receipt/FileIndexEntry writes, exact-orphan cleanup that preserves a sentinel file, sanitized internal errors, and indexed live/missing/deleted image responses.
+
+Implementation — original bytes are written once with `flag: 'wx'` beneath generated UUID month/kind paths and are never recompressed. Validation completes before any path is created. Receipt upload is sequential; `nextOrder()`, the recognizing Receipt, and its FileIndexEntry are persisted in one synchronous transaction. A transaction failure unlinks only the exact newly created path. Image reads require a live file-index row and resolve it through `safePath`; no static directory is exposed. Multer bounds memory to 50 files at 20 MiB each, which can still require substantial local RAM at the maximum request size. The server opens one Store and closes it when the HTTP server shuts down, while dependency-free app creation retains isolated health behavior.
+
+Verification — `pnpm test` exited 0 with 46/46 tests (contracts 25, API 20, web 1), with no failures or runtime warnings. `pnpm typecheck` exited 0 for contracts, API, and web.
+
+Scope review — changes are limited to the Task 4 allowlist: upload/storage/routes/app/server code, the upload integration suite, the API manifest and pnpm lockfile, and this log. No duplicate detection, recognition/AI, queue, frontend, schema expansion, refund, or later-task behavior was added.
+
+Commit — `feat: upload immutable receipt images in order`; its immutable SHA is recorded in the Task 4 report immediately after Git creates the commit.

@@ -9,10 +9,13 @@
   },
   "dependencies": {
     "@auto-reimbursement/contracts": "workspace:*",
-    "express": "^5.1.0"
+    "express": "^5.1.0",
+    "multer": "^2.3.0",
+    "sharp": "^0.35.4"
   },
   "devDependencies": {
     "@types/express": "^5.0.3",
+    "@types/multer": "^2.2.0",
     "@types/node": "^24.3.1",
     "@types/supertest": "^6.0.3",
     "supertest": "^7.1.4",
