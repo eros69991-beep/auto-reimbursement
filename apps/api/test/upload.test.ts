@@ -74,6 +74,7 @@ import { loadConfig, type Config } from '../src/config.js';
 import { openStore, type Store } from '../src/db.js';
 import { uploadReceipts } from '../src/receipts.js';
 import { safePath, storeImage } from '../src/storage.js';
+import { sampleReceipt } from './support.js';
 
 const now = new Date(2026, 8, 3, 12, 0, 0);
 
@@ -100,8 +101,8 @@ describe('ordered receipt image upload', () => {
   });
 
   it('preserves multipart order, immutable bytes, and ignores traversal names', async () => {
-    const first = await pixelPng('#123456');
-    const second = await pixelPng('#abcdef');
+    const first = await patternPng(1);
+    const second = await patternPng(2);
 
     const response = await request(createApp({ store, config }))
       .post('/api/receipts/upload')
@@ -112,6 +113,10 @@ describe('ordered receipt image upload', () => {
       .attach('files', second, {
         filename: 'two.png',
         contentType: 'image/png',
+      })
+      .attach('files', first, {
+        filename: 'renamed-copy.png',
+        contentType: 'image/png',
       });
 
     expect(response.status).toBe(201);
@@ -119,7 +124,13 @@ describe('ordered receipt image upload', () => {
       response.body.accepted.map((receipt: Receipt) => receipt.uploadOrder),
     ).toEqual([1, 2]);
     expect(response.body.accepted).toHaveLength(2);
-    expect(response.body.rejected).toEqual([]);
+    expect(response.body.rejected).toEqual([
+      {
+        index: 2,
+        code: 'EXACT_DUPLICATE',
+        duplicateId: response.body.accepted[0].id,
+      },
+    ]);
 
     const receipts = response.body.accepted as Receipt[];
     expect(receipts.map((receipt) => receipt.status)).toEqual([
@@ -161,12 +172,14 @@ describe('ordered receipt image upload', () => {
   });
 
   it('accepts exactly 50 files and rejects the 51st file at the HTTP boundary', async () => {
-    const png = await pixelPng('#010203');
+    const pngs = await Promise.all(
+      Array.from({ length: 50 }, (_, index) => patternPng(index + 10)),
+    );
     let fifty = request(createApp({ store, config })).post(
       '/api/receipts/upload',
     );
     for (let index = 0; index < 50; index += 1) {
-      fifty = fifty.attach('files', png, `${index}.png`);
+      fifty = fifty.attach('files', pngs[index]!, `${index}.png`);
     }
 
     const accepted = await fifty;
@@ -182,7 +195,11 @@ describe('ordered receipt image upload', () => {
         '/api/receipts/upload',
       );
       for (let index = 0; index < 51; index += 1) {
-        fiftyOne = fiftyOne.attach('files', png, `${index}.png`);
+        fiftyOne = fiftyOne.attach(
+          'files',
+          pngs[index % pngs.length]!,
+          `${index}.png`,
+        );
       }
       const rejected = await fiftyOne;
       expect(rejected.status).toBe(413);
@@ -392,6 +409,120 @@ describe('ordered receipt image upload', () => {
     expect(await filesUnder(temp)).toEqual([sentinel]);
   });
 
+  it('keeps only historical evidence when rejecting an exact renamed upload', async () => {
+    const png = await patternPng(80);
+    const first = await request(createApp({ store, config }))
+      .post('/api/receipts/upload')
+      .attach('files', png, 'original.png');
+    const prior = first.body.accepted[0] as Receipt;
+    store.put('receipts', {
+      ...prior,
+      status: 'archived',
+      archivedAt: '2026-10-01T00:00:00.000Z',
+    });
+
+    const duplicate = await request(createApp({ store, config }))
+      .post('/api/receipts/upload')
+      .attach('files', png, 'renamed.png');
+
+    expect(duplicate.status).toBe(201);
+    expect(duplicate.body.accepted).toEqual([]);
+    expect(duplicate.body.rejected).toEqual([
+      { index: 0, code: 'EXACT_DUPLICATE', duplicateId: prior.id },
+    ]);
+    expect(store.list('receipts')).toHaveLength(1);
+    expect(store.list('files')).toHaveLength(1);
+    expect(await filesUnder(temp)).toEqual([
+      safePath(temp, prior.original.path),
+    ]);
+
+    const evidence = await request(createApp({ store, config })).get(
+      `/api/images/${prior.original.id}`,
+    );
+    expect(evidence.status).toBe(200);
+    expect(evidence.body).toEqual(png);
+  });
+
+  it('persists a recompressed visual match as pending without losing evidence', async () => {
+    const source = await patternPng(90, 0);
+    const recompressed = await sharp(source)
+      .png({ compressionLevel: 9 })
+      .toBuffer();
+    expect(recompressed).not.toEqual(source);
+
+    const response = await request(createApp({ store, config }))
+      .post('/api/receipts/upload')
+      .attach('files', source, 'source.png')
+      .attach('files', recompressed, 'recompressed.png');
+
+    expect(response.status).toBe(201);
+    expect(response.body.rejected).toEqual([]);
+    expect(response.body.accepted).toHaveLength(2);
+    const [prior, suspected] = response.body.accepted as Receipt[];
+    expect(prior).toMatchObject({ status: 'recognizing', duplicateIds: [] });
+    expect(suspected).toMatchObject({
+      status: 'pending',
+      pendingReasons: ['suspected_duplicate'],
+      duplicateIds: [prior!.id],
+      duplicateOverride: false,
+    });
+    expect(store.list('files')).toHaveLength(2);
+    expect(
+      (
+        await request(createApp({ store, config })).get(
+          `/api/images/${suspected!.original.id}`,
+        )
+      ).body,
+    ).toEqual(recompressed);
+  });
+
+  it('rechecks exact duplicates inside the persistence transaction and removes the race orphan', async () => {
+    const png = await patternPng(100);
+    const sha256 = createHash('sha256').update(png).digest('hex');
+    const prior = sampleReceipt({
+      id: 'concurrent-winner',
+      original: {
+        ...sampleReceipt().original,
+        id: 'winner-image',
+        sha256,
+      },
+    });
+    let inserted = false;
+    const racingStore: Store = {
+      get: store.get.bind(store),
+      list: store.list.bind(store),
+      put: store.put.bind(store),
+      remove: store.remove.bind(store),
+      transact: <T>(run: () => T): T => {
+        if (!inserted) {
+          inserted = true;
+          store.put('receipts', prior);
+        }
+        return store.transact(run);
+      },
+      nextOrder: store.nextOrder.bind(store),
+      backupTo: store.backupTo.bind(store),
+      close: store.close.bind(store),
+    };
+
+    const result = await uploadReceipts(
+      racingStore,
+      config,
+      [{ name: 'loser.png', mime: 'image/png', bytes: png }],
+      now,
+    );
+
+    expect(result).toEqual({
+      accepted: [],
+      rejected: [
+        { index: 0, code: 'EXACT_DUPLICATE', duplicateId: prior.id },
+      ],
+    });
+    expect(store.list('receipts')).toEqual([prior]);
+    expect(store.list('files')).toEqual([]);
+    expect(await filesUnder(temp)).toEqual([]);
+  });
+
   it('serves only indexed live images and distinguishes deleted and missing IDs', async () => {
     const png = await pixelPng('#fedcba');
     const upload = await request(createApp({ store, config }))
@@ -433,6 +564,27 @@ async function pixelPng(background: string): Promise<Buffer> {
     create: { width: 8, height: 8, channels: 3, background },
   })
     .png()
+    .toBuffer();
+}
+
+async function patternPng(
+  seed: number,
+  compressionLevel = 6,
+): Promise<Buffer> {
+  const width = 18;
+  const height = 16;
+  const pixels = Buffer.alloc(width * height * 3);
+  let state = seed >>> 0;
+  for (let offset = 0; offset < pixels.length; offset += 3) {
+    state ^= state << 13;
+    state ^= state >>> 17;
+    state ^= state << 5;
+    pixels[offset] = state & 0xff;
+    pixels[offset + 1] = (state >>> 8) & 0xff;
+    pixels[offset + 2] = (state >>> 16) & 0xff;
+  }
+  return sharp(pixels, { raw: { width, height, channels: 3 } })
+    .png({ compressionLevel })
     .toBuffer();
 }
 

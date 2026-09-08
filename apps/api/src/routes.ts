@@ -6,6 +6,7 @@ import multer from 'multer';
 
 import type { Config } from './config.js';
 import type { Store } from './db.js';
+import { confirmDistinct } from './duplicates.js';
 import { uploadReceipts } from './receipts.js';
 import { safePath } from './storage.js';
 
@@ -86,6 +87,24 @@ export function createRouter(store: Store, config: Config): Router {
       }
       response.type(extname(entry.path)).send(bytes);
     } catch (error) {
+      next(error);
+    }
+  });
+
+  router.post('/receipts/:id/confirm-distinct', (request, response, next) => {
+    try {
+      response.json(confirmDistinct(store, request.params.id));
+    } catch (error) {
+      if (error instanceof Error && error.message === 'RECEIPT_NOT_FOUND') {
+        next(new HttpError(404, 'RECEIPT_NOT_FOUND', '凭证不存在'));
+        return;
+      }
+      if (error instanceof Error && error.message === 'IMMUTABLE_RECEIPT') {
+        next(
+          new HttpError(409, 'IMMUTABLE_RECEIPT', '已归档凭证不可修改'),
+        );
+        return;
+      }
       next(error);
     }
   });

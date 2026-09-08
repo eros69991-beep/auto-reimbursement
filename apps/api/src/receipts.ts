@@ -9,6 +9,7 @@ import type {
 
 import type { Config } from './config.js';
 import type { Store } from './db.js';
+import { findDuplicates } from './duplicates.js';
 import { safePath, storeImage, type InputImage } from './storage.js';
 
 function localMonth(now: Date): string {
@@ -50,7 +51,22 @@ export async function uploadReceipts(
 
     const receiptId = randomUUID();
     try {
-      const receipt = store.transact(() => {
+      const initialMatch = findDuplicates(store, original);
+      if (initialMatch.exactId !== null) {
+        await unlink(safePath(config.dataDir, original.path));
+        rejected.push({
+          index,
+          code: 'EXACT_DUPLICATE',
+          duplicateId: initialMatch.exactId,
+        });
+        continue;
+      }
+
+      const result = store.transact(() => {
+        const match = findDuplicates(store, original);
+        if (match.exactId !== null) {
+          return { receipt: null, duplicateId: match.exactId };
+        }
         const row: Receipt = {
           id: receiptId,
           original,
@@ -65,9 +81,10 @@ export async function uploadReceipts(
           category: null,
           merchant: null,
           date: null,
-          status: 'recognizing',
-          pendingReasons: [],
-          duplicateIds: [],
+          status: match.suspectedIds.length > 0 ? 'pending' : 'recognizing',
+          pendingReasons:
+            match.suspectedIds.length > 0 ? ['suspected_duplicate'] : [],
+          duplicateIds: match.suspectedIds,
           duplicateOverride: false,
           attempts: 0,
           nextAttemptAt: null,
@@ -86,9 +103,18 @@ export async function uploadReceipts(
         };
         store.put('receipts', row);
         store.put('files', fileIndex);
-        return row;
+        return { receipt: row, duplicateId: null };
       });
-      accepted.push(receipt);
+      if (result.receipt === null) {
+        await unlink(safePath(config.dataDir, original.path));
+        rejected.push({
+          index,
+          code: 'EXACT_DUPLICATE',
+          duplicateId: result.duplicateId,
+        });
+      } else {
+        accepted.push(result.receipt);
+      }
     } catch (error) {
       try {
         await unlink(safePath(config.dataDir, original.path));

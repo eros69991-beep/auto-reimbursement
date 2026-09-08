@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { mkdir, open, unlink } from 'node:fs/promises';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
 
@@ -6,6 +6,7 @@ import type { ImageRef } from '@auto-reimbursement/contracts';
 import sharp from 'sharp';
 
 import type { Config } from './config.js';
+import { fingerprint } from './duplicates.js';
 
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
 const MAX_IMAGE_PIXELS = 40_000_000;
@@ -95,7 +96,7 @@ export async function storeImage(
   const id = randomUUID();
   const path = `${month}/${kind}/${id}.${format.extension}`;
   const absolutePath = safePath(config.dataDir, path);
-  const sha256 = createHash('sha256').update(input.bytes).digest('hex');
+  const hashes = await fingerprint(input.bytes);
   await ensureMonthDirs(config.dataDir, month);
 
   let handle;
@@ -124,8 +125,8 @@ export async function storeImage(
     id,
     path,
     mime: format.mime,
-    sha256,
-    perceptualHash: '',
+    sha256: hashes.sha256,
+    perceptualHash: hashes.perceptualHash,
     bytes: input.bytes.length,
     width: metadata.width,
     height: metadata.height,
