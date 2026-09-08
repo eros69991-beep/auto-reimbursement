@@ -391,6 +391,51 @@ describe('OpenAI-compatible receipt analyzer', () => {
     }
   });
 
+  it('maps Error-shaped fetch timeouts without requiring DOMException', async () => {
+    const timeout = new Error('top-secret-api-key');
+    timeout.name = 'TimeoutError';
+    const fetcher = (async () => {
+      throw timeout;
+    }) as typeof fetch;
+
+    await expect(
+      createAnalyzer(configured, fetcher).analyzeReceipt({
+        bytes: Buffer.from('image'),
+        mime: 'image/jpeg',
+      }),
+    ).rejects.toSatisfy((error: unknown) => {
+      expectAiError(error, 'TIMEOUT', true);
+      return true;
+    });
+  });
+
+  it('maps a timeout while decoding the response body as TIMEOUT', async () => {
+    const timeout = new Error('sensitive upstream body');
+    timeout.name = 'TimeoutError';
+    const response = new Response(
+      new ReadableStream({
+        start(controller) {
+          controller.error(timeout);
+        },
+      }),
+      {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      },
+    );
+    const { fetcher } = captureFetch(response);
+
+    await expect(
+      createAnalyzer(configured, fetcher).analyzeReceipt({
+        bytes: Buffer.from('image'),
+        mime: 'image/jpeg',
+      }),
+    ).rejects.toSatisfy((error: unknown) => {
+      expectAiError(error, 'TIMEOUT', true);
+      return true;
+    });
+  });
+
   it('maps malformed upstream JSON, malformed content JSON, and invalid analyses', async () => {
     const malformedBody = new Response('{', {
       status: 200,

@@ -25,10 +25,10 @@ function contentFromResponse(input: unknown): string {
 }
 
 function isTimeout(error: unknown): boolean {
-  return (
-    error instanceof DOMException &&
-    (error.name === 'TimeoutError' || error.name === 'AbortError')
-  );
+  if (typeof error !== 'object' || error === null || !('name' in error)) {
+    return false;
+  }
+  return error.name === 'TimeoutError' || error.name === 'AbortError';
 }
 
 async function analyze(
@@ -94,7 +94,10 @@ async function analyze(
   let upstream: unknown;
   try {
     upstream = await response.json();
-  } catch {
+  } catch (error) {
+    if (isTimeout(error)) {
+      throw new AiError('TIMEOUT', true);
+    }
     throw new AiError('INVALID_RESPONSE', true);
   }
 
