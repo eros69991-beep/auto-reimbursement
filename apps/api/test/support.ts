@@ -1,0 +1,40 @@
+import type { Receipt } from '@auto-reimbursement/contracts';
+
+export function sampleReceipt(overrides: Partial<Receipt> = {}): Receipt {
+  return {
+    id: 'receipt-1',
+    original: {
+      id: 'image-1',
+      path: '2026-09/originals/image-1.png',
+      mime: 'image/png',
+      sha256: '0'.repeat(64),
+      perceptualHash: '0000000000000000',
+      bytes: 100,
+      width: 10,
+      height: 10,
+      deletedAt: null,
+    },
+    refundImages: [],
+    month: '2026-09',
+    uploadedAt: '2026-09-03T00:00:00.000Z',
+    uploadOrder: 1,
+    analysis: null,
+    recognizedFen: 1000,
+    paidFen: 1000,
+    refundFen: 0,
+    category: '耗材',
+    merchant: null,
+    date: null,
+    status: 'ready',
+    pendingReasons: [],
+    duplicateIds: [],
+    duplicateOverride: false,
+    attempts: 0,
+    nextAttemptAt: null,
+    batchId: null,
+    archivedAt: null,
+    statusBeforeArchive: null,
+    deletedAt: null,
+    ...overrides,
+  };
+}

@@ -8,6 +8,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@auto-reimbursement/contracts": "workspace:*",
     "express": "^5.1.0"
   },
   "devDependencies": {
