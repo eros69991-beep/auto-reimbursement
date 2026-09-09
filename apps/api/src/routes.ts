@@ -8,6 +8,7 @@ import { getApiStatus } from './ai/openai-compatible.js';
 import type { Config } from './config.js';
 import type { Store } from './db.js';
 import { confirmDistinct } from './duplicates.js';
+import { getProgress, type RecognitionQueue } from './queue.js';
 import { uploadReceipts } from './receipts.js';
 import { safePath } from './storage.js';
 
@@ -28,11 +29,26 @@ export class HttpError extends Error {
   }
 }
 
-export function createRouter(store: Store, config: Config): Router {
+export function createRouter(
+  store: Store,
+  config: Config,
+  queue?: RecognitionQueue,
+): Router {
   const router = Router();
 
   router.get('/ai/status', (_request, response) => {
     response.json(getApiStatus(config));
+  });
+
+  router.get('/progress', (request, response) => {
+    const ids =
+      typeof request.query.ids === 'string'
+        ? request.query.ids
+            .split(',')
+            .map((id) => id.trim())
+            .filter(Boolean)
+        : [];
+    response.json(getProgress(store, ids));
   });
 
   // Multer keeps each image in memory. A 50-file maximum-size upload can
@@ -60,6 +76,7 @@ export function createRouter(store: Store, config: Config): Router {
           })),
           new Date(),
         );
+        queue?.enqueue(result.accepted.map((receipt) => receipt.id));
         response.status(201).json(result);
       } catch (error) {
         next(error);
@@ -98,7 +115,11 @@ export function createRouter(store: Store, config: Config): Router {
 
   router.post('/receipts/:id/confirm-distinct', (request, response, next) => {
     try {
-      response.json(confirmDistinct(store, request.params.id));
+      const receipt = confirmDistinct(store, request.params.id);
+      if (receipt.status === 'recognizing') {
+        queue?.enqueue([receipt.id]);
+      }
+      response.json(receipt);
     } catch (error) {
       if (error instanceof Error && error.message === 'RECEIPT_NOT_FOUND') {
         next(new HttpError(404, 'RECEIPT_NOT_FOUND', '凭证不存在'));
@@ -110,6 +131,38 @@ export function createRouter(store: Store, config: Config): Router {
         );
         return;
       }
+      next(error);
+    }
+  });
+
+  router.post('/receipts/:id/retry', (request, response, next) => {
+    try {
+      const receipt = store.transact(() => {
+        const current = store.get('receipts', request.params.id);
+        if (current === null) {
+          throw new HttpError(404, 'RECEIPT_NOT_FOUND', '凭证不存在');
+        }
+        if (
+          current.status !== 'pending' ||
+          !current.pendingReasons.includes('api_failed')
+        ) {
+          throw new HttpError(409, 'RETRY_NOT_ALLOWED', '该凭证不可重试');
+        }
+        const updated = {
+          ...current,
+          status: 'recognizing' as const,
+          pendingReasons: current.pendingReasons.filter(
+            (reason) => reason !== 'api_failed',
+          ),
+          attempts: 0,
+          nextAttemptAt: null,
+        };
+        store.put('receipts', updated);
+        return updated;
+      });
+      queue?.enqueue([receipt.id]);
+      response.json(receipt);
+    } catch (error) {
       next(error);
     }
   });

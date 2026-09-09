@@ -3,9 +3,14 @@ import { MulterError } from 'multer';
 
 import type { Config } from './config.js';
 import type { Store } from './db.js';
+import type { RecognitionQueue } from './queue.js';
 import { createRouter, HttpError } from './routes.js';
 
-type AppDependencies = { store: Store; config: Config };
+type AppDependencies = {
+  store: Store;
+  config: Config;
+  queue?: RecognitionQueue;
+};
 
 export function createApp(deps?: AppDependencies): express.Express {
   const application = express();
@@ -16,7 +21,7 @@ export function createApp(deps?: AppDependencies): express.Express {
   });
 
   if (deps !== undefined) {
-    application.use('/api', createRouter(deps.store, deps.config));
+    application.use('/api', createRouter(deps.store, deps.config, deps.queue));
   }
 
   application.use(
