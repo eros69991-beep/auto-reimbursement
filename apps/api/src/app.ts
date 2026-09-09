@@ -35,6 +35,18 @@ export function createApp(deps?: AppDependencies): express.Express {
         error instanceof MulterError &&
         error.code === 'LIMIT_UNEXPECTED_FILE' &&
         request.method === 'POST' &&
+        request.path === '/api/settings/signature'
+      ) {
+        response.status(400).json({
+          code: 'INVALID_SIGNATURE_IMAGE',
+          message: '签名图片参数无效',
+        });
+        return;
+      }
+      if (
+        error instanceof MulterError &&
+        error.code === 'LIMIT_UNEXPECTED_FILE' &&
+        request.method === 'POST' &&
         /^\/api\/receipts\/[^/]+\/refund-images$/.test(request.path)
       ) {
         response.status(400).json({
@@ -60,6 +72,23 @@ export function createApp(deps?: AppDependencies): express.Express {
         'status' in error &&
         error.status === 400
       ) {
+        if (request.method === 'PUT' && request.path === '/api/settings') {
+          response.status(400).json({
+            code: 'INVALID_SETTINGS',
+            message: '请求参数无效',
+          });
+          return;
+        }
+        if (
+          (request.method === 'POST' && request.path === '/api/notes') ||
+          (request.method === 'PUT' && /^\/api\/notes\/[^/]+$/.test(request.path))
+        ) {
+          response.status(400).json({
+            code: 'INVALID_NOTE',
+            message: '请求参数无效',
+          });
+          return;
+        }
         if (
           request.method === 'PATCH' &&
           /^\/api\/receipts\/[^/]+$/.test(request.path)

@@ -35,7 +35,7 @@ const refundUpload = multer({
 });
 const signatureUpload = multer({
   storage: multer.memoryStorage(),
-  limits: { fields: 0, files: 1, fileSize: MAX_IMAGE_BYTES },
+  limits: { fields: 0, fileSize: MAX_IMAGE_BYTES },
 });
 
 export class HttpError extends Error {

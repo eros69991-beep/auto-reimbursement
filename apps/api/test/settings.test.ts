@@ -138,6 +138,75 @@ describe('reimbursement defaults and note library', () => {
     }
   });
 
+  it('rejects malformed JSON for settings and notes without writing any state', async () => {
+    const store = openStore(':memory:');
+    try {
+      saveNote(store, { id: 'existing', name: '原备注', content: '原内容' });
+      const app = createApp({ store, config });
+      const cases = [
+        { method: 'put' as const, path: '/api/settings', code: 'INVALID_SETTINGS' },
+        { method: 'post' as const, path: '/api/notes', code: 'INVALID_NOTE' },
+        { method: 'put' as const, path: '/api/notes/existing', code: 'INVALID_NOTE' },
+      ];
+      for (const testCase of cases) {
+        const response = await request(app)[testCase.method](testCase.path)
+          .set('Content-Type', 'application/json')
+          .send('{');
+        expect(response.status).toBe(400);
+        expect(response.body.code).toBe(testCase.code);
+      }
+      expect(getSettings(store)).toEqual({
+        id: 'default', department: '', dateMode: 'today', customDate: null,
+        signerMode: 'text', signerName: '', signature: null,
+        amountThreshold: 0.95, categoryThreshold: 0.9,
+      });
+      expect(store.list('notes')).toEqual([{ id: 'existing', name: '原备注', content: '原内容' }]);
+    } finally {
+      store.close();
+    }
+  });
+
+  it('rejects unexpected signature multipart files before writing bytes', async () => {
+    const store = openStore(':memory:');
+    try {
+      const app = createApp({ store, config });
+      for (const upload of [
+        request(app).post('/api/settings/signature').attach('wrong', await png(), 'signature.png'),
+        request(app).post('/api/settings/signature')
+          .attach('file', await png(), 'one.png')
+          .attach('file', await png(), 'two.png'),
+      ]) {
+        const response = await upload;
+        expect(response.status).toBe(400);
+        expect(response.body.code).toBe('INVALID_SIGNATURE_IMAGE');
+      }
+      expect(store.list('files')).toEqual([]);
+      expect(await filesUnder(temporaryDirectory)).toEqual([]);
+    } finally {
+      store.close();
+    }
+  });
+
+  it('does not persist forged signature metadata supplied by a settings client', async () => {
+    const store = openStore(':memory:');
+    try {
+      const settings = await saveSignature(store, config, {
+        name: 'signature.png', mime: 'image/png', bytes: await png(),
+      });
+      const saved = saveSettings(store, {
+        ...settings,
+        signerMode: 'image',
+        signature: {
+          ...settings.signature!, mime: 'image/jpeg', bytes: 1, deletedAt: '2026-09-04T00:00:00.000Z',
+        },
+      });
+      expect(saved.signature).toEqual(settings.signature);
+      expect(getSettings(store).signature).toEqual(settings.signature);
+    } finally {
+      store.close();
+    }
+  });
+
   it('removes a newly written signature if settings persistence fails', async () => {
     const store = openStore(':memory:');
     store.close();

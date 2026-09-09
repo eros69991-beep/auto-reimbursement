@@ -43,8 +43,11 @@ export function getSettings(store: Store): Settings {
 }
 
 export function saveSettings(store: Store, input: Settings): Settings {
-  validateSettings(store, input);
-  const saved: Settings = { ...input };
+  const saved: Settings = {
+    ...input,
+    signature: canonicalSignature(store, input.signature),
+  };
+  validateSettings(store, saved);
   store.put('settings', saved);
   return saved;
 }
@@ -179,21 +182,59 @@ function isLeapYear(year: number): boolean {
 }
 
 function isIndexedSignature(store: Store, signature: unknown): boolean {
-  if (signature === null || typeof signature !== 'object') {
+  if (!isImageReference(signature)) {
     return false;
   }
-  const reference = signature as Record<string, unknown>;
-  if (typeof reference.id !== 'string' || typeof reference.path !== 'string' || typeof reference.sha256 !== 'string') {
-    return false;
-  }
-  const entry = store.get('files', reference.id);
+  const entry = store.get('files', signature.id);
   return (
     entry !== null &&
     entry.kind === 'signature' &&
     entry.ownerId === 'default' &&
-    entry.deletedAt === null &&
-    entry.path === reference.path &&
-    entry.sha256 === reference.sha256
+    entry.deletedAt === signature.deletedAt &&
+    entry.path === signature.path &&
+    entry.sha256 === signature.sha256
+  );
+}
+
+function canonicalSignature(
+  store: Store,
+  candidate: Settings['signature'],
+): Settings['signature'] {
+  if (candidate === null) {
+    return null;
+  }
+  if (candidate === undefined || typeof candidate !== 'object') {
+    throw new Error('INVALID_SIGNATURE');
+  }
+  const stored = getSettings(store).signature;
+  if (
+    stored === null ||
+    candidate.id !== stored.id ||
+    !isIndexedSignature(store, stored)
+  ) {
+    throw new Error('INVALID_SIGNATURE');
+  }
+  return { ...stored };
+}
+
+function isImageReference(value: unknown): value is NonNullable<Settings['signature']> {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    return false;
+  }
+  const reference = value as Record<string, unknown>;
+  return (
+    typeof reference.id === 'string' &&
+    typeof reference.path === 'string' &&
+    typeof reference.mime === 'string' &&
+    typeof reference.sha256 === 'string' &&
+    typeof reference.perceptualHash === 'string' &&
+    typeof reference.bytes === 'number' &&
+    Number.isSafeInteger(reference.bytes) &&
+    typeof reference.width === 'number' &&
+    Number.isSafeInteger(reference.width) &&
+    typeof reference.height === 'number' &&
+    Number.isSafeInteger(reference.height) &&
+    (reference.deletedAt === null || typeof reference.deletedAt === 'string')
   );
 }
 
