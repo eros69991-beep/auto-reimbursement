@@ -177,3 +177,13 @@ GREEN — `pnpm --filter @auto-reimbursement/api test test/pdf.test.ts` passed 2
 Implementation — attachment pages follow every form page in stored group/receipt/refund order. They use portrait A4, 12 mm margins, an 18 mm non-overlapping label band, and aspect-fit images. Required indexed attachments use safe paths; WebP is converted only in renderer memory. Export first renders the complete buffer, writes an exclusive temporary file below the batch month, atomically renames it to a UUID PDF, then transactionally indexes the SHA-256 and saves `pdfPath`; an existing export is returned unchanged. Draft preview renders the same output, while an exported batch serves its immutable saved bytes. Missing receipt evidence maps to HTTP 409 and identifies the receipt ID.
 
 Verification — the API typecheck, workspace test suite (180 tests), workspace typecheck, `git diff --check`, and fresh five-page 144-DPI visual PDF inspection all passed. The local QA PDFs/PNGs/scripts remain untracked under `tmp/` and `apps/api/tmp/`.
+
+## Task 17: Browser upload screen and batch-specific progress
+
+RED — `pnpm --filter @auto-reimbursement/web test src/pages/UploadPage.test.tsx` exited 1 before implementation because Vitest could not resolve the missing `./UploadPage` module.
+
+GREEN — `pnpm --filter @auto-reimbursement/web test src/pages/UploadPage.test.tsx` exited 0 with 5/5 tests. It covers the client-side 50-file cap, input-order-preserving drag/drop upload, duplicate rejection/link rendering, failed progress polling retry, and terminating the polling loop when recognition completes.
+
+Implementation — the typed browser client posts ordered FormData without manually setting a multipart header, polls only batch-local accepted IDs, exposes image routes, and converts only a safe API error message into an Error. The upload page has accessible file selection and drop interaction, HTTP upload disable/count, received/rejected file details, exact duplicate links, total/recognizing/ready/pending counts, abortable timer cleanup, and a stopped-loop retry control. Upload network errors remain distinct from AI pending progress. The shell retains its accessible English application heading, adds 首页 / 上传凭证 navigation, responsive Chinese-font fallback/focus styling, and Vite development proxies for `/api` and `/health`. No backend configuration or keys are provided to the browser and no Task 18+ UI was added.
+
+Verification — the full web suite passed 6/6 tests, workspace `pnpm typecheck` passed for contracts/API/web, and the web production build exited 0. A case-insensitive scan of generated `apps/web/dist` files found no API-key, OpenAI-key, secret, or `sk-` strings. The full evidence and scope note are recorded in the Task 17 report.

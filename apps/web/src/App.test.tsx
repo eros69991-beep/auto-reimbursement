@@ -9,5 +9,7 @@ describe('App', () => {
     expect(
       screen.getByRole('heading', { name: 'Automatic Reimbursement Assistant' })
     ).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: '首页' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: '上传凭证' })).toBeInTheDocument();
   });
 });
