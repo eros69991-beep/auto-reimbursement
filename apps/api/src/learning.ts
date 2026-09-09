@@ -94,9 +94,11 @@ export function deleteRule(store: Store, id: string): void {
 }
 
 function featureFor(receipt: Receipt): Feature | null {
-  const merchant = normalizeFeature(receipt.analysis?.merchant ?? receipt.merchant ?? '');
-  if (merchant !== '') {
-    return { kind: 'merchant', key: merchant };
+  for (const source of [receipt.analysis?.merchant, receipt.merchant]) {
+    const merchant = normalizeFeature(source ?? '');
+    if (merchant !== '') {
+      return { kind: 'merchant', key: merchant };
+    }
   }
   const keyword = receipt.analysis?.keywords
     .map(normalizeFeature)

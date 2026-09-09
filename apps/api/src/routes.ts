@@ -139,11 +139,11 @@ export function createRouter(
 
   router.patch('/receipts/:id', (request, response, next) => {
     try {
-      const body = request.body as Record<string, unknown>;
-      const receipt = updateReceipt(store, request.params.id, {
-        paidFen: body.paidFen as number | undefined,
-        category: body.category as Rule['category'] | undefined,
-      });
+      const receipt = updateReceipt(
+        store,
+        request.params.id,
+        receiptPatchFromRequest(request.body),
+      );
       response.json(receipt);
     } catch (error) {
       next(correctionHttpError(error));
@@ -240,6 +240,23 @@ function ruleFromRequest(id: string, body: unknown): Rule {
   };
 }
 
+function receiptPatchFromRequest(body: unknown): {
+  paidFen?: number;
+  category?: Rule['category'];
+} {
+  if (body === null || typeof body !== 'object' || Array.isArray(body)) {
+    throw new Error('INVALID_RECEIPT_PATCH');
+  }
+  const value = body as Record<string, unknown>;
+  if (!Object.hasOwn(value, 'paidFen') && !Object.hasOwn(value, 'category')) {
+    throw new Error('INVALID_RECEIPT_PATCH');
+  }
+  return {
+    paidFen: value.paidFen as number | undefined,
+    category: value.category as Rule['category'] | undefined,
+  };
+}
+
 function correctionHttpError(error: unknown): Error {
   if (!(error instanceof Error)) {
     return new HttpError(500, 'INTERNAL_ERROR', '服务器内部错误');
@@ -257,6 +274,7 @@ function correctionHttpError(error: unknown): Error {
   if (
     error.message === 'INVALID_CATEGORY' ||
     error.message === 'INVALID_PAID_FEN' ||
+    error.message === 'INVALID_RECEIPT_PATCH' ||
     error.message.startsWith('INVALID_RULE') ||
     error.message === 'INVALID_CONFIRMATIONS'
   ) {

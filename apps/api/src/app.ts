@@ -27,7 +27,7 @@ export function createApp(deps?: AppDependencies): express.Express {
   application.use(
     (
       error: unknown,
-      _request: express.Request,
+      request: express.Request,
       response: express.Response,
       _next: express.NextFunction,
     ) => {
@@ -40,6 +40,19 @@ export function createApp(deps?: AppDependencies): express.Express {
         response.status(413).json({
           code: 'UPLOAD_LIMIT',
           message: '上传图片数量或大小超出限制',
+        });
+        return;
+      }
+      if (
+        error instanceof SyntaxError &&
+        'status' in error &&
+        error.status === 400 &&
+        request.method === 'PATCH' &&
+        /^\/api\/receipts\/[^/]+$/.test(request.path)
+      ) {
+        response.status(400).json({
+          code: 'INVALID_RECEIPT_PATCH',
+          message: '请求参数无效',
         });
         return;
       }

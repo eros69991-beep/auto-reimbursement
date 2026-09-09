@@ -119,6 +119,19 @@ describe('local correction learning', () => {
     });
   });
 
+  it('uses a usable receipt merchant when the AI merchant is only whitespace', () => {
+    const receipt = analyzedReceipt('merchant-fallback', {
+      merchant: '　 ',
+      keywords: ['coffee'],
+    });
+    store.put('receipts', { ...receipt, merchant: '  Fallback Store  ' });
+
+    expect(recordCorrection(store, receipt.id, '酒水')).toMatchObject({
+      kind: 'merchant',
+      key: 'fallback store',
+    });
+  });
+
   it('validates manually saved rule confirmations and strong state', () => {
     const rule: Rule = {
       id: 'manual',
@@ -240,4 +253,21 @@ describe('correction HTTP routes', () => {
     expect(response.body.code).toBe('INVALID_CATEGORY');
     expect(store.get('receipts', receipt.id)).toEqual(receipt);
   });
+
+  it.each(['null', '[]', '"invalid"', '0', 'false', '{}'])(
+    'rejects PATCH body %s without changing a receipt',
+    async (body) => {
+      const receipt = sampleReceipt({ id: `invalid-patch-${body}`, status: 'ready' });
+      store.put('receipts', receipt);
+
+      const response = await request(createApp({ store, config }))
+        .patch(`/api/receipts/${receipt.id}`)
+        .set('Content-Type', 'application/json')
+        .send(body);
+
+      expect(response.status).toBe(400);
+      expect(response.body.code).toBe('INVALID_RECEIPT_PATCH');
+      expect(store.get('receipts', receipt.id)).toEqual(receipt);
+    },
+  );
 });
