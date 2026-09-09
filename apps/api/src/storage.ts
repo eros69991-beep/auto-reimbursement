@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { mkdir, open, unlink } from 'node:fs/promises';
+import { mkdir, open, rename, unlink } from 'node:fs/promises';
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 
 import type { ImageRef } from '@auto-reimbursement/contracts';
@@ -57,6 +57,45 @@ export async function ensureMonthDirs(
     ),
   );
   return { originals, refunds, exports };
+}
+
+export async function storeExportPdf(
+  config: Config,
+  month: string,
+  id: string,
+  bytes: Buffer,
+): Promise<{ path: string; absolutePath: string }> {
+  const directories = await ensureMonthDirs(config.dataDir, month);
+  const path = `${month}/exports/${id}.pdf`;
+  const temporaryPath = safePath(directories.exports, `${id}.tmp`);
+  const absolutePath = safePath(config.dataDir, path);
+  let handle;
+  let temporaryCreated = false;
+  try {
+    handle = await open(temporaryPath, 'wx');
+    temporaryCreated = true;
+    await handle.writeFile(bytes);
+    await handle.close();
+    handle = undefined;
+    await rename(temporaryPath, absolutePath);
+    return { path, absolutePath };
+  } catch (error) {
+    if (handle !== undefined) {
+      try {
+        await handle.close();
+      } catch {
+        // Continue with cleanup of this export's exclusive temporary path.
+      }
+    }
+    if (temporaryCreated) {
+      try {
+        await unlink(temporaryPath);
+      } catch {
+        // Preserve the exclusive-write or rename failure.
+      }
+    }
+    throw error;
+  }
 }
 
 export async function storeImage(

@@ -25,6 +25,7 @@ import type { Store } from './db.js';
 import { confirmDistinct } from './duplicates.js';
 import { deleteRule, listRules, saveRule } from './learning.js';
 import { getProgress, type RecognitionQueue } from './queue.js';
+import { exportBatchPdf, renderBatchPdf } from './render/pdf.js';
 import {
   confirmReceipt,
   deleteReceipt,
@@ -194,6 +195,38 @@ export function createRouter(
   router.get('/batches/:id', (request, response, next) => {
     try {
       response.json(getBatch(store, request.params.id));
+    } catch (error) {
+      next(batchHttpError(error));
+    }
+  });
+
+  router.get('/batches/:id/preview.pdf', async (request, response, next) => {
+    try {
+      const batch = getBatch(store, request.params.id);
+      const bytes = batch.pdfPath === null
+        ? await renderBatchPdf(config, batch)
+        : await readSavedPdf(config, batch.pdfPath);
+      response.type('application/pdf').send(bytes);
+    } catch (error) {
+      next(batchHttpError(error));
+    }
+  });
+
+  router.post('/batches/:id/export', async (request, response, next) => {
+    try {
+      response.json(await exportBatchPdf(store, config, request.params.id));
+    } catch (error) {
+      next(batchHttpError(error));
+    }
+  });
+
+  router.get('/batches/:id/pdf', async (request, response, next) => {
+    try {
+      const batch = getBatch(store, request.params.id);
+      if (batch.pdfPath === null) {
+        throw new HttpError(404, 'PDF_NOT_FOUND', '导出文件不存在');
+      }
+      response.type('application/pdf').send(await readSavedPdf(config, batch.pdfPath));
     } catch (error) {
       next(batchHttpError(error));
     }
@@ -546,6 +579,17 @@ function batchHttpError(error: unknown): Error {
   if (error.message === 'BATCH_FINALIZED') {
     return new HttpError(409, 'BATCH_FINALIZED', '已导出的报销单不可修改');
   }
+  if (error.message === 'PDF_NOT_FOUND') {
+    return new HttpError(404, 'PDF_NOT_FOUND', '导出文件不存在');
+  }
+  if (error.message.startsWith('MISSING_ATTACHMENT')) {
+    const receiptId = error.message.slice('MISSING_ATTACHMENT:'.length);
+    return new HttpError(
+      409,
+      'MISSING_ATTACHMENT',
+      receiptId === '' ? '缺少报销凭证图片' : `缺少报销凭证图片：${receiptId}`,
+    );
+  }
   if (
     error.message === 'INVALID_SELECTION' ||
     error.message === 'INVALID_OPTIONS' ||
@@ -562,6 +606,14 @@ function batchHttpError(error: unknown): Error {
     return new HttpError(400, error.message, '请求参数无效');
   }
   return error;
+}
+
+async function readSavedPdf(config: Config, path: string): Promise<Buffer> {
+  try {
+    return await readFile(safePath(config.dataDir, path));
+  } catch {
+    throw new Error('PDF_NOT_FOUND');
+  }
 }
 
 function correctionHttpError(error: unknown): Error {
