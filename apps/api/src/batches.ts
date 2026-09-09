@@ -14,11 +14,11 @@ import {
 
 import type { Store } from './db.js';
 import {
-  defaultMetrics,
   groupItems,
   moveGroup,
   packGroups,
   sheetFits,
+  type LayoutMetrics,
 } from './render/layout.js';
 import { createFormDocument, formMetrics } from './render/form.js';
 import { isEligible } from './refunds.js';
@@ -73,7 +73,7 @@ export function createBatch(
       (total, item) => addFen(total, item.netFen),
       0,
     );
-    const sheets = packGroups(groupItems(items), pdfMetrics());
+    const sheets = withPdfMetrics((metrics) => packGroups(groupItems(items), metrics));
     const batch: Batch = {
       id: randomUUID(),
       month: `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`,
@@ -117,7 +117,7 @@ export function moveBatchGroup(
   return updateBatchLayout(
     store,
     id,
-    moveGroup(batch.sheets, category, direction, defaultMetrics()),
+    withPdfMetrics((metrics) => moveGroup(batch.sheets, category, direction, metrics)),
   );
 }
 
@@ -180,12 +180,12 @@ function addFen(total: number, value: number): number {
   return result;
 }
 
-function pdfMetrics() {
+function withPdfMetrics<T>(operation: (metrics: LayoutMetrics) => T): T {
   const doc = createFormDocument();
   try {
-    return formMetrics(doc);
+    return operation(formMetrics(doc));
   } finally {
-    doc.end();
+    doc.destroy();
   }
 }
 
@@ -245,6 +245,14 @@ function canonicalOptions(store: Store, value: FormOptions): FormOptions {
 }
 
 function assertLayout(batch: Batch, sheets: FormSheet[]): void {
+  withPdfMetrics((metrics) => assertLayoutWithMetrics(batch, sheets, metrics));
+}
+
+function assertLayoutWithMetrics(
+  batch: Batch,
+  sheets: FormSheet[],
+  metrics: LayoutMetrics,
+): void {
   if (!Array.isArray(sheets) || sheets.length === 0) {
     throw new Error('INVALID_LAYOUT');
   }
@@ -254,7 +262,6 @@ function assertLayout(batch: Batch, sheets: FormSheet[]): void {
   const existingNotes = new Map(batch.sheets.map((sheet) => [sheet.id, sheet.noteId]));
   const seenSheetIds = new Set<string>();
   const seenCategories = new Set<Category>();
-  const metrics = defaultMetrics();
   for (const [index, sheet] of sheets.entries()) {
     if (
       sheet === null ||

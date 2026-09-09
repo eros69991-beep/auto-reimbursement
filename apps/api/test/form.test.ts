@@ -6,6 +6,7 @@ import { createBatch } from '../src/batches.js';
 import { openStore } from '../src/db.js';
 import { createFormDocument, drawForm, sheetAttachmentCount } from '../src/render/form.js';
 import { getSettings, resolveOptions } from '../src/settings.js';
+import { chineseUppercase } from '../src/uppercase.js';
 import { sampleReceipt } from './support.js';
 
 describe('Chinese reimbursement form', () => {
@@ -86,6 +87,28 @@ describe('Chinese reimbursement form', () => {
       const overflowDoc = createFormDocument();
       expect(() => drawForm(overflowDoc, batch, overflowingSheet, null)).toThrow('FORM_TEXT_OVERFLOW');
       overflowDoc.end();
+    } finally {
+      store.close();
+    }
+  });
+
+  it('rejects a maximum sheet total when its measured uppercase amount cannot fit', () => {
+    const store = openStore(':memory:');
+    try {
+      store.put('receipts', sampleReceipt({ id: 'maximum', paidFen: 999999999, category: '耗材' }));
+      const batch = createBatch(
+        store,
+        ['maximum'],
+        { department: '', date: null, signerMode: 'text', signerName: '', signature: null },
+        new Date('2026-09-04T00:00:00.000Z'),
+      );
+      const doc = createFormDocument();
+      const measured = doc.widthOfString.bind(doc);
+      const uppercase = chineseUppercase(999999999);
+      doc.widthOfString = (text: string) => text === uppercase ? 500 : measured(text);
+
+      expect(() => drawForm(doc, batch, batch.sheets[0]!, null)).toThrow('FORM_TEXT_OVERFLOW');
+      doc.destroy();
     } finally {
       store.close();
     }

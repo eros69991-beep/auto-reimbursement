@@ -3,7 +3,7 @@ import request from 'supertest';
 import { describe, expect, it } from 'vitest';
 
 import { createApp } from '../src/app.js';
-import { createBatch, getBatch, poolTotals } from '../src/batches.js';
+import { createBatch, getBatch, moveBatchGroup, poolTotals } from '../src/batches.js';
 import { loadConfig } from '../src/config.js';
 import { openStore, type Store } from '../src/db.js';
 import { deleteReceipt, listReceipts } from '../src/receipts.js';
@@ -172,6 +172,35 @@ describe('manual batches', () => {
     }, new Date());
     expect(textBatch.options.signature).toBeNull();
     store.close();
+  });
+
+  it('uses embedded-font metrics when moving a packed category back to its form sheet', () => {
+    const store = openStore(':memory:');
+    try {
+      for (let index = 0; index < 55; index += 1) {
+        store.put('receipts', sampleReceipt({
+          id: `supply-${index}`,
+          category: '耗材',
+          paidFen: 10000,
+          uploadOrder: index + 1,
+        }));
+      }
+      store.put('receipts', sampleReceipt({
+        id: 'food', category: '食材', paidFen: 10000, uploadOrder: 56,
+      }));
+      const batch = createBatch(
+        store,
+        [...Array.from({ length: 55 }, (_, index) => `supply-${index}`), 'food'],
+        resolveOptions(getSettings(store), new Date('2026-09-04T00:00:00.000Z')),
+        new Date('2026-09-04T00:00:00.000Z'),
+      );
+      expect(batch.sheets).toHaveLength(1);
+
+      expect(moveBatchGroup(store, batch.id, '食材', 1).sheets).toHaveLength(2);
+      expect(moveBatchGroup(store, batch.id, '食材', -1).sheets).toHaveLength(1);
+    } finally {
+      store.close();
+    }
   });
 
   it('serves pool, deletion, and a first measured reimbursement sheet', async () => {

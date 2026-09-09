@@ -119,7 +119,7 @@ function drawTitle(doc: PDFKit.PDFDocument, left: number, right: number): void {
     align: 'center',
     lineBreak: false,
   });
-  doc.lineWidth(0.5).strokeColor(PRINTED_BLUE);
+  doc.lineWidth(0.5).strokeColor(BLACK);
   for (const underlineY of geometry.title.underlineY) {
     doc.moveTo(mm(82), mm(underlineY)).lineTo(mm(188), mm(underlineY)).stroke();
   }
@@ -159,7 +159,7 @@ interface Bounds {
 
 function drawStructure(doc: PDFKit.PDFDocument, bounds: Bounds): void {
   const { x, y, projectX, summaryX, amountX, verticalLabelX, notesX, right, headerBottom, bodyBottom, totalBottom, formBottom } = bounds;
-  doc.lineWidth(0.5).strokeColor(PRINTED_BLUE);
+  doc.lineWidth(0.5).strokeColor(BLACK);
   for (const vertical of [x, summaryX, amountX, verticalLabelX, notesX, right]) {
     doc.moveTo(vertical, y).lineTo(vertical, formBottom).stroke();
   }
@@ -217,7 +217,7 @@ function drawGroups(
     const subtotalDigits = String(group.totalFen).padStart(3, '0').padStart(9, ' ');
     if (subtotalDigits.length > 9) throw new Error('FORM_AMOUNT_OVERFLOW');
     drawAmountDigits(doc, subtotalDigits, bounds.amountX, y, mm(geometry.table.columns.amount), height);
-    doc.lineWidth(0.5).strokeColor(PRINTED_BLUE).moveTo(bounds.projectX, y + height).lineTo(bounds.amountX, y + height).stroke();
+    doc.lineWidth(0.5).strokeColor(BLACK).moveTo(bounds.projectX, y + height).lineTo(bounds.amountX, y + height).stroke();
     y += height;
   }
 }
@@ -235,7 +235,9 @@ function drawUppercase(doc: PDFKit.PDFDocument, uppercase: string, left: number,
   doc.fontSize(8);
   centered(doc, '金额\n(大写)', left, top + 2, summaryX - left);
   doc.fontSize(10).text('大写：', summaryX + 6, top + 3, { width: 32, lineBreak: false });
-  doc.fillColor(BLACK).text(uppercase, summaryX + 38, top + 3, { width: notesX - summaryX - 44, lineBreak: false });
+  const uppercaseWidth = notesX - summaryX - 44;
+  assertFits(doc, uppercase, uppercaseWidth, 'FORM_TEXT_OVERFLOW');
+  doc.fillColor(BLACK).text(uppercase, summaryX + 38, top + 3, { width: uppercaseWidth, lineBreak: false });
   doc.fillColor(PRINTED_BLUE).text('原借款：', notesX + 6, top + 3, { width: 64, lineBreak: false });
   doc.text('应退（补）款：', notesX + 72, top + 3, { width: 88, lineBreak: false });
 }
