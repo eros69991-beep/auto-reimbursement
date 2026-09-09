@@ -87,3 +87,13 @@ Self-review — active-set slot reservation occurs before any asynchronous bound
 Verification — the focused queue suite exited 0 with 12/12 tests. `pnpm --filter @auto-reimbursement/api test` exited 0 with 63/63 API tests, `pnpm --filter @auto-reimbursement/api typecheck` exited 0, and `git diff --check` exited 0 with only informational Windows line-ending notices. Final fresh workspace-wide test and typecheck evidence is recorded in the Task 7 report.
 
 Commit — `feat: queue receipt analysis with durable retries`; its immutable SHA is recorded in the Task 7 report immediately after Git creates the commit.
+
+## Task 8: Confidence decisions and automatic release
+
+RED — `pnpm --filter @auto-reimbursement/api test test/decision.test.ts` exited 1 before production edits because Vitest could not resolve the expected missing `../src/decision.js` module.
+
+GREEN — `pnpm --filter @auto-reimbursement/api test test/decision.test.ts` exited 0 with 17/17 tests. The decision suite uses real decision and SQLite store behavior to cover default high confidence release; strict ambiguity/null/floor ordering; boundary confidences; normalized merchant and keyword strong-rule matches; medium release only with an agreeing strong rule; unconfirmed-rule rejection; category/rule conflicts before high release; no amount inference; duplicate refinement veto; lifecycle guards; and transactional rollback on invalid amounts.
+
+Implementation — `decide` evaluates ambiguity, null fields, medium floors, matching strong-rule conflicts, high thresholds, then medium rule-supported release in that order. Its local NFKC normalizer keeps merchant and keyword matching isolated until Task 9. `applyAnalysis` performs the recognition-to-ready/pending transition in one Store transaction, persists original analysis plus parsed recognized/paid amounts and extracted fields, re-runs duplicate refinement, deduplicates pending reasons, and makes duplicate evidence veto automatic release. No ready row can retain a null amount or category. Production now calls `applyAnalysis`; the Task 7 temporary callback remains only for its existing queue coverage.
+
+Verification — final focused, API, workspace test, and typecheck evidence is recorded in the Task 8 report after the commit is created. `git diff --check` exited 0 before commit.

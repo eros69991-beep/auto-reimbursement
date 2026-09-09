@@ -5,7 +5,8 @@ import { createAnalyzer } from './ai/openai-compatible.js';
 import { createApp } from './app.js';
 import { loadConfig } from './config.js';
 import { openStore } from './db.js';
-import { createQueue, persistAnalysis } from './queue.js';
+import { applyAnalysis } from './decision.js';
+import { createQueue } from './queue.js';
 
 const config = loadConfig(process.env, resolve(process.cwd(), '../..'));
 mkdirSync(config.dataDir, { recursive: true });
@@ -14,7 +15,7 @@ const queue = createQueue({
   store,
   config,
   analyzer: createAnalyzer(config),
-  onAnalyzed: (id, result) => persistAnalysis(store, id, result),
+  onAnalyzed: (id, result) => applyAnalysis(store, id, result),
 });
 queue.start();
 
