@@ -149,3 +149,15 @@ Implementation — `chineseUppercase(fen)` delegates validation to `formatFen` b
 Verification — `pnpm --filter @auto-reimbursement/api test` exited 0 with 142/142 tests; `pnpm --filter @auto-reimbursement/api typecheck` exited 0; focused tests and `git diff --check` also passed.
 
 Commit — `feat: format exact Chinese uppercase amounts`; its immutable SHA is recorded in the Task 13 report after Git creates the commit.
+
+## Task 14: Deterministic category grouping, measured packing and manual moves
+
+RED — `pnpm --filter @auto-reimbursement/api test test/layout.test.ts` exited 1 before production edits because Vitest could not resolve the expected missing `../src/render/layout.js` module. The revised Task 12 batch assertion then failed as intended while `sheets` was still blank, and the move endpoint test initially returned 404.
+
+GREEN — the focused layout and batch suites passed 18/18 tests. They cover upload-order category grouping, whole-token measured wrapping, single-token overflow, exact measured fitting, category capacity failures, whole-category moves, destination overflow, receipt-order preservation, first-sheet creation, per-sheet note selection, and finalized draft protection.
+
+Implementation — layout groups snapshots by first category occurrence after upload-order sorting and keeps each category intact. Greedy packing uses provisional deterministic character measurement, whole amount tokens, measured heights, and the nine-digit amount-grid maximum; oversized categories expose `CATEGORY_TOO_LARGE` details before a batch is written. Draft batches now persist deterministic sheet IDs. Manual moves retain existing sheet IDs and notes, create only a trailing sheet when moving right from the last sheet, remove empty sources, and never silently repack other categories. Server-side layout validation checks every original category, receipt ID, amount, capacity and sheet-note invariant. Draft-only move and options routes validate category/direction/options/note choices and reject exported batches. Task 15 PDF output and font measurement were not added.
+
+Verification — `pnpm --filter @auto-reimbursement/api test` exited 0 with 149/149 tests; API typecheck exited 0. Fresh workspace `pnpm test` passed 175 tests (25 contracts, 149 API, 1 web), `pnpm typecheck` exited 0, and `git diff --check` exited 0.
+
+Commit — `feat: pack categories into measured reimbursement sheets`; its immutable SHA is recorded in the Task 14 report after Git creates the commit.

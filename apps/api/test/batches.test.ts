@@ -174,7 +174,7 @@ describe('manual batches', () => {
     store.close();
   });
 
-  it('serves pool, deletion, and batch routes without a blank-sheet preview', async () => {
+  it('serves pool, deletion, and a first measured reimbursement sheet', async () => {
     const store = openStore(':memory:');
     try {
       store.put('receipts', sampleReceipt({ id: 'pool', paidFen: 2 }));
@@ -187,7 +187,20 @@ describe('manual batches', () => {
         options: resolveOptions(getSettings(store), new Date()),
       });
       expect(created.status).toBe(201);
-      expect(created.body.sheets).toEqual([]);
+      expect(created.body.sheets).toEqual([
+        {
+          id: 'sheet-001',
+          noteId: null,
+          groups: [
+            {
+              category: '耗材',
+              receiptIds: ['pool'],
+              amountsFen: [2],
+              totalFen: 2,
+            },
+          ],
+        },
+      ]);
       expect((await request(app).get(`/api/batches/${created.body.id}`)).body).toEqual(created.body);
       expect((await request(app).delete('/api/receipts/pool')).status).toBe(409);
     } finally {
@@ -232,6 +245,69 @@ describe('manual batches', () => {
       expect(response.body.code).toBe('INVALID_BATCH_REQUEST');
       expect(store.get('receipts', 'ready')?.status).toBe('ready');
       expect(store.list('batches')).toEqual([]);
+    } finally {
+      store.close();
+    }
+  });
+
+  it('moves whole categories and saves draft options with per-sheet notes', async () => {
+    const store = openStore(':memory:');
+    try {
+      store.put(
+        'receipts',
+        sampleReceipt({ id: 'supply', category: '耗材', paidFen: 100 }),
+      );
+      store.put(
+        'receipts',
+        sampleReceipt({ id: 'food', category: '食材', paidFen: 200, uploadOrder: 2 }),
+      );
+      store.put('notes', { id: 'purchase-note', name: '采购', content: '本月采购' });
+      const app = createApp({ store, config: loadConfig({}, process.cwd()) });
+      const created = await request(app).post('/api/batches').send({
+        receiptIds: ['supply', 'food'],
+        options: resolveOptions(getSettings(store), new Date()),
+      });
+
+      const moved = await request(app)
+        .post(`/api/batches/${created.body.id}/move`)
+        .send({ category: '耗材', direction: 1 });
+      expect(moved.status).toBe(200);
+      expect(
+        moved.body.sheets.map(
+          (sheet: { id: string; groups: Array<{ category: string }> }) => [
+            sheet.id,
+            sheet.groups.map((group) => group.category),
+          ],
+        ),
+      ).toEqual([
+        ['sheet-001', ['食材']],
+        ['sheet-002', ['耗材']],
+      ]);
+
+      const saved = await request(app)
+        .patch(`/api/batches/${created.body.id}/options`)
+        .send({
+          options: { ...created.body.options, department: '门店' },
+          noteBySheet: { 'sheet-001': null, 'sheet-002': 'purchase-note' },
+        });
+      expect(saved.status).toBe(200);
+      expect(saved.body).toMatchObject({
+        options: { department: '门店' },
+        sheets: [
+          { id: 'sheet-001', noteId: null },
+          { id: 'sheet-002', noteId: 'purchase-note' },
+        ],
+      });
+
+      store.put('batches', {
+        ...store.get('batches', created.body.id)!,
+        pdfPath: 'exports/final.pdf',
+      });
+      const finalized = await request(app)
+        .post(`/api/batches/${created.body.id}/move`)
+        .send({ category: '耗材', direction: -1 });
+      expect(finalized.status).toBe(409);
+      expect(finalized.body.code).toBe('BATCH_FINALIZED');
     } finally {
       store.close();
     }

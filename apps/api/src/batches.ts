@@ -5,12 +5,21 @@ import {
   formatFen,
   netFen,
   type Batch,
+  type Category,
   type FormOptions,
+  type FormSheet,
   type Receipt,
   type Totals,
 } from '@auto-reimbursement/contracts';
 
 import type { Store } from './db.js';
+import {
+  defaultMetrics,
+  groupItems,
+  moveGroup,
+  packGroups,
+  sheetFits,
+} from './render/layout.js';
 import { isEligible } from './refunds.js';
 import { getSettings } from './settings.js';
 
@@ -63,13 +72,14 @@ export function createBatch(
       (total, item) => addFen(total, item.netFen),
       0,
     );
+    const sheets = packGroups(groupItems(items), defaultMetrics());
     const batch: Batch = {
       id: randomUUID(),
       month: `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`,
       createdAt: now.toISOString(),
       totalFen,
       items,
-      sheets: [],
+      sheets,
       options: canonicalOptions(store, options),
       notes: structuredClone(store.list('notes')),
       pdfPath: null,
@@ -93,6 +103,71 @@ export function getBatch(store: Store, id: string): Batch {
     throw new Error('BATCH_NOT_FOUND');
   }
   return batch;
+}
+
+export function moveBatchGroup(
+  store: Store,
+  id: string,
+  category: Category,
+  direction: -1 | 1,
+): Batch {
+  const batch = getBatch(store, id);
+  assertDraft(batch);
+  return updateBatchLayout(
+    store,
+    id,
+    moveGroup(batch.sheets, category, direction, defaultMetrics()),
+  );
+}
+
+export function updateBatchLayout(
+  store: Store,
+  id: string,
+  sheets: FormSheet[],
+): Batch {
+  return store.transact(() => {
+    const batch = getBatch(store, id);
+    assertDraft(batch);
+    assertLayout(batch, sheets);
+    const updated: Batch = { ...batch, sheets: structuredClone(sheets) };
+    store.put('batches', updated);
+    return updated;
+  });
+}
+
+export function updateBatchOptions(
+  store: Store,
+  id: string,
+  options: FormOptions,
+  noteBySheet: Record<string, string | null>,
+): Batch {
+  return store.transact(() => {
+    const batch = getBatch(store, id);
+    assertDraft(batch);
+    if (
+      noteBySheet === null ||
+      typeof noteBySheet !== 'object' ||
+      Array.isArray(noteBySheet) ||
+      !hasExactKeys(noteBySheet, batch.sheets.map((sheet) => sheet.id))
+    ) {
+      throw new Error('INVALID_NOTE_BY_SHEET');
+    }
+    const validNoteIds = new Set(batch.notes.map((note) => note.id));
+    const sheets = batch.sheets.map((sheet) => {
+      const noteId = noteBySheet[sheet.id];
+      if (noteId !== null && (typeof noteId !== 'string' || !validNoteIds.has(noteId))) {
+        throw new Error('INVALID_NOTE_BY_SHEET');
+      }
+      return { ...sheet, noteId };
+    });
+    const updated: Batch = {
+      ...batch,
+      options: canonicalOptions(store, options),
+      sheets,
+    };
+    store.put('batches', updated);
+    return updated;
+  });
 }
 
 function addFen(total: number, value: number): number {
@@ -157,6 +232,103 @@ function canonicalOptions(store: Store, value: FormOptions): FormOptions {
     signerName: value.signerName,
     signature: structuredClone(signature),
   };
+}
+
+function assertLayout(batch: Batch, sheets: FormSheet[]): void {
+  if (!Array.isArray(sheets) || sheets.length === 0) {
+    throw new Error('INVALID_LAYOUT');
+  }
+  const expected = new Map(
+    groupItems(batch.items).map((group) => [group.category, group]),
+  );
+  const existingNotes = new Map(batch.sheets.map((sheet) => [sheet.id, sheet.noteId]));
+  const seenSheetIds = new Set<string>();
+  const seenCategories = new Set<Category>();
+  const metrics = defaultMetrics();
+  for (const [index, sheet] of sheets.entries()) {
+    if (
+      sheet === null ||
+      typeof sheet !== 'object' ||
+      typeof sheet.id !== 'string' ||
+      sheet.id.length === 0 ||
+      seenSheetIds.has(sheet.id) ||
+      !Array.isArray(sheet.groups) ||
+      sheet.groups.length === 0 ||
+      !sheet.groups.every(isFormGroup) ||
+      (sheet.noteId !== null && typeof sheet.noteId !== 'string')
+    ) {
+      throw new Error('INVALID_LAYOUT');
+    }
+    seenSheetIds.add(sheet.id);
+    const priorNote = existingNotes.get(sheet.id);
+    if (priorNote !== undefined && priorNote !== sheet.noteId) {
+      throw new Error('INVALID_LAYOUT');
+    }
+    if (
+      priorNote === undefined &&
+      (sheet.id !== nextSheetId(batch.sheets) || index !== sheets.length - 1 || sheet.noteId !== null)
+    ) {
+      throw new Error('INVALID_LAYOUT');
+    }
+    if (!sheetFits(sheet.groups, metrics)) {
+      throw new Error('CATEGORY_TOO_LARGE');
+    }
+    for (const group of sheet.groups) {
+      const original = expected.get(group.category);
+      if (original === undefined || seenCategories.has(group.category) || !sameGroup(group, original)) {
+        throw new Error('INVALID_LAYOUT');
+      }
+      seenCategories.add(group.category);
+    }
+  }
+  if (seenCategories.size !== expected.size) {
+    throw new Error('INVALID_LAYOUT');
+  }
+}
+
+function sameGroup(left: FormSheet['groups'][number], right: FormSheet['groups'][number]): boolean {
+  return (
+    left.totalFen === right.totalFen &&
+    left.receiptIds.length === right.receiptIds.length &&
+    left.amountsFen.length === right.amountsFen.length &&
+    left.receiptIds.every((id, index) => id === right.receiptIds[index]) &&
+    left.amountsFen.every((amount, index) => amount === right.amountsFen[index])
+  );
+}
+
+function isFormGroup(value: unknown): value is FormSheet['groups'][number] {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    return false;
+  }
+  const group = value as Record<string, unknown>;
+  return (
+    typeof group.category === 'string' &&
+    typeof group.totalFen === 'number' &&
+    Number.isSafeInteger(group.totalFen) &&
+    Array.isArray(group.receiptIds) &&
+    group.receiptIds.every((id) => typeof id === 'string') &&
+    Array.isArray(group.amountsFen) &&
+    group.amountsFen.every((amount) => typeof amount === 'number' && Number.isSafeInteger(amount))
+  );
+}
+
+function nextSheetId(sheets: FormSheet[]): string {
+  const largest = sheets.reduce((largestId, sheet) => {
+    const match = /^sheet-(\d+)$/.exec(sheet.id);
+    return match === null ? largestId : Math.max(largestId, Number(match[1]));
+  }, 0);
+  return `sheet-${String(largest + 1).padStart(3, '0')}`;
+}
+
+function assertDraft(batch: Batch): void {
+  if (batch.pdfPath !== null) {
+    throw new Error('BATCH_FINALIZED');
+  }
+}
+
+function hasExactKeys(value: Record<string, unknown>, expected: string[]): boolean {
+  const keys = Object.keys(value);
+  return keys.length === expected.length && expected.every((key) => Object.hasOwn(value, key));
 }
 
 function isCalendarDate(value: string): boolean {

@@ -3,10 +3,23 @@ import { extname } from 'node:path';
 
 import { Router } from 'express';
 import multer from 'multer';
-import type { FormOptions, Note, Rule, Settings } from '@auto-reimbursement/contracts';
+import {
+  CATEGORIES,
+  type Category,
+  type FormOptions,
+  type Note,
+  type Rule,
+  type Settings,
+} from '@auto-reimbursement/contracts';
 
 import { getApiStatus } from './ai/openai-compatible.js';
-import { createBatch, getBatch, poolTotals } from './batches.js';
+import {
+  createBatch,
+  getBatch,
+  moveBatchGroup,
+  poolTotals,
+  updateBatchOptions,
+} from './batches.js';
 import type { Config } from './config.js';
 import type { Store } from './db.js';
 import { confirmDistinct } from './duplicates.js';
@@ -181,6 +194,24 @@ export function createRouter(
   router.get('/batches/:id', (request, response, next) => {
     try {
       response.json(getBatch(store, request.params.id));
+    } catch (error) {
+      next(batchHttpError(error));
+    }
+  });
+
+  router.post('/batches/:id/move', (request, response, next) => {
+    try {
+      const { category, direction } = batchMoveRequest(request.body);
+      response.json(moveBatchGroup(store, request.params.id, category, direction));
+    } catch (error) {
+      next(batchHttpError(error));
+    }
+  });
+
+  router.patch('/batches/:id/options', (request, response, next) => {
+    try {
+      const { options, noteBySheet } = batchOptionsRequest(request.body);
+      response.json(updateBatchOptions(store, request.params.id, options, noteBySheet));
     } catch (error) {
       next(batchHttpError(error));
     }
@@ -460,6 +491,48 @@ function batchRequest(body: unknown): {
   return { receiptIds: value.receiptIds, options: value.options as FormOptions };
 }
 
+function batchMoveRequest(body: unknown): {
+  category: Category;
+  direction: -1 | 1;
+} {
+  if (body === null || typeof body !== 'object' || Array.isArray(body)) {
+    throw new Error('INVALID_MOVE');
+  }
+  const value = body as Record<string, unknown>;
+  if (
+    typeof value.category !== 'string' ||
+    !CATEGORIES.includes(value.category as Category) ||
+    (value.direction !== -1 && value.direction !== 1)
+  ) {
+    throw new Error('INVALID_MOVE');
+  }
+  return { category: value.category as Category, direction: value.direction };
+}
+
+function batchOptionsRequest(body: unknown): {
+  options: FormOptions;
+  noteBySheet: Record<string, string | null>;
+} {
+  if (body === null || typeof body !== 'object' || Array.isArray(body)) {
+    throw new Error('INVALID_BATCH_OPTIONS');
+  }
+  const value = body as Record<string, unknown>;
+  if (
+    value.options === null ||
+    typeof value.options !== 'object' ||
+    Array.isArray(value.options) ||
+    value.noteBySheet === null ||
+    typeof value.noteBySheet !== 'object' ||
+    Array.isArray(value.noteBySheet)
+  ) {
+    throw new Error('INVALID_BATCH_OPTIONS');
+  }
+  return {
+    options: value.options as FormOptions,
+    noteBySheet: value.noteBySheet as Record<string, string | null>,
+  };
+}
+
 function batchHttpError(error: unknown): Error {
   if (!(error instanceof Error)) {
     return new HttpError(500, 'INTERNAL_ERROR', '服务器内部错误');
@@ -470,12 +543,21 @@ function batchHttpError(error: unknown): Error {
   if (error.message === 'NOT_ELIGIBLE') {
     return new HttpError(409, 'NOT_ELIGIBLE', '凭证当前状态不可生成');
   }
+  if (error.message === 'BATCH_FINALIZED') {
+    return new HttpError(409, 'BATCH_FINALIZED', '已导出的报销单不可修改');
+  }
   if (
     error.message === 'INVALID_SELECTION' ||
     error.message === 'INVALID_OPTIONS' ||
     error.message === 'INVALID_SIGNATURE' ||
     error.message === 'INVALID_BATCH_REQUEST' ||
-    error.message === 'INVALID_AMOUNT'
+    error.message === 'INVALID_AMOUNT' ||
+    error.message === 'INVALID_MOVE' ||
+    error.message === 'INVALID_LAYOUT' ||
+    error.message === 'INVALID_NOTE_BY_SHEET' ||
+    error.message === 'INVALID_BATCH_OPTIONS' ||
+    error.message === 'LAYOUT_OVERFLOW' ||
+    error.message === 'CATEGORY_TOO_LARGE'
   ) {
     return new HttpError(400, error.message, '请求参数无效');
   }
