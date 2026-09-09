@@ -1,15 +1,18 @@
 import { randomUUID } from 'node:crypto';
 import { unlink } from 'node:fs/promises';
 
-import type {
-  FileIndexEntry,
-  Receipt,
-  UploadResult,
+import {
+  CATEGORIES,
+  type Category,
+  type FileIndexEntry,
+  type Receipt,
+  type UploadResult,
 } from '@auto-reimbursement/contracts';
 
 import type { Config } from './config.js';
 import type { Store } from './db.js';
 import { findDuplicates } from './duplicates.js';
+import { recordCorrectionInTransaction } from './learning.js';
 import { safePath, storeImage, type InputImage } from './storage.js';
 
 function localMonth(now: Date): string {
@@ -126,6 +129,75 @@ export async function uploadReceipts(
   }
 
   return { accepted, rejected };
+}
+
+export function updateReceipt(
+  store: Store,
+  id: string,
+  patch: { paidFen?: number; category?: Category },
+): Receipt {
+  return store.transact(() => {
+    const receipt = store.get('receipts', id);
+    if (receipt === null) {
+      throw new Error('NOT_FOUND');
+    }
+    assertMutable(receipt);
+    if (patch.paidFen !== undefined && !validFen(patch.paidFen)) {
+      throw new Error('INVALID_PAID_FEN');
+    }
+    if (patch.category !== undefined && !CATEGORIES.includes(patch.category)) {
+      throw new Error('INVALID_CATEGORY');
+    }
+    const updated: Receipt = {
+      ...receipt,
+      paidFen: patch.paidFen ?? receipt.paidFen,
+      category: patch.category ?? receipt.category,
+      status: 'pending',
+    };
+    store.put('receipts', updated);
+    return updated;
+  });
+}
+
+export function confirmReceipt(store: Store, id: string): Receipt {
+  return store.transact(() => {
+    const receipt = store.get('receipts', id);
+    if (receipt === null) {
+      throw new Error('NOT_FOUND');
+    }
+    assertMutable(receipt);
+    const category = receipt.category;
+    if (receipt.paidFen === null || category === null) {
+      throw new Error('INCOMPLETE_RECEIPT');
+    }
+    if (!validFen(receipt.paidFen) || !CATEGORIES.includes(category)) {
+      throw new Error('INCOMPLETE_RECEIPT');
+    }
+    if (receipt.duplicateIds.length > 0 && !receipt.duplicateOverride) {
+      throw new Error('UNRESOLVED_DUPLICATE');
+    }
+    const confirmed: Receipt = {
+      ...receipt,
+      status: 'ready',
+      pendingReasons: [],
+      nextAttemptAt: null,
+    };
+    store.put('receipts', confirmed);
+    recordCorrectionInTransaction(store, id, category);
+    return confirmed;
+  });
+}
+
+function assertMutable(receipt: Receipt): void {
+  if (receipt.status === 'generated' || receipt.status === 'archived') {
+    throw new Error('IMMUTABLE_RECEIPT');
+  }
+}
+
+function validFen(value: number): boolean {
+  return (
+    Number.isSafeInteger(value) && value >= 0 && value <= 999_999_999_999
+  );
 }
 
 export type { InputImage } from './storage.js';

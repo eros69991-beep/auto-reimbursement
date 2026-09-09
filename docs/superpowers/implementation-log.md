@@ -97,3 +97,13 @@ GREEN — `pnpm --filter @auto-reimbursement/api test test/decision.test.ts` exi
 Implementation — `decide` evaluates ambiguity, null fields, medium floors, matching strong-rule conflicts, high thresholds, then medium rule-supported release in that order. Its local NFKC normalizer keeps merchant and keyword matching isolated until Task 9. `applyAnalysis` performs the recognition-to-ready/pending transition in one Store transaction, persists original analysis plus parsed recognized/paid amounts and extracted fields, re-runs duplicate refinement, deduplicates pending reasons, and makes duplicate evidence veto automatic release. No ready row can retain a null amount or category. Production now calls `applyAnalysis`; the Task 7 temporary callback remains only for its existing queue coverage.
 
 Verification — final focused, API, workspace test, and typecheck evidence is recorded in the Task 8 report after the commit is created. `git diff --check` exited 0 before commit.
+
+## Task 9: Local correction learning and editable rules
+
+RED — `pnpm --filter @auto-reimbursement/api test test/learning.test.ts` exited 1 before production edits because Vitest could not resolve the missing `../src/learning.js` module.
+
+GREEN — the focused learning suite exited 0 with 10/10 tests. It verifies three consistent corrections promote a normalized merchant rule; a conflicting correction resets its confirmation count; blank feature data yields no rule; repeated confirmation of one receipt/category is counted only once; keyword fallback is normalized; and explicit receipt confirmation, rule CRUD, invalid categories, archived edits, and unresolved duplicates follow their required guards.
+
+Implementation — schema version 2 adds a vendor-neutral `corrections` SQLite table, using `INSERT OR IGNORE` for one audit record per receipt/category. Local learning prefers a normalized merchant, otherwise the first usable AI keyword, and persists the original AI category, latest user category, count, strong flag and timestamp in ordinary rules. Receipt PATCH remains pending; explicit confirmation validates mutable state, final amount/category and duplicate resolution, preserves the original analysis, clears pending reasons, then records the correction in the same transaction. Rules are editable through GET/PUT/DELETE API endpoints, and decision matching now uses the shared feature normalizer.
+
+Verification — `pnpm --filter @auto-reimbursement/api test` exited 0 with 92/92 tests and `pnpm --filter @auto-reimbursement/api typecheck` exited 0. `git diff --check` exited 0 with only informational line-ending notices.

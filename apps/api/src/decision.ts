@@ -10,6 +10,7 @@ import {
 
 import type { Store } from './db.js';
 import { refineDuplicates } from './duplicates.js';
+import { normalizeFeature } from './learning.js';
 
 const AMOUNT_FLOOR = 0.8;
 const CATEGORY_FLOOR = 0.7;
@@ -150,18 +151,16 @@ function confidenceReasons(analysis: Analysis, settings: Settings): Reason[] {
 
 function matchesRule(rule: Rule, analysis: Analysis): boolean {
   if (rule.kind === 'merchant') {
-    return normalize(rule.key) !== '' && normalize(rule.key) === normalize(analysis.merchant);
+    return (
+      normalizeFeature(rule.key) !== '' &&
+      normalizeFeature(rule.key) === normalizeFeature(analysis.merchant ?? '')
+    );
   }
-  const key = normalize(rule.key);
-  return key !== '' && analysis.keywords.some((keyword) => normalize(keyword) === key);
-}
-
-function normalize(value: string | null): string {
-  return (value ?? '')
-    .normalize('NFKC')
-    .trim()
-    .toLowerCase()
-    .replace(/\s+/g, ' ');
+  const key = normalizeFeature(rule.key);
+  return (
+    key !== '' &&
+    analysis.keywords.some((keyword) => normalizeFeature(keyword) === key)
+  );
 }
 
 function uniqueReasons(reasons: Reason[]): Reason[] {

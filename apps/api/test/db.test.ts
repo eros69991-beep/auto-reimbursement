@@ -201,7 +201,7 @@ describe('SQLite store', () => {
       try {
         expect(
           database.prepare('PRAGMA user_version').get(),
-        ).toEqual({ user_version: 1 });
+        ).toEqual({ user_version: 2 });
         expect(() =>
           database
             .prepare('INSERT INTO receipts (id, data) VALUES (?, ?)')

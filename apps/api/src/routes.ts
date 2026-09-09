@@ -3,13 +3,15 @@ import { extname } from 'node:path';
 
 import { Router } from 'express';
 import multer from 'multer';
+import type { Rule } from '@auto-reimbursement/contracts';
 
 import { getApiStatus } from './ai/openai-compatible.js';
 import type { Config } from './config.js';
 import type { Store } from './db.js';
 import { confirmDistinct } from './duplicates.js';
+import { deleteRule, listRules, saveRule } from './learning.js';
 import { getProgress, type RecognitionQueue } from './queue.js';
-import { uploadReceipts } from './receipts.js';
+import { confirmReceipt, updateReceipt, uploadReceipts } from './receipts.js';
 import { safePath } from './storage.js';
 
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
@@ -135,6 +137,46 @@ export function createRouter(
     }
   });
 
+  router.patch('/receipts/:id', (request, response, next) => {
+    try {
+      const body = request.body as Record<string, unknown>;
+      const receipt = updateReceipt(store, request.params.id, {
+        paidFen: body.paidFen as number | undefined,
+        category: body.category as Rule['category'] | undefined,
+      });
+      response.json(receipt);
+    } catch (error) {
+      next(correctionHttpError(error));
+    }
+  });
+
+  router.post('/receipts/:id/confirm', (request, response, next) => {
+    try {
+      response.json(confirmReceipt(store, request.params.id));
+    } catch (error) {
+      next(correctionHttpError(error));
+    }
+  });
+
+  router.get('/rules', (_request, response) => {
+    response.json(listRules(store));
+  });
+
+  router.put('/rules/:id', (request, response, next) => {
+    try {
+      response.json(
+        saveRule(store, ruleFromRequest(request.params.id, request.body)),
+      );
+    } catch (error) {
+      next(correctionHttpError(error));
+    }
+  });
+
+  router.delete('/rules/:id', (request, response) => {
+    deleteRule(store, request.params.id);
+    response.status(204).end();
+  });
+
   router.post('/receipts/:id/retry', (request, response, next) => {
     try {
       const receipt = store.transact(() => {
@@ -168,4 +210,57 @@ export function createRouter(
   });
 
   return router;
+}
+
+function ruleFromRequest(id: string, body: unknown): Rule {
+  if (body === null || typeof body !== 'object' || Array.isArray(body)) {
+    throw new Error('INVALID_RULE');
+  }
+  const value = body as Record<string, unknown>;
+  if (
+    (value.kind !== 'merchant' && value.kind !== 'keyword') ||
+    typeof value.key !== 'string' ||
+    typeof value.category !== 'string' ||
+    (value.originalCategory !== null &&
+      typeof value.originalCategory !== 'string') ||
+    typeof value.confirmations !== 'number' ||
+    typeof value.strong !== 'boolean'
+  ) {
+    throw new Error('INVALID_RULE');
+  }
+  return {
+    id,
+    kind: value.kind,
+    key: value.key,
+    originalCategory: value.originalCategory as Rule['originalCategory'],
+    category: value.category as Rule['category'],
+    confirmations: value.confirmations,
+    strong: value.strong,
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+function correctionHttpError(error: unknown): Error {
+  if (!(error instanceof Error)) {
+    return new HttpError(500, 'INTERNAL_ERROR', '服务器内部错误');
+  }
+  if (error.message === 'NOT_FOUND') {
+    return new HttpError(404, 'RECEIPT_NOT_FOUND', '凭证不存在');
+  }
+  if (
+    error.message === 'IMMUTABLE_RECEIPT' ||
+    error.message === 'INCOMPLETE_RECEIPT' ||
+    error.message === 'UNRESOLVED_DUPLICATE'
+  ) {
+    return new HttpError(409, error.message, '凭证当前状态不可确认');
+  }
+  if (
+    error.message === 'INVALID_CATEGORY' ||
+    error.message === 'INVALID_PAID_FEN' ||
+    error.message.startsWith('INVALID_RULE') ||
+    error.message === 'INVALID_CONFIRMATIONS'
+  ) {
+    return new HttpError(400, error.message, '请求参数无效');
+  }
+  return error;
 }

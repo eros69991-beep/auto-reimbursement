@@ -3,13 +3,13 @@ import { join } from 'node:path';
 import { backup, DatabaseSync } from 'node:sqlite';
 import { types as utilTypes } from 'node:util';
 
-import type { Table, Tables } from '@auto-reimbursement/contracts';
+import type { Category, Table, Tables } from '@auto-reimbursement/contracts';
 
-const SCHEMA_VERSION = 1;
-const MIGRATION = readFileSync(
-  join(__dirname, 'migrations', '001-initial.sql'),
-  'utf8',
-);
+const SCHEMA_VERSION = 2;
+const MIGRATIONS = [
+  readFileSync(join(__dirname, 'migrations', '001-initial.sql'), 'utf8'),
+  readFileSync(join(__dirname, 'migrations', '002-corrections.sql'), 'utf8'),
+];
 
 const TABLE_NAMES = {
   receipts: 'receipts',
@@ -27,6 +27,7 @@ export interface Store {
   remove(table: Table, id: string): void;
   transact<T>(fn: () => T): T;
   nextOrder(): number;
+  recordConfirmation(receiptId: string, category: Category): boolean;
   backupTo(path: string): Promise<void>;
   close(): void;
 }
@@ -52,7 +53,13 @@ function migrate(database: DatabaseSync): void {
 
   database.exec('BEGIN IMMEDIATE');
   try {
-    database.exec(MIGRATION);
+    for (
+      let version = versionRow.user_version;
+      version < SCHEMA_VERSION;
+      version += 1
+    ) {
+      database.exec(MIGRATIONS[version]!);
+    }
     database.exec(`PRAGMA user_version=${SCHEMA_VERSION}`);
     database.exec('COMMIT');
   } catch (error) {
@@ -143,6 +150,24 @@ class SqliteStore implements Store {
       throw new Error('MISSING_UPLOAD_COUNTER');
     }
     return row.value;
+  }
+
+  recordConfirmation(receiptId: string, category: Category): boolean {
+    const result = this.database
+      .prepare(
+        `INSERT OR IGNORE INTO corrections (receipt_id, category, data)
+         VALUES (?, ?, ?)`,
+      )
+      .run(
+        receiptId,
+        category,
+        JSON.stringify({
+          receiptId,
+          category,
+          recordedAt: new Date().toISOString(),
+        }),
+      );
+    return result.changes === 1;
   }
 
   async backupTo(path: string): Promise<void> {

@@ -501,6 +501,7 @@ describe('ordered receipt image upload', () => {
         return store.transact(run);
       },
       nextOrder: store.nextOrder.bind(store),
+      recordConfirmation: store.recordConfirmation.bind(store),
       backupTo: store.backupTo.bind(store),
       close: store.close.bind(store),
     };

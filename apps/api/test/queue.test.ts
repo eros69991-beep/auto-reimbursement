@@ -184,6 +184,7 @@ describe('durable recognition queue', () => {
         }
       },
       nextOrder: store.nextOrder.bind(store),
+      recordConfirmation: store.recordConfirmation.bind(store),
       backupTo: store.backupTo.bind(store),
       close: store.close.bind(store),
     };
