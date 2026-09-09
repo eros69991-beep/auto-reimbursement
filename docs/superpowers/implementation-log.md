@@ -137,3 +137,15 @@ GREEN — `pnpm --filter @auto-reimbursement/api test test/batches.test.ts` exit
 Implementation — batch closure first validates the complete selected ID set before writing anything, then sorts by upload order, snapshots receipt image/refund data and current notes, validates safe totals, writes the immutable batch, and marks every selected receipt generated in one transaction. It has no amount threshold or automatic month-close behavior. Options are validated server-side; image-signature metadata is reconstructed only from the persisted Settings/FileIndex record, while text mode strips a client signature. Pool totals exclude ineligible/full-refund records while the pool still shows unbatched ready fully refunded receipts for editing. Deletion sets only `deletedAt`, retaining receipt hashes and file references, and rejects generated/archived records. No preview or sheet generation was added; `sheets` intentionally remains empty for Task 14.
 
 Verification — `pnpm --filter @auto-reimbursement/api test` exited 0 with 121/121 tests; `pnpm --filter @auto-reimbursement/api typecheck` exited 0; `git diff --check` exited 0 (only informational Windows line-ending notices).
+
+## Task 13: Programmatic Chinese uppercase currency
+
+RED — `pnpm --filter @auto-reimbursement/api test test/uppercase.test.ts` exited 1 before production edits because Vitest could not resolve the expected missing `../src/uppercase.js` module; no tests were collected.
+
+GREEN — `pnpm --filter @auto-reimbursement/api test test/uppercase.test.ts` exited 0 with 18/18 tests. The table-driven suite covers all specified amounts, 亿/万/unit section boundaries, and negative, fractional, overflow, non-finite and NaN rejection.
+
+Implementation — `chineseUppercase(fen)` delegates validation to `formatFen` before arithmetic, converts yuan with four-digit sections and 亿/万/unit groups, and emits exact 元/角/分/整 text with collapsed zero insertion. It is deterministic and makes no API or AI calls.
+
+Verification — `pnpm --filter @auto-reimbursement/api test` exited 0 with 142/142 tests; `pnpm --filter @auto-reimbursement/api typecheck` exited 0; focused tests and `git diff --check` also passed.
+
+Commit — `feat: format exact Chinese uppercase amounts`; its immutable SHA is recorded in the Task 13 report after Git creates the commit.
