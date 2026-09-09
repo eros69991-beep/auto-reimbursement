@@ -109,6 +109,13 @@ export function createApp(deps?: AppDependencies): express.Express {
           });
           return;
         }
+        if (request.method === 'POST' && request.path === '/api/batches') {
+          response.status(400).json({
+            code: 'INVALID_BATCH_REQUEST',
+            message: '请求参数无效',
+          });
+          return;
+        }
       }
       if (error instanceof HttpError) {
         response.status(error.status).json({

@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { createApp } from '../src/app.js';
 import { createBatch, getBatch, poolTotals } from '../src/batches.js';
 import { loadConfig } from '../src/config.js';
-import { openStore } from '../src/db.js';
+import { openStore, type Store } from '../src/db.js';
 import { deleteReceipt, listReceipts } from '../src/receipts.js';
 import { getSettings, resolveOptions } from '../src/settings.js';
 import { sampleReceipt } from './support.js';
@@ -216,4 +216,68 @@ describe('manual batches', () => {
       store.close();
     }
   });
+
+  it('rejects malformed batch JSON without closing any receipts', async () => {
+    const store = openStore(':memory:');
+    try {
+      store.put('receipts', sampleReceipt({ id: 'ready' }));
+      const app = createApp({ store, config: loadConfig({}, process.cwd()) });
+
+      const response = await request(app)
+        .post('/api/batches')
+        .set('Content-Type', 'application/json')
+        .send('{');
+
+      expect(response.status).toBe(400);
+      expect(response.body.code).toBe('INVALID_BATCH_REQUEST');
+      expect(store.get('receipts', 'ready')?.status).toBe('ready');
+      expect(store.list('batches')).toEqual([]);
+    } finally {
+      store.close();
+    }
+  });
+
+  it.each([{}, []])('rejects malformed image signatures %o before file lookup', async (signature) => {
+    const store = openStore(':memory:');
+    try {
+      store.put('receipts', sampleReceipt({ id: 'ready' }));
+      const app = createApp({
+        store: noUndefinedFileLookupStore(store),
+        config: loadConfig({}, process.cwd()),
+      });
+
+      const response = await request(app).post('/api/batches').send({
+        receiptIds: ['ready'],
+        options: {
+          department: '', date: null, signerMode: 'image', signerName: '', signature,
+        },
+      });
+
+      expect(response.status).toBe(400);
+      expect(response.body.code).toBe('INVALID_SIGNATURE');
+      expect(store.get('receipts', 'ready')?.status).toBe('ready');
+      expect(store.list('batches')).toEqual([]);
+    } finally {
+      store.close();
+    }
+  });
 });
+
+function noUndefinedFileLookupStore(base: Store): Store {
+  return {
+    get: (table, id) => {
+      if (table === 'files' && (typeof id !== 'string' || id.length === 0)) {
+        throw new Error('UNDEFINED_FILE_LOOKUP');
+      }
+      return base.get(table, id);
+    },
+    list: base.list.bind(base),
+    put: base.put.bind(base),
+    remove: base.remove.bind(base),
+    transact: base.transact.bind(base),
+    nextOrder: base.nextOrder.bind(base),
+    recordConfirmation: base.recordConfirmation.bind(base),
+    backupTo: base.backupTo.bind(base),
+    close: base.close.bind(base),
+  };
+}

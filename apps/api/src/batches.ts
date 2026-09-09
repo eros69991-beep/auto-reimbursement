@@ -127,7 +127,13 @@ function canonicalOptions(store: Store, value: FormOptions): FormOptions {
       signature: null,
     };
   }
-  if (value.signature === null || typeof value.signature !== 'object') {
+  if (
+    value.signature === null ||
+    typeof value.signature !== 'object' ||
+    Array.isArray(value.signature) ||
+    typeof value.signature.id !== 'string' ||
+    value.signature.id.length === 0
+  ) {
     throw new Error('INVALID_SIGNATURE');
   }
   const signature = getSettings(store).signature;
