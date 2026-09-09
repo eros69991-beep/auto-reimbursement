@@ -17,3 +17,13 @@ The renderer now emits each form immediately followed by its attachment pages, r
 ## Scope and concern
 
 The untracked `tmp/` and `apps/api/tmp/` fixtures, scripts, PDFs, and PNGs are QA-only and intentionally excluded from the commit. Task 17 and later UI behavior remains out of scope.
+
+## Review fix round 1: indexed file integrity
+
+Root cause — attachment, signature, and saved-PDF reads trusted the batch snapshot path or `pdfPath` and read bytes directly, without resolving the active `files` index record or comparing the indexed SHA-256. Consequently, a valid replacement image/PDF or an unindexed snapshot could be consumed.
+
+RED — focused PDF regression tests returned HTTP 200 for a replaced saved PDF, replaced receipt evidence, and replaced signature instead of the required domain errors.
+
+Fix — `readVerifiedFile` now resolves the indexed path with `safePath`, reads it, and compares the full SHA-256. Rendering resolves attachment IDs through active, correctly owned/type-matched `files` entries, ignores mutable snapshot path/MIME/hash metadata, and determines WebP from verified bytes. Image signatures require an active `default`/`signature` index entry. Saved-PDF routes require exactly one active PDF index record matching the batch owner and `pdfPath`, and return `PDF_NOT_FOUND` for absent, deleted, unindexed, unreadable, or tampered data. Exports stop before file persistence when evidence verification fails.
+
+GREEN — `pnpm --filter @auto-reimbursement/api test test/pdf.test.ts` passed 4/4; `pnpm --filter @auto-reimbursement/api test` passed 157/157; API typecheck and `git diff --check` exited 0. Regressions cover replaced and unindexed attachments, replaced signatures, tampered and unindexed saved PDFs, and no persisted partial export.

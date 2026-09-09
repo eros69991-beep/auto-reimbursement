@@ -1,8 +1,8 @@
-import { randomUUID } from 'node:crypto';
-import { mkdir, open, rename, unlink } from 'node:fs/promises';
+import { createHash, randomUUID } from 'node:crypto';
+import { mkdir, open, readFile, rename, unlink } from 'node:fs/promises';
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 
-import type { ImageRef } from '@auto-reimbursement/contracts';
+import type { FileIndexEntry, ImageRef } from '@auto-reimbursement/contracts';
 import sharp from 'sharp';
 
 import type { Config } from './config.js';
@@ -37,6 +37,17 @@ export function safePath(root: string, input: string): string {
     throw new Error('UNSAFE_PATH');
   }
   return target;
+}
+
+export async function readVerifiedFile(
+  config: Config,
+  entry: FileIndexEntry,
+): Promise<Buffer> {
+  const bytes = await readFile(safePath(config.dataDir, entry.path));
+  if (createHash('sha256').update(bytes).digest('hex') !== entry.sha256) {
+    throw new Error('FILE_INTEGRITY');
+  }
+  return bytes;
 }
 
 export async function ensureMonthDirs(

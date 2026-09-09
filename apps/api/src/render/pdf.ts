@@ -1,17 +1,21 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { readFile, unlink } from 'node:fs/promises';
+import { unlink } from 'node:fs/promises';
 
-import type { Batch, FileIndexEntry, ImageRef } from '@auto-reimbursement/contracts';
+import type { Batch, FileIndexEntry } from '@auto-reimbursement/contracts';
 import sharp from 'sharp';
 
 import { getBatch } from '../batches.js';
 import type { Config } from '../config.js';
 import type { Store } from '../db.js';
-import { safePath, storeExportPdf } from '../storage.js';
+import { readVerifiedFile, storeExportPdf } from '../storage.js';
 import { drawAttachment, orderedAttachments, type Attachment } from './attachments.js';
 import { createFormDocument, drawForm } from './form.js';
 
-export async function renderBatchPdf(config: Config, batch: Batch): Promise<Buffer> {
+export async function renderBatchPdf(
+  store: Store,
+  config: Config,
+  batch: Batch,
+): Promise<Buffer> {
   const doc = createFormDocument();
   const chunks: Buffer[] = [];
   const done = new Promise<Buffer>((resolve, reject) => {
@@ -21,11 +25,11 @@ export async function renderBatchPdf(config: Config, batch: Batch): Promise<Buff
   });
 
   try {
-    const signature = await readSignatureBytes(config, batch);
+    const signature = await readSignatureBytes(store, config, batch);
     for (const sheet of batch.sheets) {
       drawForm(doc, batch, sheet, signature);
       for (const attachment of orderedAttachments(batch, sheet)) {
-        const bytes = await attachmentBytes(config, attachment);
+        const bytes = await attachmentBytes(store, config, attachment);
         drawAttachment(doc, attachment, bytes);
       }
     }
@@ -46,7 +50,7 @@ export async function exportBatchPdf(
     return existing;
   }
 
-  const bytes = await renderBatchPdf(config, existing);
+  const bytes = await renderBatchPdf(store, config, existing);
   const fileId = randomUUID();
   let createdPath: string | null = null;
   try {
@@ -89,35 +93,86 @@ export async function exportBatchPdf(
   }
 }
 
-async function readSignatureBytes(config: Config, batch: Batch): Promise<Buffer | null> {
+export async function readSavedBatchPdf(
+  store: Store,
+  config: Config,
+  batch: Batch,
+): Promise<Buffer> {
+  if (batch.pdfPath === null) {
+    throw new Error('PDF_NOT_FOUND');
+  }
+  const entries = store.list('files').filter((entry) => (
+    entry.ownerId === batch.id &&
+    entry.kind === 'pdf' &&
+    entry.path === batch.pdfPath &&
+    entry.deletedAt === null
+  ));
+  if (entries.length !== 1) {
+    throw new Error('PDF_NOT_FOUND');
+  }
+  try {
+    return await readVerifiedFile(config, entries[0]!);
+  } catch {
+    throw new Error('PDF_NOT_FOUND');
+  }
+}
+
+async function readSignatureBytes(
+  store: Store,
+  config: Config,
+  batch: Batch,
+): Promise<Buffer | null> {
   if (batch.options.signerMode === 'text') {
     return null;
   }
-  if (batch.options.signature === null || batch.options.signature.deletedAt !== null) {
+  if (batch.options.signature === null) {
+    throw new Error('MISSING_ATTACHMENT');
+  }
+  const entry = store.get('files', batch.options.signature.id);
+  if (
+    entry === null ||
+    entry.ownerId !== 'default' ||
+    entry.kind !== 'signature' ||
+    entry.deletedAt !== null
+  ) {
     throw new Error('MISSING_ATTACHMENT');
   }
   try {
-    return await readFile(safePath(config.dataDir, batch.options.signature.path));
+    return await readVerifiedFile(config, entry);
   } catch {
     throw new Error('MISSING_ATTACHMENT');
   }
 }
 
-async function attachmentBytes(config: Config, attachment: Attachment): Promise<Buffer> {
-  if (attachment.image.deletedAt !== null) {
+async function attachmentBytes(
+  store: Store,
+  config: Config,
+  attachment: Attachment,
+): Promise<Buffer> {
+  const entry = store.get('files', attachment.image.id);
+  if (
+    entry === null ||
+    entry.ownerId !== attachment.receiptId ||
+    entry.kind !== attachment.kind ||
+    entry.deletedAt !== null
+  ) {
     throw missingAttachment(attachment.receiptId);
   }
   let bytes: Buffer;
   try {
-    bytes = await readFile(safePath(config.dataDir, attachment.image.path));
+    bytes = await readVerifiedFile(config, entry);
   } catch {
     throw missingAttachment(attachment.receiptId);
   }
-  if (attachment.image.mime !== 'image/webp') {
-    return bytes;
-  }
   try {
-    return await sharp(bytes).png().toBuffer();
+    const metadata = await sharp(bytes).metadata();
+    if (metadata.format === 'webp') {
+      return await sharp(bytes).png().toBuffer();
+    }
+    if (metadata.format === 'jpeg' || metadata.format === 'png') {
+      return bytes;
+    }
+    throw new Error('INVALID_IMAGE');
   } catch {
     throw missingAttachment(attachment.receiptId);
   }

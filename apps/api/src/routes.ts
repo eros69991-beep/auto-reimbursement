@@ -25,7 +25,7 @@ import type { Store } from './db.js';
 import { confirmDistinct } from './duplicates.js';
 import { deleteRule, listRules, saveRule } from './learning.js';
 import { getProgress, type RecognitionQueue } from './queue.js';
-import { exportBatchPdf, renderBatchPdf } from './render/pdf.js';
+import { exportBatchPdf, readSavedBatchPdf, renderBatchPdf } from './render/pdf.js';
 import {
   confirmReceipt,
   deleteReceipt,
@@ -204,8 +204,8 @@ export function createRouter(
     try {
       const batch = getBatch(store, request.params.id);
       const bytes = batch.pdfPath === null
-        ? await renderBatchPdf(config, batch)
-        : await readSavedPdf(config, batch.pdfPath);
+        ? await renderBatchPdf(store, config, batch)
+        : await readSavedBatchPdf(store, config, batch);
       response.type('application/pdf').send(bytes);
     } catch (error) {
       next(batchHttpError(error));
@@ -223,10 +223,7 @@ export function createRouter(
   router.get('/batches/:id/pdf', async (request, response, next) => {
     try {
       const batch = getBatch(store, request.params.id);
-      if (batch.pdfPath === null) {
-        throw new HttpError(404, 'PDF_NOT_FOUND', '导出文件不存在');
-      }
-      response.type('application/pdf').send(await readSavedPdf(config, batch.pdfPath));
+      response.type('application/pdf').send(await readSavedBatchPdf(store, config, batch));
     } catch (error) {
       next(batchHttpError(error));
     }
@@ -606,14 +603,6 @@ function batchHttpError(error: unknown): Error {
     return new HttpError(400, error.message, '请求参数无效');
   }
   return error;
-}
-
-async function readSavedPdf(config: Config, path: string): Promise<Buffer> {
-  try {
-    return await readFile(safePath(config.dataDir, path));
-  } catch {
-    throw new Error('PDF_NOT_FOUND');
-  }
 }
 
 function correctionHttpError(error: unknown): Error {
