@@ -153,19 +153,7 @@ function matchesRule(rule: Rule, analysis: Analysis): boolean {
     return normalize(rule.key) !== '' && normalize(rule.key) === normalize(analysis.merchant);
   }
   const key = normalize(rule.key);
-  return key !== '' && keywordTokens(analysis.keywords).has(key);
-}
-
-function keywordTokens(keywords: string[]): Set<string> {
-  const tokens = new Set<string>();
-  for (const keyword of keywords) {
-    for (const token of normalize(keyword).split(' ')) {
-      if (token !== '') {
-        tokens.add(token);
-      }
-    }
-  }
-  return tokens;
+  return key !== '' && analysis.keywords.some((keyword) => normalize(keyword) === key);
 }
 
 function normalize(value: string | null): string {

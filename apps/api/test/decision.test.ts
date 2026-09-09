@@ -87,6 +87,36 @@ describe('confidence decisions', () => {
     ).toEqual({ status: 'ready', reasons: [], category: '耗材' });
   });
 
+  it('releases medium confidence for a normalized exact keyword phrase', () => {
+    expect(
+      decide(
+        analysis({
+          confidence: { amount: 0.8, category: 0.7 },
+          keywords: [' Ｃｏｆｆｅｅ   Ｂｅａｎｓ '],
+        }),
+        [strongRule({ kind: 'keyword', key: 'coffee beans' })],
+        settings,
+      ),
+    ).toEqual({ status: 'ready', reasons: [], category: '耗材' });
+  });
+
+  it('does not release medium confidence for an incidental keyword word match', () => {
+    expect(
+      decide(
+        analysis({
+          confidence: { amount: 0.8, category: 0.7 },
+          keywords: ['coffee beans'],
+        }),
+        [strongRule({ kind: 'keyword', key: 'coffee' })],
+        settings,
+      ),
+    ).toEqual({
+      status: 'pending',
+      reasons: ['amount_uncertain', 'category_uncertain'],
+      category: '耗材',
+    });
+  });
+
   it('does not release medium confidence from an unconfirmed rule', () => {
     expect(
       decide(
