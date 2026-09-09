@@ -161,3 +161,11 @@ Implementation — layout groups snapshots by first category occurrence after up
 Verification — `pnpm --filter @auto-reimbursement/api test` exited 0 with 149/149 tests; API typecheck exited 0. Fresh workspace `pnpm test` passed 175 tests (25 contracts, 149 API, 1 web), `pnpm typecheck` exited 0, and `git diff --check` exited 0.
 
 Commit — `feat: pack categories into measured reimbursement sheets`; its immutable SHA is recorded in the Task 14 report after Git creates the commit.
+
+## Task 15: Measured Chinese reimbursement forms
+
+RED — `pnpm --filter @auto-reimbursement/api test test/form.test.ts` failed because the expected form renderer was absent. GREEN — the PDF.js fixture test extracts every mandated Chinese printed label and the sheet-specific uppercase total using an embedded Noto Sans SC font with system fonts disabled.
+
+Implementation — `form.ts` creates a 270 x 165 mm landscape PDFKit document with an official Noto Sans SC TTF, exposes PDF-accurate packing metrics, counts per-sheet original/refund attachment images, and draws literal-text field content into the measured printed structure. Batch creation now packs with the same registered-font measurement as the renderer. The template contains the double title rule, metadata, five body guides, category regions and numeric subtotals, nine amount-digit cells, notes/approval split, total and uppercase/loan strip, plus a text or aspect-fit image signer cell.
+
+Calibration — the two supplied private paper forms were inspected without copying them. Geometry, font source/checksum, rasterizer command, and visual review evidence are recorded in `docs/form-calibration.md`; the documented 270 x 165 mm size is an assumption rather than an exact claim from perspective photos.

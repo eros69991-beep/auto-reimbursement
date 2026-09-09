@@ -11,6 +11,7 @@
     "@auto-reimbursement/contracts": "workspace:*",
     "express": "^5.1.0",
     "multer": "^2.3.0",
+    "pdfkit": "^0.20.2",
     "sharp": "^0.35.4",
     "zod": "^4.5.4"
   },
@@ -18,7 +19,9 @@
     "@types/express": "^5.0.3",
     "@types/multer": "^2.2.0",
     "@types/node": "^24.3.1",
+    "@types/pdfkit": "^0.17.6",
     "@types/supertest": "^6.0.3",
+    "pdfjs-dist": "^6.3.289",
     "supertest": "^7.1.4",
     "tsx": "^4.20.5",
     "typescript": "^5.9.2",

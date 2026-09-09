@@ -20,6 +20,7 @@ import {
   packGroups,
   sheetFits,
 } from './render/layout.js';
+import { createFormDocument, formMetrics } from './render/form.js';
 import { isEligible } from './refunds.js';
 import { getSettings } from './settings.js';
 
@@ -72,7 +73,7 @@ export function createBatch(
       (total, item) => addFen(total, item.netFen),
       0,
     );
-    const sheets = packGroups(groupItems(items), defaultMetrics());
+    const sheets = packGroups(groupItems(items), pdfMetrics());
     const batch: Batch = {
       id: randomUUID(),
       month: `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`,
@@ -177,6 +178,15 @@ function addFen(total: number, value: number): number {
   }
   formatFen(result);
   return result;
+}
+
+function pdfMetrics() {
+  const doc = createFormDocument();
+  try {
+    return formMetrics(doc);
+  } finally {
+    doc.end();
+  }
 }
 
 function canonicalOptions(store: Store, value: FormOptions): FormOptions {
