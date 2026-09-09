@@ -12,6 +12,7 @@ import { confirmDistinct } from './duplicates.js';
 import { deleteRule, listRules, saveRule } from './learning.js';
 import { getProgress, type RecognitionQueue } from './queue.js';
 import { confirmReceipt, updateReceipt, uploadReceipts } from './receipts.js';
+import { addRefundImage, setRefund } from './refunds.js';
 import { safePath } from './storage.js';
 
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
@@ -19,6 +20,10 @@ const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fields: 0, files: 50, fileSize: MAX_IMAGE_BYTES },
+});
+const refundUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fields: 0, files: 1, fileSize: MAX_IMAGE_BYTES },
 });
 
 export class HttpError extends Error {
@@ -158,6 +163,45 @@ export function createRouter(
     }
   });
 
+  router.put('/receipts/:id/refund', (request, response, next) => {
+    try {
+      response.json(
+        setRefund(
+          store,
+          request.params.id,
+          refundFenFromRequest(request.body),
+        ),
+      );
+    } catch (error) {
+      next(correctionHttpError(error));
+    }
+  });
+
+  router.post(
+    '/receipts/:id/refund-images',
+    refundUpload.single('file'),
+    async (request, response, next) => {
+      try {
+        const id = request.params.id;
+        if (typeof id !== 'string') {
+          throw new HttpError(404, 'RECEIPT_NOT_FOUND', '凭证不存在');
+        }
+        if (request.file === undefined) {
+          throw new HttpError(400, 'EMPTY_REFUND_IMAGE', '请选择退款凭证图片');
+        }
+        response.json(
+          await addRefundImage(store, config, id, {
+            name: request.file.originalname,
+            mime: request.file.mimetype,
+            bytes: request.file.buffer,
+          }),
+        );
+      } catch (error) {
+        next(correctionHttpError(error));
+      }
+    },
+  );
+
   router.get('/rules', (_request, response) => {
     response.json(listRules(store));
   });
@@ -257,6 +301,17 @@ function receiptPatchFromRequest(body: unknown): {
   };
 }
 
+function refundFenFromRequest(body: unknown): number {
+  if (body === null || typeof body !== 'object' || Array.isArray(body)) {
+    throw new Error('INVALID_REFUND');
+  }
+  const value = body as Record<string, unknown>;
+  if (!Object.hasOwn(value, 'refundFen') || typeof value.refundFen !== 'number') {
+    throw new Error('INVALID_REFUND');
+  }
+  return value.refundFen;
+}
+
 function correctionHttpError(error: unknown): Error {
   if (!(error instanceof Error)) {
     return new HttpError(500, 'INTERNAL_ERROR', '服务器内部错误');
@@ -274,6 +329,7 @@ function correctionHttpError(error: unknown): Error {
   if (
     error.message === 'INVALID_CATEGORY' ||
     error.message === 'INVALID_PAID_FEN' ||
+    error.message === 'INVALID_REFUND' ||
     error.message === 'INVALID_RECEIPT_PATCH' ||
     error.message.startsWith('INVALID_RULE') ||
     error.message === 'INVALID_CONFIRMATIONS'

@@ -107,3 +107,13 @@ GREEN — the focused learning suite exited 0 with 10/10 tests. It verifies thre
 Implementation — schema version 2 adds a vendor-neutral `corrections` SQLite table, using `INSERT OR IGNORE` for one audit record per receipt/category. Local learning prefers a normalized merchant, otherwise the first usable AI keyword, and persists the original AI category, latest user category, count, strong flag and timestamp in ordinary rules. Receipt PATCH remains pending; explicit confirmation validates mutable state, final amount/category and duplicate resolution, preserves the original analysis, clears pending reasons, then records the correction in the same transaction. Rules are editable through GET/PUT/DELETE API endpoints, and decision matching now uses the shared feature normalizer.
 
 Verification — `pnpm --filter @auto-reimbursement/api test` exited 0 with 92/92 tests and `pnpm --filter @auto-reimbursement/api typecheck` exited 0. `git diff --check` exited 0 with only informational line-ending notices.
+
+## Task 10: Full and partial refunds with evidence
+
+RED — `pnpm --filter @auto-reimbursement/api test test/refunds.test.ts` exited 1 before production edits because Vitest could not resolve the missing `../src/refunds.js` module.
+
+GREEN — the focused refund suite exited 0 with 5/5 tests. It covers partial, full and reset refunds; eligibility guards; immutable financial history; ordered, indexed refund-image evidence; original-hash preservation; persistence-failure cleanup; strict HTTP validation; and the one-file multipart boundary.
+
+Implementation — refunds change only `refundFen`, retaining the receipt's existing status and recognition data. Eligibility uses the shared net amount and excludes non-ready, deleted, archived, batched, uncategorized and fully refunded rows. Refund evidence is stored below the receipt's original upload month, appended in request order, indexed as `refund` evidence and cleaned up only at its newly created path if the synchronous database transaction fails. HTTP routes expose strict `PUT /receipts/:id/refund` and one-file, 20 MiB `POST /receipts/:id/refund-images` endpoints; generated and archived receipts return conflict responses.
+
+Verification — `pnpm --filter @auto-reimbursement/api test` exited 0 with 104/104 tests, `pnpm --filter @auto-reimbursement/api typecheck` exited 0, and `git diff --check` exited 0 (informational Windows line-ending notices only).
