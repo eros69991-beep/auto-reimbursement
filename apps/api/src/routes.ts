@@ -3,7 +3,7 @@ import { extname } from 'node:path';
 
 import { Router } from 'express';
 import multer from 'multer';
-import type { Rule } from '@auto-reimbursement/contracts';
+import type { Note, Rule, Settings } from '@auto-reimbursement/contracts';
 
 import { getApiStatus } from './ai/openai-compatible.js';
 import type { Config } from './config.js';
@@ -13,6 +13,14 @@ import { deleteRule, listRules, saveRule } from './learning.js';
 import { getProgress, type RecognitionQueue } from './queue.js';
 import { confirmReceipt, updateReceipt, uploadReceipts } from './receipts.js';
 import { addRefundImage, setRefund } from './refunds.js';
+import {
+  createNote,
+  deleteNote,
+  getSettings,
+  saveNote,
+  saveSettings,
+  saveSignature,
+} from './settings.js';
 import { safePath } from './storage.js';
 
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
@@ -22,6 +30,10 @@ const upload = multer({
   limits: { fields: 0, files: 50, fileSize: MAX_IMAGE_BYTES },
 });
 const refundUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fields: 0, files: 1, fileSize: MAX_IMAGE_BYTES },
+});
+const signatureUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fields: 0, files: 1, fileSize: MAX_IMAGE_BYTES },
 });
@@ -45,6 +57,77 @@ export function createRouter(
 
   router.get('/ai/status', (_request, response) => {
     response.json(getApiStatus(config));
+  });
+
+  router.get('/settings', (_request, response) => {
+    response.json(getSettings(store));
+  });
+
+  router.put('/settings', (request, response, next) => {
+    try {
+      response.json(saveSettings(store, settingsFromRequest(request.body)));
+    } catch (error) {
+      next(settingsHttpError(error));
+    }
+  });
+
+  router.post(
+    '/settings/signature',
+    signatureUpload.single('file'),
+    async (request, response, next) => {
+      try {
+        if (request.file === undefined) {
+          throw new HttpError(400, 'EMPTY_SIGNATURE', '请选择签名图片');
+        }
+        response.json(
+          await saveSignature(store, config, {
+            name: request.file.originalname,
+            mime: request.file.mimetype,
+            bytes: request.file.buffer,
+          }),
+        );
+      } catch (error) {
+        next(settingsHttpError(error));
+      }
+    },
+  );
+
+  router.get('/notes', (_request, response) => {
+    response.json(store.list('notes'));
+  });
+
+  router.get('/notes/:id', (request, response, next) => {
+    const note = store.get('notes', request.params.id);
+    if (note === null) {
+      next(new HttpError(404, 'NOTE_NOT_FOUND', '备注不存在'));
+      return;
+    }
+    response.json(note);
+  });
+
+  router.post('/notes', (request, response, next) => {
+    try {
+      response.status(201).json(createNote(store, noteForCreate(request.body)));
+    } catch (error) {
+      next(settingsHttpError(error));
+    }
+  });
+
+  router.put('/notes/:id', (request, response, next) => {
+    try {
+      response.json(saveNote(store, noteForUpdate(request.params.id, request.body)));
+    } catch (error) {
+      next(settingsHttpError(error));
+    }
+  });
+
+  router.delete('/notes/:id', (request, response, next) => {
+    try {
+      deleteNote(store, request.params.id);
+      response.status(204).end();
+    } catch (error) {
+      next(settingsHttpError(error));
+    }
   });
 
   router.get('/progress', (request, response) => {
@@ -334,6 +417,61 @@ function correctionHttpError(error: unknown): Error {
     error.message === 'INVALID_RECEIPT_PATCH' ||
     error.message.startsWith('INVALID_RULE') ||
     error.message === 'INVALID_CONFIRMATIONS'
+  ) {
+    return new HttpError(400, error.message, '请求参数无效');
+  }
+  if (error.message === 'IMAGE_TOO_LARGE') {
+    return new HttpError(413, error.message, '上传图片数量或大小超出限制');
+  }
+  return error;
+}
+
+function settingsFromRequest(body: unknown): Settings {
+  if (body === null || typeof body !== 'object' || Array.isArray(body)) {
+    throw new Error('INVALID_SETTINGS');
+  }
+  return body as Settings;
+}
+
+function noteForCreate(body: unknown): Omit<Note, 'id'> {
+  if (body === null || typeof body !== 'object' || Array.isArray(body)) {
+    throw new Error('INVALID_NOTE');
+  }
+  const value = body as Record<string, unknown>;
+  if (typeof value.name !== 'string' || typeof value.content !== 'string') {
+    throw new Error('INVALID_NOTE');
+  }
+  return { name: value.name, content: value.content };
+}
+
+function noteForUpdate(id: string, body: unknown): Note {
+  if (body === null || typeof body !== 'object' || Array.isArray(body)) {
+    throw new Error('INVALID_NOTE');
+  }
+  const value = body as Record<string, unknown>;
+  if (value.id !== id) {
+    throw new Error('INVALID_NOTE_ID');
+  }
+  return { id, name: value.name as string, content: value.content as string };
+}
+
+function settingsHttpError(error: unknown): Error {
+  if (error instanceof HttpError) {
+    return error;
+  }
+  if (!(error instanceof Error)) {
+    return new HttpError(500, 'INTERNAL_ERROR', '服务器内部错误');
+  }
+  if (error.message === 'NOTE_NOT_FOUND') {
+    return new HttpError(404, 'NOTE_NOT_FOUND', '备注不存在');
+  }
+  if (
+    error.message === 'INVALID_SETTINGS' ||
+    error.message === 'INVALID_DATE' ||
+    error.message === 'INVALID_SIGNATURE' ||
+    error.message === 'INVALID_NOTE' ||
+    error.message === 'INVALID_NOTE_ID' ||
+    error.message === 'INVALID_IMAGE'
   ) {
     return new HttpError(400, error.message, '请求参数无效');
   }

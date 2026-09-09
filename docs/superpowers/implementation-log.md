@@ -117,3 +117,13 @@ GREEN — the focused refund suite exited 0 with 5/5 tests. It covers partial, f
 Implementation — refunds change only `refundFen`, retaining the receipt's existing status and recognition data. Eligibility uses the shared net amount and excludes non-ready, deleted, archived, batched, uncategorized and fully refunded rows. Refund evidence is stored below the receipt's original upload month, appended in request order, indexed as `refund` evidence and cleaned up only at its newly created path if the synchronous database transaction fails. HTTP routes expose strict `PUT /receipts/:id/refund` and one-file, 20 MiB `POST /receipts/:id/refund-images` endpoints; generated and archived receipts return conflict responses.
 
 Verification — `pnpm --filter @auto-reimbursement/api test` exited 0 with 104/104 tests, `pnpm --filter @auto-reimbursement/api typecheck` exited 0, and `git diff --check` exited 0 (informational Windows line-ending notices only).
+
+## Task 11: Reimbursement defaults, signer modes and note library
+
+RED — `pnpm --filter @auto-reimbursement/api test test/settings.test.ts` exited 1 before production edits because Vitest could not resolve the missing `../src/settings.js` module.
+
+GREEN — `pnpm --filter @auto-reimbursement/api test test/settings.test.ts` exited 0 with 5/5 tests. It covers default values, blank/custom local-calendar dates, indexed signature mode and text-mode masking, multiline and invalid notes, durable reopen, generated note IDs, route ID matching, settings response secrecy, and persistence-failure cleanup.
+
+Implementation — the fixed `default` settings row now supplies decision thresholds and validated reimbursement options. Signature source bytes are decoded, exclusively written under the configured data root's `settings/signatures/` directory, indexed in the same transaction as their Settings reference, and cleaned up precisely if persistence fails. Note content retains line breaks; route POST generates IDs and PUT requires a matching path ID. Existing decision analysis uses persisted settings instead of a temporary default object.
+
+Verification — the API suite passed 110/110 tests and API typecheck passed; `git diff --check` passed.

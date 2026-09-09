@@ -11,21 +11,10 @@ import {
 import type { Store } from './db.js';
 import { refineDuplicates } from './duplicates.js';
 import { normalizeFeature } from './learning.js';
+import { getSettings } from './settings.js';
 
 const AMOUNT_FLOOR = 0.8;
 const CATEGORY_FLOOR = 0.7;
-
-const DEFAULT_SETTINGS: Settings = {
-  id: 'default',
-  department: '',
-  dateMode: 'today',
-  customDate: null,
-  signerMode: 'text',
-  signerName: '',
-  signature: null,
-  amountThreshold: 0.95,
-  categoryThreshold: 0.9,
-};
 
 export type Decision = {
   status: 'ready' | 'pending';
@@ -92,7 +81,7 @@ export function applyAnalysis(
     }
 
     const recognizedFen = analysis.amount === null ? null : parseFen(analysis.amount);
-    const decision = decide(analysis, store.list('rules'), DEFAULT_SETTINGS);
+    const decision = decide(analysis, store.list('rules'), getSettings(store));
     const analyzed: Receipt = {
       ...receipt,
       analysis,
