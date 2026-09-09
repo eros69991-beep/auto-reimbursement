@@ -33,6 +33,18 @@ export function createApp(deps?: AppDependencies): express.Express {
     ) => {
       if (
         error instanceof MulterError &&
+        error.code === 'LIMIT_UNEXPECTED_FILE' &&
+        request.method === 'POST' &&
+        /^\/api\/receipts\/[^/]+\/refund-images$/.test(request.path)
+      ) {
+        response.status(400).json({
+          code: 'INVALID_REFUND_IMAGE',
+          message: '退款凭证图片参数无效',
+        });
+        return;
+      }
+      if (
+        error instanceof MulterError &&
         (error.code === 'LIMIT_FILE_SIZE' ||
           error.code === 'LIMIT_FILE_COUNT' ||
           error.code === 'LIMIT_FIELD_COUNT')
@@ -46,15 +58,28 @@ export function createApp(deps?: AppDependencies): express.Express {
       if (
         error instanceof SyntaxError &&
         'status' in error &&
-        error.status === 400 &&
-        request.method === 'PATCH' &&
-        /^\/api\/receipts\/[^/]+$/.test(request.path)
+        error.status === 400
       ) {
-        response.status(400).json({
-          code: 'INVALID_RECEIPT_PATCH',
-          message: '请求参数无效',
-        });
-        return;
+        if (
+          request.method === 'PATCH' &&
+          /^\/api\/receipts\/[^/]+$/.test(request.path)
+        ) {
+          response.status(400).json({
+            code: 'INVALID_RECEIPT_PATCH',
+            message: '请求参数无效',
+          });
+          return;
+        }
+        if (
+          request.method === 'PUT' &&
+          /^\/api\/receipts\/[^/]+\/refund$/.test(request.path)
+        ) {
+          response.status(400).json({
+            code: 'INVALID_REFUND',
+            message: '请求参数无效',
+          });
+          return;
+        }
       }
       if (error instanceof HttpError) {
         response.status(error.status).json({

@@ -161,6 +161,37 @@ describe('refund recording and evidence', () => {
       .attach('file', await png('#708090'), 'third.png');
     expect(tooMany.status).toBe(413);
   });
+
+  it('rejects malformed refund requests without persisting receipt or evidence changes', async () => {
+    const receipt = sampleReceipt({ id: 'invalid-request', paidFen: 30000 });
+    store.put('receipts', receipt);
+    const application = createApp({ store, config });
+
+    const invalidImage = await request(application)
+      .post('/api/receipts/invalid-request/refund-images')
+      .attach('file', Buffer.from('not an image'), 'bad.png');
+    expect(invalidImage.status).toBe(400);
+    expect(invalidImage.body.code).toBe('INVALID_IMAGE');
+    expect(store.get('receipts', receipt.id)).toEqual(receipt);
+    expect(store.list('files')).toEqual([]);
+    expect(await filesUnder(temp)).toEqual([]);
+
+    const wrongField = await request(application)
+      .post('/api/receipts/invalid-request/refund-images')
+      .attach('wrong', await png('#102030'), 'refund.png');
+    expect(wrongField.status).toBe(400);
+    expect(wrongField.body.code).toBe('INVALID_REFUND_IMAGE');
+    expect(store.get('receipts', receipt.id)).toEqual(receipt);
+    expect(store.list('files')).toEqual([]);
+
+    const malformedJson = await request(application)
+      .put('/api/receipts/invalid-request/refund')
+      .set('Content-Type', 'application/json')
+      .send('{"refundFen":');
+    expect(malformedJson.status).toBe(400);
+    expect(malformedJson.body.code).toBe('INVALID_REFUND');
+    expect(store.get('receipts', receipt.id)).toEqual(receipt);
+  });
 });
 
 function image(name: string, bytes: Buffer) {

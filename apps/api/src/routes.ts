@@ -330,11 +330,15 @@ function correctionHttpError(error: unknown): Error {
     error.message === 'INVALID_CATEGORY' ||
     error.message === 'INVALID_PAID_FEN' ||
     error.message === 'INVALID_REFUND' ||
+    error.message === 'INVALID_IMAGE' ||
     error.message === 'INVALID_RECEIPT_PATCH' ||
     error.message.startsWith('INVALID_RULE') ||
     error.message === 'INVALID_CONFIRMATIONS'
   ) {
     return new HttpError(400, error.message, '请求参数无效');
+  }
+  if (error.message === 'IMAGE_TOO_LARGE') {
+    return new HttpError(413, error.message, '上传图片数量或大小超出限制');
   }
   return error;
 }
