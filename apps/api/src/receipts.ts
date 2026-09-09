@@ -188,6 +188,34 @@ export function confirmReceipt(store: Store, id: string): Receipt {
   });
 }
 
+export function listReceipts(
+  store: Store,
+  view: 'pool' | 'pending',
+): Receipt[] {
+  return store
+    .list('receipts')
+    .filter((receipt) => {
+      if (receipt.deletedAt !== null || receipt.archivedAt !== null) {
+        return false;
+      }
+      return view === 'pool'
+        ? receipt.status === 'ready' && receipt.batchId === null
+        : receipt.status === 'pending';
+    })
+    .sort((left, right) => left.uploadOrder - right.uploadOrder);
+}
+
+export function deleteReceipt(store: Store, id: string, now: Date): void {
+  store.transact(() => {
+    const receipt = store.get('receipts', id);
+    if (receipt === null) {
+      throw new Error('NOT_FOUND');
+    }
+    assertMutable(receipt);
+    store.put('receipts', { ...receipt, deletedAt: now.toISOString() });
+  });
+}
+
 function assertMutable(receipt: Receipt): void {
   if (receipt.status === 'generated' || receipt.status === 'archived') {
     throw new Error('IMMUTABLE_RECEIPT');

@@ -3,15 +3,22 @@ import { extname } from 'node:path';
 
 import { Router } from 'express';
 import multer from 'multer';
-import type { Note, Rule, Settings } from '@auto-reimbursement/contracts';
+import type { FormOptions, Note, Rule, Settings } from '@auto-reimbursement/contracts';
 
 import { getApiStatus } from './ai/openai-compatible.js';
+import { createBatch, getBatch, poolTotals } from './batches.js';
 import type { Config } from './config.js';
 import type { Store } from './db.js';
 import { confirmDistinct } from './duplicates.js';
 import { deleteRule, listRules, saveRule } from './learning.js';
 import { getProgress, type RecognitionQueue } from './queue.js';
-import { confirmReceipt, updateReceipt, uploadReceipts } from './receipts.js';
+import {
+  confirmReceipt,
+  deleteReceipt,
+  listReceipts,
+  updateReceipt,
+  uploadReceipts,
+} from './receipts.js';
 import { addRefundImage, setRefund } from './refunds.js';
 import {
   createNote,
@@ -139,6 +146,44 @@ export function createRouter(
             .filter(Boolean)
         : [];
     response.json(getProgress(store, ids));
+  });
+
+  router.get('/receipts', (request, response, next) => {
+    if (request.query.view !== 'pool' && request.query.view !== 'pending') {
+      next(new HttpError(400, 'INVALID_RECEIPT_VIEW', '请求参数无效'));
+      return;
+    }
+    response.json(listReceipts(store, request.query.view));
+  });
+
+  router.get('/pool/totals', (_request, response) => {
+    response.json(poolTotals(store.list('receipts')));
+  });
+
+  router.delete('/receipts/:id', (request, response, next) => {
+    try {
+      deleteReceipt(store, request.params.id, new Date());
+      response.status(204).end();
+    } catch (error) {
+      next(correctionHttpError(error));
+    }
+  });
+
+  router.post('/batches', (request, response, next) => {
+    try {
+      const { receiptIds, options } = batchRequest(request.body);
+      response.status(201).json(createBatch(store, receiptIds, options, new Date()));
+    } catch (error) {
+      next(batchHttpError(error));
+    }
+  });
+
+  router.get('/batches/:id', (request, response, next) => {
+    try {
+      response.json(getBatch(store, request.params.id));
+    } catch (error) {
+      next(batchHttpError(error));
+    }
   });
 
   // Multer keeps each image in memory. A 50-file maximum-size upload can
@@ -393,6 +438,48 @@ function refundFenFromRequest(body: unknown): number {
     throw new Error('INVALID_REFUND');
   }
   return value.refundFen;
+}
+
+function batchRequest(body: unknown): {
+  receiptIds: string[];
+  options: FormOptions;
+} {
+  if (body === null || typeof body !== 'object' || Array.isArray(body)) {
+    throw new Error('INVALID_BATCH_REQUEST');
+  }
+  const value = body as Record<string, unknown>;
+  if (
+    !Array.isArray(value.receiptIds) ||
+    !value.receiptIds.every((id) => typeof id === 'string') ||
+    value.options === null ||
+    typeof value.options !== 'object' ||
+    Array.isArray(value.options)
+  ) {
+    throw new Error('INVALID_BATCH_REQUEST');
+  }
+  return { receiptIds: value.receiptIds, options: value.options as FormOptions };
+}
+
+function batchHttpError(error: unknown): Error {
+  if (!(error instanceof Error)) {
+    return new HttpError(500, 'INTERNAL_ERROR', '服务器内部错误');
+  }
+  if (error.message === 'BATCH_NOT_FOUND') {
+    return new HttpError(404, 'BATCH_NOT_FOUND', '报销批次不存在');
+  }
+  if (error.message === 'NOT_ELIGIBLE') {
+    return new HttpError(409, 'NOT_ELIGIBLE', '凭证当前状态不可生成');
+  }
+  if (
+    error.message === 'INVALID_SELECTION' ||
+    error.message === 'INVALID_OPTIONS' ||
+    error.message === 'INVALID_SIGNATURE' ||
+    error.message === 'INVALID_BATCH_REQUEST' ||
+    error.message === 'INVALID_AMOUNT'
+  ) {
+    return new HttpError(400, error.message, '请求参数无效');
+  }
+  return error;
 }
 
 function correctionHttpError(error: unknown): Error {

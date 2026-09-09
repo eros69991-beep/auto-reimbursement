@@ -127,3 +127,13 @@ GREEN — `pnpm --filter @auto-reimbursement/api test test/settings.test.ts` exi
 Implementation — the fixed `default` settings row now supplies decision thresholds and validated reimbursement options. Signature source bytes are decoded, exclusively written under the configured data root's `settings/signatures/` directory, indexed in the same transaction as their Settings reference, and cleaned up precisely if persistence fails. Note content retains line breaks; route POST generates IDs and PUT requires a matching path ID. Existing decision analysis uses persisted settings instead of a temporary default object.
 
 Verification — the API suite passed 110/110 tests and API typecheck passed; `git diff --check` passed.
+
+## Task 12: Pool totals, manual batch creation and immutable snapshots
+
+RED — `pnpm --filter @auto-reimbursement/api test test/batches.test.ts` exited 1 before production edits because Vitest could not resolve the missing `../src/batches.js` module. The later expanded RED run also failed only on the absent totals, receipt-list/deletion, batch lookup, and HTTP route operations.
+
+GREEN — `pnpm --filter @auto-reimbursement/api test test/batches.test.ts` exited 0 with 8/8 tests. The suite uses an in-memory SQLite Store and Supertest routes to cover integer net totals across all ten categories, partial/full refunds, sorted pool and pending filters, non-destructive deletion, selected-only atomic closure and rollback, duplicate/double generation guards, single-fen cross-month snapshots, immutable stored lookup, canonical image signatures, text-mode signature clearing, and the new API endpoints.
+
+Implementation — batch closure first validates the complete selected ID set before writing anything, then sorts by upload order, snapshots receipt image/refund data and current notes, validates safe totals, writes the immutable batch, and marks every selected receipt generated in one transaction. It has no amount threshold or automatic month-close behavior. Options are validated server-side; image-signature metadata is reconstructed only from the persisted Settings/FileIndex record, while text mode strips a client signature. Pool totals exclude ineligible/full-refund records while the pool still shows unbatched ready fully refunded receipts for editing. Deletion sets only `deletedAt`, retaining receipt hashes and file references, and rejects generated/archived records. No preview or sheet generation was added; `sheets` intentionally remains empty for Task 14.
+
+Verification — `pnpm --filter @auto-reimbursement/api test` exited 0 with 121/121 tests; `pnpm --filter @auto-reimbursement/api typecheck` exited 0; `git diff --check` exited 0 (only informational Windows line-ending notices).
