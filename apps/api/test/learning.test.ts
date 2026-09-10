@@ -241,6 +241,13 @@ describe('correction HTTP routes', () => {
     expect(store.get('receipts', 'http')).not.toBeNull();
   });
 
+  it('maps an under-confirmed strong rule to client validation', async () => {
+    const rule: Rule = { id: 'under-confirmed', kind: 'keyword', key: 'coffee', originalCategory: null, category: '酒水', confirmations: 2, strong: true, updatedAt: '2026-09-03T00:00:00.000Z' };
+    const response = await request(createApp({ store, config })).put('/api/rules/under-confirmed').send(rule);
+    expect(response.status).toBe(400);
+    expect(response.body.code).toBe('INVALID_STRONG_RULE');
+  });
+
   it('rejects unknown categories without changing the receipt', async () => {
     const receipt = analyzedReceipt('invalid-category');
     store.put('receipts', receipt);

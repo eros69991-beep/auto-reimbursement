@@ -28,3 +28,7 @@ Dynamic `#batches/:id/preview` hashes now render the preview page, so both pool 
 Preview client errors retain safe server error codes and visibly report `NOTE_OVERFLOW`/`CATEGORY_TOO_LARGE` while preserving the unchanged draft choices. Both errors are mapped as HTTP 400 rather than server failures. Cleanup validates every affected exported PDF with its live, correctly indexed, hash-verified bytes before it deletes any original image. Its partial-failure response includes the completed count plus a bounded-safe receipt ID. Backup closes the snapshot database before synchronous ZIP packaging, and ZIP downloads now pipe a read stream.
 
 Fresh review-fix evidence: focused maintenance 4/4 and focused browser 4/4 passed; workspace tests passed 203/203 (25 contracts, 161 API, 17 web), along with typecheck, production web build and diff check.
+
+## Review fix round 2
+
+The editable-rule form now disables strong status until a rule has at least three confirmations, including every new draft, and shows a safe in-context alert when saving fails. The API maps `INVALID_STRONG_RULE` to an ordinary 400 validation response rather than a server error. Focused browser workflow tests passed 4/4, focused learning/API tests passed 18/18, workspace typecheck and the web production build passed.

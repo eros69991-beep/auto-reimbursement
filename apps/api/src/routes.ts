@@ -671,7 +671,8 @@ function correctionHttpError(error: unknown): Error {
     error.message === 'INVALID_IMAGE' ||
     error.message === 'INVALID_RECEIPT_PATCH' ||
     error.message.startsWith('INVALID_RULE') ||
-    error.message === 'INVALID_CONFIRMATIONS'
+    error.message === 'INVALID_CONFIRMATIONS' ||
+    error.message === 'INVALID_STRONG_RULE'
   ) {
     return new HttpError(400, error.message, '请求参数无效');
   }

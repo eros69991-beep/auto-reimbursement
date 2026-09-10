@@ -39,4 +39,20 @@ describe('workflow pages', () => {
     fireEvent.click(screen.getAllByRole('button', { name: '保存设置' }).at(-1)!);
     await waitFor(() => expect(saveSettings).toHaveBeenCalledWith(expect.objectContaining({ dateMode: 'custom', customDate: '2026-10-01', amountThreshold: 0.91, categoryThreshold: 0.88 })));
   });
+
+  it('disables strong state for a new rule before three confirmations', async () => {
+    render(<SettingsPage />);
+    fireEvent.click((await screen.findAllByRole('button', { name: '新建规则' })).at(-1)!);
+    const strong = screen.getAllByLabelText('强规则').at(-1)!;
+    expect(strong).toBeDisabled();
+  });
+
+  it('shows a safe rule-save error', async () => {
+    saveRule.mockRejectedValue(new Error('请求参数无效'));
+    render(<SettingsPage />);
+    fireEvent.click((await screen.findAllByRole('button', { name: '新建规则' })).at(-1)!);
+    fireEvent.change(screen.getAllByLabelText('规则特征').at(-1)!, { target: { value: 'coffee' } });
+    fireEvent.click(screen.getAllByRole('button', { name: '保存规则' }).at(-1)!);
+    expect(await screen.findByRole('alert')).toHaveTextContent('请求参数无效');
+  });
 });
