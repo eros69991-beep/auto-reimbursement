@@ -1,3 +1,4 @@
+import { createReadStream } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { extname } from 'node:path';
 
@@ -116,7 +117,10 @@ export function createRouter(
     try {
       const path = store.getBackup?.(request.params.id) ?? null;
       if (path === null) throw new Error('BACKUP_NOT_FOUND');
-      response.type('application/zip').attachment(`${request.params.id}.zip`).send(await readFile(safePath(config.dataDir, path)));
+      const stream = createReadStream(safePath(config.dataDir, path));
+      stream.once('error', next);
+      response.type('application/zip').attachment(`${request.params.id}.zip`);
+      stream.pipe(response);
     } catch (error) { next(maintenanceHttpError(error)); }
   });
 
@@ -638,7 +642,8 @@ function batchHttpError(error: unknown): Error {
     error.message === 'INVALID_NOTE_BY_SHEET' ||
     error.message === 'INVALID_BATCH_OPTIONS' ||
     error.message === 'LAYOUT_OVERFLOW' ||
-    error.message === 'CATEGORY_TOO_LARGE'
+    error.message === 'CATEGORY_TOO_LARGE' ||
+    error.message === 'NOTE_OVERFLOW'
   ) {
     return new HttpError(400, error.message, '请求参数无效');
   }
@@ -737,6 +742,9 @@ function maintenanceHttpError(error: unknown): Error {
   if (error.message === 'CLEANUP_NOT_ALLOWED') return new HttpError(409, error.message, '仅可清理已归档且已导出的凭证');
   if (error.message === 'INVALID_CLEANUP_CONFIRMATION') return new HttpError(400, error.message, '确认文字不正确');
   if (error.message === 'BACKUP_NOT_FOUND') return new HttpError(404, error.message, '备份不存在');
-  if (error.message.startsWith('CLEANUP_FAILED:')) return new HttpError(409, 'CLEANUP_FAILED', '清理原始图片失败');
+  if (error.message.startsWith('CLEANUP_FAILED:')) {
+    const [, count, receiptId] = error.message.split(':');
+    return new HttpError(409, 'CLEANUP_FAILED', `已清理 ${Number(count) || 0} 张，清理凭证失败：${receiptId ?? '未知'}`);
+  }
   return error;
 }

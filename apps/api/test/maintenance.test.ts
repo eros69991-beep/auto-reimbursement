@@ -36,4 +36,14 @@ describe('maintenance', () => {
     expect(store.get('receipts', 'receipt-1')?.original.deletedAt).toBeNull();
     store.close();
   });
+
+  it('denies cleanup when an exported path lacks a live indexed PDF', async () => {
+    const store = openStore(':memory:');
+    const receipt = sampleReceipt({ status: 'archived', archivedAt: '2026-09-04T00:00:00.000Z', batchId: 'batch-1' });
+    store.put('receipts', receipt);
+    store.put('batches', { id: 'batch-1', month: '2026-09', createdAt: '2026-09-04T00:00:00.000Z', totalFen: 1000, items: [{ receiptId: receipt.id, uploadOrder: receipt.uploadOrder, category: '耗材', paidFen: 1000, refundFen: 0, netFen: 1000, original: receipt.original, refundImages: [] }], sheets: [], options: { department: '', date: null, signerMode: 'text', signerName: '', signature: null }, notes: [], pdfPath: '2026-09/exports/missing.pdf', archivedAt: receipt.archivedAt });
+    await expect(cleanOriginals(store, { dataDir: process.cwd(), dbPath: ':memory:', host: '127.0.0.1', port: 3000, ai: null, concurrency: 4 }, '2026-09', 'DELETE ORIGINALS 2026-09')).rejects.toThrow('CLEANUP_NOT_ALLOWED');
+    expect(store.get('receipts', receipt.id)?.original.deletedAt).toBeNull();
+    store.close();
+  });
 });

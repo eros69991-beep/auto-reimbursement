@@ -5,6 +5,7 @@ import type { Batch, HistoryMonth, MaintenanceResult, Receipt } from '@auto-reim
 import type { Config } from './config.js';
 import type { Store } from './db.js';
 import { safePath } from './storage.js';
+import { readSavedBatchPdf } from './render/pdf.js';
 
 type LinkedSet = { receipts: Receipt[]; batches: Batch[] };
 
@@ -44,23 +45,28 @@ export async function cleanOriginals(store: Store, config: Config, month: string
   const selected = linkedSet(store, month);
   if (selected.receipts.length === 0 || selected.receipts.some((receipt) => receipt.status !== 'archived' || receipt.batchId === null) ||
       selected.batches.some((batch) => batch.pdfPath === null)) throw new Error('CLEANUP_NOT_ALLOWED');
+  try {
+    await Promise.all(selected.batches.map((batch) => readSavedBatchPdf(store, config, batch)));
+  } catch {
+    throw new Error('CLEANUP_NOT_ALLOWED');
+  }
   let affected = 0;
   for (const receipt of selected.receipts) {
     const file = store.get('files', receipt.original.id);
     if (file === null || file.kind !== 'original' || file.ownerId !== receipt.id || file.path !== receipt.original.path) {
-      throw new Error(`CLEANUP_FAILED:${receipt.id}`);
+      throw cleanupFailure(affected, receipt.id);
     }
     if (file.deletedAt !== null) continue;
     try {
       await unlink(safePath(config.dataDir, file.path));
     } catch (error) {
-      if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) throw new Error(`CLEANUP_FAILED:${receipt.id}`);
+      if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) throw cleanupFailure(affected, receipt.id);
     }
     const deletedAt = new Date().toISOString();
     store.transact(() => {
       const current = store.get('receipts', receipt.id);
       const entry = store.get('files', file.id);
-      if (current === null || entry === null || entry.kind !== 'original' || entry.ownerId !== current.id || entry.path !== current.original.path) throw new Error(`CLEANUP_FAILED:${receipt.id}`);
+      if (current === null || entry === null || entry.kind !== 'original' || entry.ownerId !== current.id || entry.path !== current.original.path) throw cleanupFailure(affected, receipt.id);
       store.put('files', { ...entry, deletedAt });
       store.put('receipts', { ...current, original: { ...current.original, deletedAt } });
       for (const batch of store.list('batches')) {
@@ -71,6 +77,10 @@ export async function cleanOriginals(store: Store, config: Config, month: string
     affected += 1;
   }
   return { affected };
+}
+
+function cleanupFailure(affected: number, id: string): Error {
+  return new Error(`CLEANUP_FAILED:${affected}:${/^[A-Za-z0-9_-]{1,100}$/.test(id) ? id : 'unknown'}`);
 }
 
 export function history(store: Store): HistoryMonth[] {

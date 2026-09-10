@@ -22,7 +22,7 @@ export default function App() {
     ? <PoolPage onBatch={(id) => { setSelectedBatch(id); window.location.hash = `#batches/${id}/preview`; }} />
     : route === '#pending'
       ? <PendingPage />
-      : route === '#preview'
+      : (route === '#preview' || /^#batches\/[^/]+\/preview$/.test(route))
         ? <PreviewPage batchId={previewId} />
         : route === '#history'
           ? <HistoryPage onPreview={(id) => { setSelectedBatch(id); window.location.hash = `#batches/${id}/preview`; }} />

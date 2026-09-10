@@ -19,7 +19,9 @@ export async function requestJson<T>(path: string, init?: RequestInit): Promise<
   const response = await fetch(path, init);
   if (!response.ok) {
     const error = await response.json().catch(() => null) as Partial<ApiErrorBody> | null;
-    throw new Error(typeof error?.message === 'string' ? error.message : '请求失败');
+    const failure = new Error(typeof error?.message === 'string' ? error.message : '请求失败');
+    Object.assign(failure, { code: typeof error?.code === 'string' ? error.code : null });
+    throw failure;
   }
   return response.status === 204 ? undefined as T : response.json() as Promise<T>;
 }

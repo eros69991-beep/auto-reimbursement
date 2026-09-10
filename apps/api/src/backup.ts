@@ -16,14 +16,18 @@ export async function backupAll(store: Store, config: Config): Promise<{ path: s
   await mkdir(tempDir, { recursive: true });
   await mkdir(safePath(config.dataDir, 'backups'), { recursive: true });
   await store.backupTo(snapshotPath);
-  const snapshot = openStore(snapshotPath);
+  let snapshot: Store | null = openStore(snapshotPath);
+  let structured: Record<string, string>;
+  let bytes: Uint8Array;
   try {
-    const structured = {
+    structured = {
       'settings.json': JSON.stringify(snapshot.list('settings')),
       'rules.json': JSON.stringify(snapshot.list('rules')),
       'files.json': JSON.stringify(snapshot.list('files')),
     };
-    const bytes = new Uint8Array(await readFile(snapshotPath));
+    bytes = new Uint8Array(await readFile(snapshotPath));
+    snapshot.close();
+    snapshot = null;
     const zip = zipSync({
       ...Object.fromEntries(Object.entries(structured).map(([name, text]) => [name, strToU8(text)])),
       'app.sqlite': bytes,
@@ -34,7 +38,7 @@ export async function backupAll(store: Store, config: Config): Promise<{ path: s
     store.putBackup(id, relativePath);
     return { path: relativePath, includesImages: false };
   } finally {
-    snapshot.close();
+    snapshot?.close();
     await rm(tempDir, { recursive: true, force: true });
   }
 }

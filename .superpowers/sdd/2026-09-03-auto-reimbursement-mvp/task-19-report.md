@@ -20,3 +20,11 @@ The browser adds a complete PDF preview/editor with export immutability, grouped
 ## Scope and concern
 
 Existing untracked `tmp/` and `apps/api/tmp/` QA artifacts are intentionally excluded. A prior full-suite attempt hit an unrelated queue timing race; its focused suite and a fresh immediately repeated full suite passed without changes.
+
+## Review fix round 1
+
+Dynamic `#batches/:id/preview` hashes now render the preview page, so both pool and history navigation reach their selected batch. Settings now edits every persisted default; notes can be reopened for editing; and rules can be created or updated through the typed client. History exposes indexed original and refund-evidence links.
+
+Preview client errors retain safe server error codes and visibly report `NOTE_OVERFLOW`/`CATEGORY_TOO_LARGE` while preserving the unchanged draft choices. Both errors are mapped as HTTP 400 rather than server failures. Cleanup validates every affected exported PDF with its live, correctly indexed, hash-verified bytes before it deletes any original image. Its partial-failure response includes the completed count plus a bounded-safe receipt ID. Backup closes the snapshot database before synchronous ZIP packaging, and ZIP downloads now pipe a read stream.
+
+Fresh review-fix evidence: focused maintenance 4/4 and focused browser 4/4 passed; workspace tests passed 203/203 (25 contracts, 161 API, 17 web), along with typecheck, production web build and diff check.
