@@ -10,6 +10,7 @@
   "dependencies": {
     "@auto-reimbursement/contracts": "workspace:*",
     "express": "^5.1.0",
+    "fflate": "^0.8.3",
     "multer": "^2.3.0",
     "pdfkit": "^0.20.2",
     "sharp": "^0.35.4",

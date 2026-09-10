@@ -5,10 +5,11 @@ import { types as utilTypes } from 'node:util';
 
 import type { Category, Table, Tables } from '@auto-reimbursement/contracts';
 
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 const MIGRATIONS = [
   readFileSync(join(__dirname, 'migrations', '001-initial.sql'), 'utf8'),
   readFileSync(join(__dirname, 'migrations', '002-corrections.sql'), 'utf8'),
+  readFileSync(join(__dirname, 'migrations', '003-backups.sql'), 'utf8'),
 ];
 
 const TABLE_NAMES = {
@@ -29,6 +30,8 @@ export interface Store {
   nextOrder(): number;
   recordConfirmation(receiptId: string, category: Category): boolean;
   backupTo(path: string): Promise<void>;
+  putBackup?(id: string, path: string): void;
+  getBackup?(id: string): string | null;
   close(): void;
 }
 
@@ -172,6 +175,18 @@ class SqliteStore implements Store {
 
   async backupTo(path: string): Promise<void> {
     await backup(this.database, path);
+  }
+
+  putBackup(id: string, path: string): void {
+    this.database.prepare(
+      `INSERT INTO backups (id, path) VALUES (?, ?)
+       ON CONFLICT(id) DO UPDATE SET path = excluded.path`,
+    ).run(id, path);
+  }
+
+  getBackup(id: string): string | null {
+    const row = this.database.prepare('SELECT path FROM backups WHERE id = ?').get(id) as { path: string } | undefined;
+    return row?.path ?? null;
   }
 
   close(): void {

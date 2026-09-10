@@ -201,3 +201,15 @@ Verification — final focused tests, the full web test suite, web typecheck/bui
 ### Review fix round 1
 
 Receipt deletion now removes the deleted row from both pool and pending state; the pool also removes its ID from the in-memory selection so a just-deleted receipt cannot be included in a subsequent batch request. Receipt correction retains the successful server response before attempting confirmation. A failed confirmation therefore reports that the correction was saved and remains retryable without repeating the PATCH request; changing the fields clears that saved phase and requires a new save. Focused page tests cover deletion from each page, selection clearing, persisted server response, explicit confirmation failure messaging, and confirmation-only retry.
+
+## Task 19: Preview, history, settings, archive and local maintenance
+
+RED — `pnpm --filter @auto-reimbursement/api test test/maintenance.test.ts` failed before the archive module existed. `pnpm --filter @auto-reimbursement/web test src/pages/WorkflowPages.test.tsx` likewise failed before the settings page existed.
+
+GREEN — archive history preserves receipts, duplicate evidence and immutable financial snapshots while selecting linked receipt/batch records to a fixed point. Archive refuses recognizing/pending receipts and unexported batches atomically; unarchive restores the recorded prior receipt state. Original-image cleanup requires the exact month phrase, an archived set and exported batches, validates indexed owner/path association, resolves only through `safePath`, never touches refund evidence or PDFs, and records successful/idempotent deletion metadata.
+
+Backup — schema version 3 indexes generated ZIP downloads separately. A SQLite `backupTo` snapshot is reopened before packing `app.sqlite`, settings, rules, file-index JSON, and a manifest; the temporary snapshot handle is closed before ZIP generation and no configured AI credentials or media files are included. The settings UI explains this structured-backup scope and the need to copy the entire data folder for media recovery.
+
+Browser — Preview fetches a batch and renders the full PDF, supports server-validated draft options, sheet-specific notes and category moves, refreshes preview cache revision after saved edits, and becomes read-only after export. History groups batches by creation month and provides archive/unarchive plus a typed cleanup dialog. Settings provides defaults, signer upload, note/rule management, API configuration status and backup download. The shell now has six required navigation entries.
+
+Verification — focused maintenance and workflow tests passed. Fresh workspace `pnpm test` passed 200 tests (25 contracts, 160 API, 15 web); `pnpm typecheck`, web production build and `git diff --check` passed. An earlier workspace run exposed a pre-existing timing-sensitive queue test (`CONDITION_NOT_REACHED`); its isolated suite and the immediately repeated full workspace suite passed without code changes.

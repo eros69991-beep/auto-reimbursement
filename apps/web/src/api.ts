@@ -1,10 +1,15 @@
 import type {
   ApiErrorBody,
   Batch,
+  BackupResult,
   Category,
   FormOptions,
   Progress,
+  HistoryMonth,
+  MaintenanceResult,
+  Note,
   Receipt,
+  Rule,
   Settings,
   Totals,
   UploadResult,
@@ -16,7 +21,7 @@ export async function requestJson<T>(path: string, init?: RequestInit): Promise<
     const error = await response.json().catch(() => null) as Partial<ApiErrorBody> | null;
     throw new Error(typeof error?.message === 'string' ? error.message : '请求失败');
   }
-  return response.json() as Promise<T>;
+  return response.status === 204 ? undefined as T : response.json() as Promise<T>;
 }
 
 async function upload(files: File[]): Promise<UploadResult> {
@@ -99,6 +104,25 @@ function createBatch(ids: string[], options: FormOptions): Promise<Batch> {
   });
 }
 
+function batch(id: string): Promise<Batch> { return requestJson(`/api/batches/${encodeURIComponent(id)}`); }
+function moveGroup(id: string, category: Category, direction: -1 | 1): Promise<Batch> { return requestJson(`/api/batches/${encodeURIComponent(id)}/move`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ category, direction }) }); }
+function saveBatchOptions(id: string, options: FormOptions, noteBySheet: Record<string, string | null>): Promise<Batch> { return requestJson(`/api/batches/${encodeURIComponent(id)}/options`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ options, noteBySheet }) }); }
+function exportBatch(id: string): Promise<Batch> { return requestJson(`/api/batches/${encodeURIComponent(id)}/export`, { method: 'POST' }); }
+function history(): Promise<HistoryMonth[]> { return requestJson('/api/history'); }
+function saveSettings(settings: Settings): Promise<Settings> { return requestJson('/api/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(settings) }); }
+async function saveSignature(file: File): Promise<Settings> { const data = new FormData(); data.append('file', file); return requestJson('/api/settings/signature', { method: 'POST', body: data }); }
+function notes(): Promise<Note[]> { return requestJson('/api/notes'); }
+function saveNote(note: Note): Promise<Note> { return requestJson(`/api/notes/${encodeURIComponent(note.id)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(note) }); }
+function deleteNote(id: string): Promise<void> { return requestJson(`/api/notes/${encodeURIComponent(id)}`, { method: 'DELETE' }); }
+function rules(): Promise<Rule[]> { return requestJson('/api/rules'); }
+function saveRule(rule: Rule): Promise<Rule> { return requestJson(`/api/rules/${encodeURIComponent(rule.id)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(rule) }); }
+function deleteRule(id: string): Promise<void> { return requestJson(`/api/rules/${encodeURIComponent(id)}`, { method: 'DELETE' }); }
+function apiStatus(): Promise<import('@auto-reimbursement/contracts').ApiStatus> { return requestJson('/api/ai/status'); }
+function archive(month: string): Promise<MaintenanceResult> { return requestJson(`/api/archive/${encodeURIComponent(month)}`, { method: 'POST' }); }
+function unarchive(month: string): Promise<MaintenanceResult> { return requestJson(`/api/unarchive/${encodeURIComponent(month)}`, { method: 'POST' }); }
+function cleanup(month: string, confirmation: string): Promise<MaintenanceResult> { return requestJson(`/api/cleanup/${encodeURIComponent(month)}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ confirmation }) }); }
+function backup(): Promise<BackupResult> { return requestJson('/api/backup', { method: 'POST' }); }
+
 export function formOptionsFromSettings(settings: Settings, now: Date): FormOptions {
   const date = [
     now.getFullYear(),
@@ -133,4 +157,22 @@ export const api = {
   deleteReceipt,
   settings,
   createBatch,
+  batch,
+  moveGroup,
+  saveBatchOptions,
+  exportBatch,
+  history,
+  saveSettings,
+  saveSignature,
+  notes,
+  saveNote,
+  deleteNote,
+  rules,
+  saveRule,
+  deleteRule,
+  apiStatus,
+  archive,
+  unarchive,
+  cleanup,
+  backup,
 };

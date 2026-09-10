@@ -9,6 +9,12 @@
 body { margin: 0; }
 
 button, input, select { font: inherit; }
+textarea { font: inherit; min-height: 6rem; }
+label { display: grid; gap: .25rem; margin: .5rem 0; }
+fieldset { margin: 1rem 0; }
+.pdf-preview { width: 100%; min-height: 42rem; border: 1px solid #d9e0ea; background: #fff; }
+.history-month { margin: 1rem 0; padding: 1rem; background: #fff; border: 1px solid #d9e0ea; border-radius: .75rem; }
+.history-month article { margin-top: .75rem; padding-top: .75rem; border-top: 1px solid #d9e0ea; }
 
 :focus-visible { outline: 3px solid #0b63ce; outline-offset: 3px; }
 

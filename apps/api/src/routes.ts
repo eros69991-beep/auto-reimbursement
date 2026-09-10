@@ -13,6 +13,8 @@ import {
 } from '@auto-reimbursement/contracts';
 
 import { getApiStatus } from './ai/openai-compatible.js';
+import { archiveMonth, cleanOriginals, history, unarchiveMonth } from './archive.js';
+import { backupAll } from './backup.js';
 import {
   createBatch,
   getBatch,
@@ -78,6 +80,44 @@ export function createRouter(
 
   router.get('/ai/status', (_request, response) => {
     response.json(getApiStatus(config));
+  });
+
+  router.get('/history', (_request, response) => {
+    response.json(history(store));
+  });
+
+  router.post('/archive/:month', (request, response, next) => {
+    try { response.json(archiveMonth(store, request.params.month, new Date())); }
+    catch (error) { next(maintenanceHttpError(error)); }
+  });
+
+  router.post('/unarchive/:month', (request, response, next) => {
+    try { response.json(unarchiveMonth(store, request.params.month)); }
+    catch (error) { next(maintenanceHttpError(error)); }
+  });
+
+  router.post('/cleanup/:month', async (request, response, next) => {
+    try {
+      const confirmation = request.body?.confirmation;
+      if (typeof confirmation !== 'string') throw new Error('INVALID_CLEANUP_CONFIRMATION');
+      response.json(await cleanOriginals(store, config, request.params.month, confirmation));
+    } catch (error) { next(maintenanceHttpError(error)); }
+  });
+
+  router.post('/backup', async (_request, response, next) => {
+    try {
+      const result = await backupAll(store, config);
+      const id = result.path.slice('backups/'.length, -'.zip'.length);
+      response.status(201).json({ downloadUrl: `/api/backups/${encodeURIComponent(id)}`, includesImages: false });
+    } catch (error) { next(maintenanceHttpError(error)); }
+  });
+
+  router.get('/backups/:id', async (request, response, next) => {
+    try {
+      const path = store.getBackup?.(request.params.id) ?? null;
+      if (path === null) throw new Error('BACKUP_NOT_FOUND');
+      response.type('application/zip').attachment(`${request.params.id}.zip`).send(await readFile(safePath(config.dataDir, path)));
+    } catch (error) { next(maintenanceHttpError(error)); }
   });
 
   router.get('/settings', (_request, response) => {
@@ -688,5 +728,15 @@ function settingsHttpError(error: unknown): Error {
   if (error.message === 'IMAGE_TOO_LARGE') {
     return new HttpError(413, error.message, '上传图片数量或大小超出限制');
   }
+  return error;
+}
+
+function maintenanceHttpError(error: unknown): Error {
+  if (!(error instanceof Error)) return new HttpError(500, 'INTERNAL_ERROR', '服务器内部错误');
+  if (error.message === 'MONTH_HAS_UNFINISHED_WORK') return new HttpError(409, error.message, '本月仍有未完成工作');
+  if (error.message === 'CLEANUP_NOT_ALLOWED') return new HttpError(409, error.message, '仅可清理已归档且已导出的凭证');
+  if (error.message === 'INVALID_CLEANUP_CONFIRMATION') return new HttpError(400, error.message, '确认文字不正确');
+  if (error.message === 'BACKUP_NOT_FOUND') return new HttpError(404, error.message, '备份不存在');
+  if (error.message.startsWith('CLEANUP_FAILED:')) return new HttpError(409, 'CLEANUP_FAILED', '清理原始图片失败');
   return error;
 }
