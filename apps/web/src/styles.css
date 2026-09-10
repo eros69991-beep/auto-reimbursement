@@ -8,7 +8,7 @@
 
 body { margin: 0; }
 
-button, input { font: inherit; }
+button, input, select { font: inherit; }
 
 :focus-visible { outline: 3px solid #0b63ce; outline-offset: 3px; }
 
@@ -55,7 +55,38 @@ button, input { font: inherit; }
 
 .poll-error { color: #8a2c0d; }
 
+.receipt-list { display: grid; gap: 1rem; margin-top: 1rem; }
+
+.receipt-card {
+  display: grid;
+  grid-template-columns: minmax(6rem, 10rem) 1fr;
+  gap: 1rem;
+  padding: 1rem;
+  background: #fff;
+  border: 1px solid #d9e0ea;
+  border-radius: .75rem;
+}
+
+.receipt-thumbnail img { display: block; width: 100%; aspect-ratio: 4 / 3; object-fit: cover; border-radius: .5rem; }
+.receipt-card-heading { display: flex; align-items: center; justify-content: space-between; gap: .75rem; }
+.receipt-card-heading h3 { margin: 0; }
+.status-badge { padding: .2rem .5rem; background: #eef6ff; border-radius: 99rem; color: #174a7e; }
+.receipt-amounts, .analysis-details { display: flex; flex-wrap: wrap; gap: .75rem 1.5rem; }
+.receipt-amounts div, .analysis-details div { display: flex; gap: .2rem; }
+.receipt-amounts dt, .receipt-amounts dd, .analysis-details dt, .analysis-details dd { margin: 0; }
+.receipt-editor { display: grid; gap: .6rem; margin-top: 1rem; padding-top: 1rem; border-top: 1px solid #d9e0ea; }
+.receipt-editor label { display: grid; gap: .25rem; }
+.refund-editor { display: grid; gap: .6rem; }
+.danger-button { color: #8a2c0d; }
+.reason-list { margin: 1rem 0 .5rem; padding-left: 1.2rem; color: #8a2c0d; }
+.pool-totals { margin: 1rem 0; padding: 1rem; background: #fff; border: 1px solid #d9e0ea; border-radius: .75rem; }
+.pool-totals ul { columns: 2; padding-left: 1.2rem; }
+.receipt-select { display: flex !important; grid-template-columns: auto 1fr; align-items: center; gap: .4rem; margin-top: 1rem; }
+
 @media (max-width: 38rem) {
   .app-header { align-items: flex-start; flex-direction: column; }
   .page-content { margin-top: 1rem; }
+  .receipt-card { grid-template-columns: 1fr; }
+  .receipt-thumbnail { max-width: 16rem; }
+  .pool-totals ul { columns: 1; }
 }
