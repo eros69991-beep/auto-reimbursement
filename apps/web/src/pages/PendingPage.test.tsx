@@ -106,4 +106,43 @@ describe('PendingPage', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('网络错误');
     expect(screen.getAllByLabelText('最终实付金额')[0]).toHaveValue('36.33');
   });
+
+  it('retains the saved server receipt when confirmation fails and retries confirmation separately', async () => {
+    mockedApi.updateReceipt.mockResolvedValueOnce(receipt({
+      id: 'a',
+      status: 'pending',
+      paidFen: 3633,
+      category: '耗材',
+      merchant: '服务端已保存商户',
+      pendingReasons: ['amount_uncertain', 'category_uncertain'],
+    }));
+    mockedApi.confirmReceipt.mockRejectedValueOnce(new Error('确认服务暂不可用'));
+    render(<PendingPage />);
+    await screen.findByText('金额无法确定');
+
+    fireEvent.change(screen.getAllByLabelText('最终实付金额')[0]!, { target: { value: '36.33' } });
+    fireEvent.change(screen.getAllByLabelText('分类')[0]!, { target: { value: '耗材' } });
+    fireEvent.click(screen.getAllByRole('button', { name: '确认可报销' })[0]!);
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('修改已保存，但确认可报销失败：确认服务暂不可用');
+    expect(screen.getByRole('status')).toHaveTextContent('修改已保存，待确认可报销');
+    expect(screen.getByText('服务端已保存商户')).toBeInTheDocument();
+    expect(screen.getAllByLabelText('最终实付金额')[0]).toHaveValue('36.33');
+
+    fireEvent.click(screen.getAllByRole('button', { name: '确认可报销' })[0]!);
+    await waitFor(() => expect(mockedApi.confirmReceipt).toHaveBeenCalledTimes(2));
+    expect(mockedApi.updateReceipt).toHaveBeenCalledTimes(1);
+  });
+
+  it('removes a deleted exception from the review list', async () => {
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    render(<PendingPage />);
+    await screen.findByText('金额无法确定');
+
+    fireEvent.click(screen.getAllByRole('button', { name: '删除凭证' })[0]!);
+
+    await waitFor(() => expect(mockedApi.deleteReceipt).toHaveBeenCalledWith('a'));
+    await waitFor(() => expect(screen.queryByText('金额无法确定')).not.toBeInTheDocument());
+    confirm.mockRestore();
+  });
 });

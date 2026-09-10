@@ -30,6 +30,11 @@ export function PoolPage({ onBatch }: { onBatch: (id: string) => void }): React.
   const eligibleIds = useMemo(() => new Set(rows.filter(eligible).map((receipt) => receipt.id)), [rows]);
 
   function replace(updated: Receipt): void {
+    if (updated.deletedAt !== null) {
+      setRows((current) => current.filter((receipt) => receipt.id !== updated.id));
+      setSelected((current) => current.filter((id) => id !== updated.id));
+      return;
+    }
     setRows((current) => current.map((receipt) => receipt.id === updated.id ? updated : receipt));
     if (!eligible(updated)) setSelected((current) => current.filter((id) => id !== updated.id));
   }

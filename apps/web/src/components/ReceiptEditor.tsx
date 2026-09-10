@@ -8,6 +8,7 @@ export function ReceiptEditor({ receipt, onSaved }: EditorProps): React.JSX.Elem
   const [amount, setAmount] = useState(receipt.paidFen === null ? '' : formatFen(receipt.paidFen));
   const [category, setCategory] = useState<Category | ''>(receipt.category ?? '');
   const [refund, setRefund] = useState(formatFen(receipt.refundFen));
+  const [savedReceipt, setSavedReceipt] = useState<Receipt | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -29,12 +30,25 @@ export function ReceiptEditor({ receipt, onSaved }: EditorProps): React.JSX.Elem
     }
     setBusy(true);
     setError(null);
+    let saved = savedReceipt;
     try {
-      await api.updateReceipt(receipt.id, { paidFen, category });
-      const confirmed = await api.confirmReceipt(receipt.id);
+      if (saved === null) {
+        saved = await api.updateReceipt(receipt.id, { paidFen, category });
+        setSavedReceipt(saved);
+        onSaved(saved);
+      }
+    } catch (reason) {
+      setError(`保存修改失败：${message(reason)}`);
+      setBusy(false);
+      return;
+    }
+
+    try {
+      const confirmed = await api.confirmReceipt(saved.id);
+      setSavedReceipt(null);
       onSaved(confirmed);
     } catch (reason) {
-      setError(message(reason));
+      setError(`修改已保存，但确认可报销失败：${message(reason)}`);
     } finally {
       setBusy(false);
     }
@@ -92,12 +106,19 @@ export function ReceiptEditor({ receipt, onSaved }: EditorProps): React.JSX.Elem
 
   return (
     <section className="receipt-editor" aria-label="编辑凭证">
-      <label>最终实付金额<input aria-label="最终实付金额" inputMode="decimal" value={amount} disabled={busy} onChange={(event) => setAmount(event.target.value)} /></label>
-      <label>分类<select aria-label="分类" value={category} disabled={busy} onChange={(event) => setCategory(event.target.value as Category | '')}>
+      <label>最终实付金额<input aria-label="最终实付金额" inputMode="decimal" value={amount} disabled={busy} onChange={(event) => {
+        setAmount(event.target.value);
+        setSavedReceipt(null);
+      }} /></label>
+      <label>分类<select aria-label="分类" value={category} disabled={busy} onChange={(event) => {
+        setCategory(event.target.value as Category | '');
+        setSavedReceipt(null);
+      }}>
         <option value="">请选择分类</option>
         {CATEGORIES.map((value) => <option key={value} value={value}>{value}</option>)}
       </select></label>
       <button type="button" disabled={busy} onClick={() => void confirm()}>确认可报销</button>
+      {savedReceipt !== null && <p role="status">修改已保存，待确认可报销</p>}
       <div className="refund-editor">
         <label>退款金额<input aria-label="退款金额" inputMode="decimal" value={refund} disabled={busy} onChange={(event) => setRefund(event.target.value)} /></label>
         <button type="button" disabled={busy || receipt.paidFen === null} onClick={chooseFullRefund}>全额退款</button>

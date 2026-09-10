@@ -197,3 +197,7 @@ The pool reads its backend totals and all ten category subtotals, selects only r
 Coverage — focused UI tests use complete receipt fixtures and mocked API calls to verify precise decimal correction, explicit category options, blank initial unknown amount, disabled full-refund control for an unknown payment, original-image links, separate correction/confirmation calls, duplicate history evidence and retry actions, backend totals, full-refund exclusion from batch selection, and empty batch prevention. Ready results are not rendered in the pending page.
 
 Verification — final focused tests, the full web test suite, web typecheck/build, and `git diff --check` are run immediately before the Task 18 commit.
+
+### Review fix round 1
+
+Receipt deletion now removes the deleted row from both pool and pending state; the pool also removes its ID from the in-memory selection so a just-deleted receipt cannot be included in a subsequent batch request. Receipt correction retains the successful server response before attempting confirmation. A failed confirmation therefore reports that the correction was saved and remains retryable without repeating the PATCH request; changing the fields clears that saved phase and requires a new save. Focused page tests cover deletion from each page, selection clearing, persisted server response, explicit confirmation failure messaging, and confirmation-only retry.

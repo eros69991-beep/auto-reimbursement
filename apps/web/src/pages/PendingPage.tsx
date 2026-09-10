@@ -26,7 +26,7 @@ export function PendingPage(): React.JSX.Element {
   }, []);
 
   function replaceOrRemove(updated: Receipt): void {
-    setRows((current) => updated.status === 'pending' && updated.pendingReasons.length > 0
+    setRows((current) => updated.deletedAt === null && updated.status === 'pending' && updated.pendingReasons.length > 0
       ? current.map((receipt) => receipt.id === updated.id ? updated : receipt)
       : current.filter((receipt) => receipt.id !== updated.id));
   }

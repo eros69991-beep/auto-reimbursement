@@ -78,4 +78,21 @@ describe('PoolPage', () => {
     expect(screen.getByLabelText('原金额：20.00')).toBeInTheDocument();
     expect(screen.getByLabelText('净额：0.00')).toBeInTheDocument();
   });
+
+  it('removes a deleted receipt and clears its batch selection', async () => {
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    render(<PoolPage onBatch={vi.fn()} />);
+    await screen.findByText('可报销 1 张');
+
+    fireEvent.click(screen.getByRole('checkbox', { name: /示例商户/ }));
+    fireEvent.click(screen.getAllByRole('button', { name: '删除凭证' })[0]!);
+
+    await waitFor(() => expect(mockedApi.deleteReceipt).toHaveBeenCalledWith('eligible'));
+    await waitFor(() => expect(screen.queryByRole('checkbox', { name: /示例商户/ })).not.toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole('button', { name: '生成报销单' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('请选择至少一张可报销凭证');
+    expect(mockedApi.createBatch).not.toHaveBeenCalled();
+    confirm.mockRestore();
+  });
 });
