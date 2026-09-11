@@ -48,7 +48,7 @@ describe('PoolPage', () => {
     const onBatch = vi.fn();
     render(<PoolPage onBatch={onBatch} />);
 
-    expect(await screen.findByText('可报销 1 张')).toBeInTheDocument();
+    expect(await screen.findByText('可报销笔数：1')).toBeInTheDocument();
     expect(screen.getByText('合计：36.33')).toBeInTheDocument();
     expect(screen.getByText('食材：0.00')).toBeInTheDocument();
     expect(screen.getByText('员工餐：0.00')).toBeInTheDocument();
@@ -70,7 +70,7 @@ describe('PoolPage', () => {
 
   it('does not create an empty batch and exposes original/refund amounts separately', async () => {
     render(<PoolPage onBatch={vi.fn()} />);
-    await screen.findByText('可报销 1 张');
+    await screen.findByText('可报销笔数：1');
     fireEvent.click(screen.getByRole('button', { name: '生成报销单' }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent('请选择至少一张可报销凭证');
@@ -82,7 +82,7 @@ describe('PoolPage', () => {
   it('removes a deleted receipt and clears its batch selection', async () => {
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
     render(<PoolPage onBatch={vi.fn()} />);
-    await screen.findByText('可报销 1 张');
+    await screen.findByText('可报销笔数：1');
 
     fireEvent.click(screen.getByRole('checkbox', { name: /示例商户/ }));
     fireEvent.click(screen.getAllByRole('button', { name: '删除凭证' })[0]!);

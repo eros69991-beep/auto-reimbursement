@@ -10,6 +10,13 @@
     "dev:api": "pnpm --filter @auto-reimbursement/api exec node --env-file-if-exists=../../.env --import tsx src/server.ts",
     "dev:web": "pnpm --filter @auto-reimbursement/web dev",
     "test": "pnpm -r run test",
-    "typecheck": "pnpm -r run typecheck"
+    "typecheck": "pnpm -r run typecheck",
+    "test:e2e": "playwright test",
+    "fixtures": "tsx e2e/fixtures/generate.ts"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0",
+    "sharp": "^0.35.4",
+    "tsx": "^4.23.13"
   }
 }

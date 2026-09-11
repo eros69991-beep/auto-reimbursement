@@ -66,7 +66,7 @@ export function PoolPage({ onBatch }: { onBatch: (id: string) => void }): React.
       <h2>报销池</h2>
       {error && <p role="alert">{error}</p>}
       {totals !== null && <section className="pool-totals" aria-label="报销池汇总">
-        <p>可报销 {totals.count} 张</p>
+        <p>可报销笔数：{totals.count}</p>
         <p>合计：{formatFen(totals.totalFen)}</p>
         <ul>{CATEGORIES.map((category) => <li key={category}>{category}：{formatFen(totals.byCategory[category])}</li>)}</ul>
       </section>}

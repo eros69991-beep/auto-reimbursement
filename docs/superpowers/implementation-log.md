@@ -213,3 +213,25 @@ Backup — schema version 3 indexes generated ZIP downloads separately. A SQLite
 Browser — Preview fetches a batch and renders the full PDF, supports server-validated draft options, sheet-specific notes and category moves, refreshes preview cache revision after saved edits, and becomes read-only after export. History groups batches by creation month and provides archive/unarchive plus a typed cleanup dialog. Settings provides defaults, signer upload, note/rule management, API configuration status and backup download. The shell now has six required navigation entries.
 
 Verification — focused maintenance and workflow tests passed. Fresh workspace `pnpm test` passed 200 tests (25 contracts, 160 API, 15 web); `pnpm typecheck`, web production build and `git diff --check` passed. An earlier workspace run exposed a pre-existing timing-sensitive queue test (`CONDITION_NOT_REACHED`); its isolated suite and the immediately repeated full workspace suite passed without code changes.
+
+## Task 20: End-to-end validation and representative acceptance fixtures
+
+RED — the first browser acceptance run exposed an E2E synchronization defect:
+the scenario could match the initial `识别中：0` before upload completion, and
+could navigate before the correction confirmation completed. A later run
+proved export creates an in-page immutable PDF link rather than a browser
+download event. The scenario was revised to wait for observable completion and
+to assert the exported endpoint's 200 `application/pdf` response.
+
+GREEN — `pnpm fixtures` generated 49 synthetic PNGs for 50 manifest records;
+its dHash checks passed. Isolated system-Chrome `pnpm test:e2e` passed 1/1 in
+6.4 seconds. The workflow uses a disposable SHA-256 keyed fake analyzer and
+real queue/store/app composition, and covers upload, correction, totals,
+partial refund/evidence, manual selection, preview options, export and the
+saved PDF endpoint.
+
+Verification — workspace `pnpm test` passed 206 tests (25 contracts, 162 API,
+19 web); `pnpm typecheck`, `pnpm --filter @auto-reimbursement/web build`, and
+`git diff --check` passed. README documents local start, backend-only provider
+settings, safe backup/restore and shutdown; `docs/acceptance.md` records the
+synthetic fixture scope and absence of consented real-world fixtures.

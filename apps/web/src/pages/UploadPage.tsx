@@ -85,7 +85,7 @@ export function UploadPage({ client = api }: { client?: UploadClient }): React.J
         <h2 id="upload-heading">上传凭证</h2>
         <p>一次可上传最多 50 张 JPEG、PNG 或 WebP 图片。</p>
         <label
-          aria-label="拖放或选择凭证图片"
+          aria-label="拖放凭证图片"
           className="drop-target"
           onDragOver={(event) => event.preventDefault()}
           onDrop={(event) => {

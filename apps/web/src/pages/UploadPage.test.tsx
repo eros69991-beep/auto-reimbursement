@@ -47,7 +47,7 @@ describe('UploadPage', () => {
     const second = new File(['second'], 'second.webp', { type: 'image/webp' });
 
     render(<UploadPage client={client} />);
-    fireEvent.drop(screen.getByLabelText('拖放或选择凭证图片'), {
+    fireEvent.drop(screen.getByLabelText('拖放凭证图片'), {
       dataTransfer: { files: [first, second] }
     });
 

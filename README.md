@@ -26,3 +26,20 @@ SQLite database at `data/app.sqlite`. Set `DATA_DIR` in `.env` to choose a
 different local directory. Per-month files are kept under
 `YYYY-MM/originals`, `YYYY-MM/refunds`, and `YYYY-MM/exports`. Local data and
 `.env` are ignored by Git.
+
+## Backup, restore, and shutdown
+
+Create a structured backup from **设置** after the backend has finished any
+current upload or PDF export. It contains a consistent SQLite snapshot plus
+settings, learning rules, and file indexes. It intentionally excludes original
+images, refund evidence, exported PDFs, and provider credentials; keep a
+separate secure copy of the whole data directory when complete media recovery
+is required.
+
+For a structured restore, stop the backend first, use a fresh empty
+`DATA_DIR`, and extract the ZIP contents there. Restore the indexed media from
+the preserved original data-directory copy separately; the ZIP alone cannot
+recreate those files. Do not overwrite a running database or replace files
+while the backend is serving requests. Stop the API with `Ctrl+C` and allow it
+to close the queue and SQLite store before copying, backing up, or restoring
+data.

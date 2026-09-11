@@ -35,13 +35,13 @@ export default function App() {
       <header className="app-header">
         <h1>Automatic Reimbursement Assistant</h1>
         <nav aria-label="主导航">
-          <a href="#home">首页</a>
-          <a href="#upload">上传凭证</a>
-          <a href="#pool">本期报销池</a>
-          <a href="#pending">待处理</a>
-          <a href="#preview">生成预览</a>
-          <a href="#history">历史报销单</a>
-          <a href="#settings">设置</a>
+          <button type="button" onClick={() => { window.location.hash = '#home'; }}>首页</button>
+          <button type="button" onClick={() => { window.location.hash = '#upload'; }}>上传凭证</button>
+          <button type="button" onClick={() => { window.location.hash = '#pool'; }}>本期报销池</button>
+          <button type="button" onClick={() => { window.location.hash = '#pending'; }}>待处理</button>
+          <button type="button" onClick={() => { window.location.hash = '#preview'; }}>生成预览</button>
+          <button type="button" onClick={() => { window.location.hash = '#history'; }}>历史报销单</button>
+          <button type="button" onClick={() => { window.location.hash = '#settings'; }}>设置</button>
         </nav>
       </header>
       {content}
