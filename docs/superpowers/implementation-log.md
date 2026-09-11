@@ -235,3 +235,19 @@ Verification — workspace `pnpm test` passed 206 tests (25 contracts, 162 API,
 `git diff --check` passed. README documents local start, backend-only provider
 settings, safe backup/restore and shutdown; `docs/acceptance.md` records the
 synthetic fixture scope and absence of consented real-world fixtures.
+
+### Review fix round 1
+
+The fixture contract is now a real direct-loopback acceptance run rather than
+unused manifest data. It uploads all first-run records, asserts each final
+receipt expectation and analyzer retry count, blocks the exact duplicate before
+analysis, verifies the 51-file boundary, and then exercises three corrections
+plus a strong-rule medium-confidence release. The representative browser flow
+waits for refund-evidence persistence and asserts the 80.00 refund/evidence
+batch snapshot before checking the draft and exported PDF endpoints. The
+separate API PDF suite retains detailed extracted attachment-page ordering
+assertions.
+
+Fresh verification — `pnpm fixtures` generated 53 synthetic records;
+system-Chrome `pnpm test:e2e` passed 2/2 in 9.5 seconds; workspace `pnpm test`
+passed 206 tests; `pnpm typecheck` and the production web build exited 0.

@@ -9,11 +9,38 @@ workflow covers accessible upload, exception correction, pool aggregation,
 partial refund and evidence, selected batch generation, option persistence,
 export immutability, and the exported PDF endpoint.
 
-Fixture generation produced 50 manifest entries backed by 49 synthetic images:
+The original fixture run had 50 manifest entries backed by 49 synthetic images:
 35 normal, 5 ambiguous, 3 low-confidence category, 2 transient, 1 terminal,
 1 exact renamed duplicate, 1 cropped suspected duplicate, and 2 manual
 correction examples. It verifies normal dHash separation and the intended
 cropped-pair match.
+
+## Review fix round 1
+
+The fixture harness now executes its data rather than only using two images in
+the browser path. A disposable direct-loopback test uploads every first-run
+record through the real API, checks all expected amount/category/outcome/reason
+values, verifies the exact duplicate is rejected before analysis, checks both
+retry counters and the terminal failure, and asserts the 51-file HTTP 413
+limit. The cropped suspected duplicate is accurately modeled as pending before
+analysis, so its amount/category expectation is null.
+
+The manifest now includes a separate learning run with three consecutive
+same-supplier corrections and a matching medium-confidence receipt. The test
+confirms the three corrections and verifies that the resulting strong rule
+releases the medium-confidence record. The browser test waits for the refund
+image HTTP response, snapshots the selected receipt's 80.00 refund and one
+refund image in the batch, and verifies the draft PDF endpoint before export.
+
+The second run adds four synthetic records, for 54 records backed by 53 images.
+The API PDF test remains the source of extracted attachment-page order
+assertions; the browser test checks the same generated draft PDF response but
+does not duplicate PDF text extraction.
+
+Fresh verification for this review fix: `pnpm fixtures` generated 53 synthetic
+fixture records; `pnpm test:e2e` passed 2/2 in 9.5 seconds; `pnpm test` passed
+206 tests; `pnpm typecheck` and `pnpm --filter @auto-reimbursement/web build`
+both exited 0.
 
 ## RED and GREEN
 
