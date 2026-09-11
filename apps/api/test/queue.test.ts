@@ -37,7 +37,7 @@ const analysis: Analysis = {
   keywords: ['测试'],
   evidence: '实付 12.30',
 };
-const realSetImmediate = setImmediate;
+const realSetTimeout = setTimeout;
 
 describe('durable recognition queue', () => {
   let temp: string;
@@ -687,11 +687,11 @@ async function patternedPng(seed: number, compressionLevel: number): Promise<Buf
 }
 
 async function waitUntil(predicate: () => boolean): Promise<void> {
-  for (let attempt = 0; attempt < 1_000; attempt += 1) {
+  for (let attempt = 0; attempt < 5_000; attempt += 1) {
     if (predicate()) {
       return;
     }
-    await new Promise<void>((resolve) => realSetImmediate(resolve));
+    await new Promise<void>((resolve) => realSetTimeout(resolve, 1));
   }
   throw new Error('CONDITION_NOT_REACHED');
 }

@@ -11,9 +11,9 @@
 
 `apps/api/assets/form-geometry.json` holds the physical millimetre geometry. The renderer converts millimetres once with `72 / 25.4` points per millimetre. It uses a 270 x 165 mm landscape page, 5 mm outer margin, a title at 9 mm, double underlines at 21/22 mm, metadata at 29 mm, and the table at 5,34 mm with 260 mm width. Column widths are 50/98/46/8/58 mm for project, summary, amount, vertical label, and notes/approval.
 
-The 17 mm header, 58 mm body, 12 mm total row, 14 mm uppercase/loan strip, five faint body guides, upper notes/lower approval split, and 146 mm footer baseline were calibrated against the two supplied paper photographs after normalising their four page corners. Both show the same title/underline, column order and relative widths, nine digit headings (`百 十 万 千 百 十 元 角 分`), notes/approval split, total/uppercase strip, and footer order. The private photos and their handwriting were inspected only; neither source nor a derivative is part of the repository.
+The 17 mm header, 58 mm body, 12 mm total row, 14 mm uppercase/loan strip, five faint body guides, upper notes/lower approval split, and 146 mm footer baseline are renderer working values selected from a visual comparison with the two supplied paper photographs. The comparison checked title/underline, column order and relative widths, nine digit headings (`百 十 万 千 百 十 元 角 分`), notes/approval split, total/uppercase strip, and footer order. It was not a measured physical calibration: the photos have perspective, curl, and no reliable scale. The private photos and their handwriting were inspected only; neither source nor a derivative is part of the repository.
 
-Perspective, paper curl, and no ruler in either photograph mean 270 x 165 mm remains an explicit working-page assumption. This is a structural calibration, not an assertion of millimetre-perfect physical fidelity.
+The 270 x 165 mm page remains an explicit working-page assumption. The review establishes structural resemblance only; it does not assert millimetre-perfect physical fidelity.
 
 ## Render evidence
 

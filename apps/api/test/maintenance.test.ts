@@ -1,8 +1,15 @@
+import { createHash } from 'node:crypto';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
 import { describe, expect, it } from 'vitest';
 
-import { archiveMonth, cleanOriginals, unarchiveMonth } from '../src/archive.js';
+import { archiveMonth, cleanOriginals, history, unarchiveMonth } from '../src/archive.js';
+import { loadConfig } from '../src/config.js';
 import { openStore } from '../src/db.js';
 import { findDuplicates } from '../src/duplicates.js';
+import { safePath } from '../src/storage.js';
 import { sampleReceipt } from './support.js';
 
 describe('maintenance', () => {
@@ -45,5 +52,86 @@ describe('maintenance', () => {
     await expect(cleanOriginals(store, { dataDir: process.cwd(), dbPath: ':memory:', host: '127.0.0.1', port: 3000, ai: null, concurrency: 4 }, '2026-09', 'DELETE ORIGINALS 2026-09')).rejects.toThrow('CLEANUP_NOT_ALLOWED');
     expect(store.get('receipts', receipt.id)?.original.deletedAt).toBeNull();
     store.close();
+  });
+
+  it('uses the persisted local batch month for history, archive, unarchive and cleanup', async () => {
+    const temp = await mkdtemp(join(tmpdir(), 'auto-reimbursement-local-month-'));
+    const store = openStore(':memory:');
+    const config = loadConfig({ DATA_DIR: temp }, temp);
+    const originalBytes = Buffer.from('original receipt bytes');
+    const pdfBytes = Buffer.from('%PDF-1.7 saved batch');
+    const receipt = sampleReceipt({
+      id: 'cross-month-receipt',
+      month: '2026-07',
+      status: 'generated',
+      batchId: 'cross-month-batch',
+      original: {
+        ...sampleReceipt().original,
+        id: 'cross-month-image',
+        path: '2026-07/originals/cross-month-image.png',
+        sha256: createHash('sha256').update(originalBytes).digest('hex'),
+        bytes: originalBytes.length,
+      },
+    });
+    const pdfPath = '2026-08/exports/cross-month.pdf';
+    const batch = {
+      id: 'cross-month-batch',
+      month: '2026-08',
+      createdAt: '2026-09-01T00:30:00.000Z',
+      totalFen: 1000,
+      items: [{
+        receiptId: receipt.id,
+        uploadOrder: receipt.uploadOrder,
+        category: '耗材' as const,
+        paidFen: 1000,
+        refundFen: 0,
+        netFen: 1000,
+        original: receipt.original,
+        refundImages: [],
+      }],
+      sheets: [],
+      options: { department: '', date: null, signerMode: 'text' as const, signerName: '', signature: null },
+      notes: [],
+      pdfPath,
+      archivedAt: null,
+    };
+
+    try {
+      await mkdir(join(temp, '2026-07', 'originals'), { recursive: true });
+      await mkdir(join(temp, '2026-08', 'exports'), { recursive: true });
+      await writeFile(safePath(temp, receipt.original.path), originalBytes);
+      await writeFile(safePath(temp, pdfPath), pdfBytes);
+      store.put('receipts', receipt);
+      store.put('batches', batch);
+      store.put('files', {
+        id: receipt.original.id,
+        ownerId: receipt.id,
+        kind: 'original',
+        path: receipt.original.path,
+        sha256: receipt.original.sha256,
+        deletedAt: null,
+      });
+      store.put('files', {
+        id: 'cross-month-pdf',
+        ownerId: batch.id,
+        kind: 'pdf',
+        path: pdfPath,
+        sha256: createHash('sha256').update(pdfBytes).digest('hex'),
+        deletedAt: null,
+      });
+
+      expect(history(store).map((group) => group.month)).toEqual(['2026-08']);
+      expect(archiveMonth(store, '2026-08', new Date('2026-09-02T00:00:00.000Z')).affected).toBe(1);
+      expect(store.get('receipts', receipt.id)?.status).toBe('archived');
+      expect(store.get('batches', batch.id)?.archivedAt).not.toBeNull();
+      expect((await cleanOriginals(store, config, '2026-08', 'DELETE ORIGINALS 2026-08')).affected).toBe(1);
+      await expect(readFile(safePath(temp, receipt.original.path))).rejects.toMatchObject({ code: 'ENOENT' });
+      expect(await readFile(safePath(temp, pdfPath))).toEqual(pdfBytes);
+      expect(unarchiveMonth(store, '2026-08').affected).toBe(1);
+      expect(store.get('receipts', receipt.id)?.status).toBe('generated');
+    } finally {
+      store.close();
+      await rm(temp, { recursive: true, force: true });
+    }
   });
 });

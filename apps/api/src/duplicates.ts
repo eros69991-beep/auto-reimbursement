@@ -107,12 +107,15 @@ export function confirmDistinct(store: Store, id: string): Receipt {
     if (receipt.status === 'generated' || receipt.status === 'archived') {
       throw new Error('IMMUTABLE_RECEIPT');
     }
+    const pendingReasons = receipt.pendingReasons.filter(
+      (reason) => reason !== 'suspected_duplicate',
+    );
     const updated: Receipt = {
       ...receipt,
-      status: receipt.analysis === null ? 'recognizing' : receipt.status,
-      pendingReasons: receipt.pendingReasons.filter(
-        (reason) => reason !== 'suspected_duplicate',
-      ),
+      status: receipt.analysis === null
+        ? 'recognizing'
+        : pendingReasons.length === 0 ? 'ready' : 'pending',
+      pendingReasons,
       duplicateIds: [],
       duplicateOverride: true,
     };

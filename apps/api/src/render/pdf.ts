@@ -138,10 +138,25 @@ async function readSignatureBytes(
     throw new Error('MISSING_ATTACHMENT');
   }
   try {
-    return await readVerifiedFile(config, entry);
+    return await pdfImageBytes(await readVerifiedFile(config, entry));
   } catch {
     throw new Error('MISSING_ATTACHMENT');
   }
+}
+
+async function pdfImageBytes(bytes: Buffer): Promise<Buffer> {
+  try {
+    const metadata = await sharp(bytes).metadata();
+    if (metadata.format === 'webp') {
+      return await sharp(bytes).png().toBuffer();
+    }
+    if (metadata.format === 'jpeg' || metadata.format === 'png') {
+      return bytes;
+    }
+  } catch {
+    // The caller must expose only the stable attachment error.
+  }
+  throw new Error('INVALID_IMAGE');
 }
 
 async function attachmentBytes(
@@ -165,14 +180,7 @@ async function attachmentBytes(
     throw missingAttachment(attachment.receiptId);
   }
   try {
-    const metadata = await sharp(bytes).metadata();
-    if (metadata.format === 'webp') {
-      return await sharp(bytes).png().toBuffer();
-    }
-    if (metadata.format === 'jpeg' || metadata.format === 'png') {
-      return bytes;
-    }
-    throw new Error('INVALID_IMAGE');
+    return await pdfImageBytes(bytes);
   } catch {
     throw missingAttachment(attachment.receiptId);
   }

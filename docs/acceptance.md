@@ -25,7 +25,7 @@ pnpm typecheck
 pnpm --filter @auto-reimbursement/web build
 ```
 
-On 2026-09-11, the direct loopback acceptance contract uploaded every first-run
+The direct loopback acceptance contract uploads every first-run
 fixture through the real HTTP application. It asserts the 49 accepted rows,
 the exact duplicate rejection, every manifest amount/category/status/reason,
 both transient retry counts, the terminal failure, the cropped duplicate's
@@ -37,9 +37,11 @@ and asserts the 80.00 refund, evidence snapshot, draft-PDF response, option
 save, export, and saved-PDF response. The API PDF suite remains the source of
 text/page-order extraction evidence for original/refund attachment sequencing.
 
-The final rerun completed `pnpm fixtures` successfully, `pnpm test:e2e` with
-2/2 tests in 9.5 seconds, `pnpm test` with 206 tests, and both `pnpm typecheck`
-and `pnpm --filter @auto-reimbursement/web build` with exit status 0.
+An additional disposable-loopback release contract verifies hostile-origin
+mutation rejection, receipt-owned historical-duplicate evidence, duplicate
+override re-recognition, and export/archive/unarchive/explicit-original-cleanup
+with PDF and structured-backup retention. These are synthetic integration
+checks; they do not establish real receipt-recognition accuracy.
 
 The initial acceptance run exposed synchronization defects in the test itself:
 it could observe the initial `识别中：0` before upload completion and it could
@@ -52,8 +54,9 @@ the product exports in place and provides an open/download link.
 
 No consented, human-labeled real receipt images were supplied. Real-recognition
 accuracy, auto-release rate, exception interception rate, wall-clock
-upload-to-PDF comparison, user manual-baseline/time-saved estimate, and paper
-form geometry comparison were therefore not performed. This project is not
-validated on real receipts, and no physical-size fidelity is claimed from the
-reference photos. Visual screenshots and rendered-PDF review artifacts are
-local QA material and are not committed.
+upload-to-PDF comparison, and user manual-baseline/time-saved estimate remain
+unperformed. The synthetic tests exercise the specified lifecycle branches,
+not those real-world metrics. Paper-form review is a structural visual check;
+it is not a physical measurement or a claim of millimetre-perfect fidelity.
+Visual screenshots and rendered-PDF review artifacts are local QA material and
+are not committed.

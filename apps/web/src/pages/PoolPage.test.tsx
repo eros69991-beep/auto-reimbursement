@@ -95,4 +95,28 @@ describe('PoolPage', () => {
     expect(mockedApi.createBatch).not.toHaveBeenCalled();
     confirm.mockRestore();
   });
+
+  it('refreshes backend totals after a refund mutation', async () => {
+    mockedApi.totals.mockReset()
+      .mockResolvedValueOnce(totals)
+      .mockResolvedValue({
+        count: 0,
+        totalFen: 0,
+        byCategory: Object.fromEntries(Object.keys(totals.byCategory).map((category) => [category, 0])),
+      });
+    mockedApi.setRefund.mockResolvedValue(receipt({
+      id: 'eligible',
+      paidFen: 3633,
+      refundFen: 3633,
+    }));
+    render(<PoolPage onBatch={vi.fn()} />);
+    await screen.findByText('可报销笔数：1');
+
+    fireEvent.change(screen.getAllByLabelText('退款金额')[0]!, { target: { value: '36.33' } });
+    fireEvent.click(screen.getAllByRole('button', { name: '保存退款' })[0]!);
+
+    await waitFor(() => expect(mockedApi.totals).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText('可报销笔数：0')).toBeInTheDocument();
+    expect(screen.getByText('合计：0.00')).toBeInTheDocument();
+  });
 });

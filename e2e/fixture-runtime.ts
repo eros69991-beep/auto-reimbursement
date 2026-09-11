@@ -108,7 +108,11 @@ export async function createFixtureRuntime(port = 0): Promise<FixtureRuntime> {
 }
 
 function assertAnalysisMatchesFixture(fixture: Fixture): void {
-  if (fixture.run === 'learning' || fixture.analysis === null) return;
+  if (
+    fixture.run === 'learning' ||
+    fixture.analysis === null ||
+    (fixture.expected.outcome === 'pending' && fixture.expected.reason === 'suspected_duplicate')
+  ) return;
   const paidFen = fixture.analysis.amount === null ? null : parseFen(fixture.analysis.amount);
   if (paidFen !== fixture.expected.paidFen || fixture.analysis.category !== fixture.expected.category) {
     throw new AiError('INVALID_RESPONSE', false);

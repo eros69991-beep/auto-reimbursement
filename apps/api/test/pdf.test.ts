@@ -143,7 +143,7 @@ describe('full reimbursement PDFs', () => {
 
   it('renders both signer modes and rejects a missing attachment without exporting', async () => {
     const original = await indexedImage('signer-original', '#245c77');
-    const signature = await indexedImage('signature', '#101010', 'settings/signatures/signature.png');
+    const signature = await indexedImage('signature', '#101010', 'settings/signatures/signature.webp');
     await writeImage(original);
     await writeImage(signature);
     indexImage('signer', 'original', original);

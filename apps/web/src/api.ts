@@ -41,6 +41,10 @@ function imageUrl(id: string): string {
   return `/api/images/${encodeURIComponent(id)}`;
 }
 
+function receiptOriginalUrl(id: string): string {
+  return `/api/receipts/${encodeURIComponent(id)}/original-image`;
+}
+
 function receipts(view: 'pool' | 'pending'): Promise<Receipt[]> {
   return requestJson<Receipt[]>(`/api/receipts?view=${view}`);
 }
@@ -148,6 +152,7 @@ export const api = {
   upload,
   progress,
   imageUrl,
+  receiptOriginalUrl,
   receipts,
   totals,
   updateReceipt,

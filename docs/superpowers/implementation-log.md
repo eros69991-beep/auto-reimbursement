@@ -251,3 +251,41 @@ assertions.
 Fresh verification — `pnpm fixtures` generated 53 synthetic records;
 system-Chrome `pnpm test:e2e` passed 2/2 in 9.5 seconds; workspace `pnpm test`
 passed 206 tests; `pnpm typecheck` and the production web build exited 0.
+
+### Final release-fix wave
+
+RED — the focused API regression run failed on five release blockers: hostile
+non-loopback mutation origin was not rejected; history used `createdAt` instead
+of persisted `batch.month`; confirming an analysed suspected duplicate did not
+release it; a receipt-ID duplicate evidence link was unresolved; and a WebP
+signature reached PDFKit without conversion. A new isolated loopback E2E
+contract initially exposed that its fake fixture analyzer rejected the
+post-override cropped receipt solely because its pre-override expected state
+was intentionally pending.
+
+GREEN — the focused API suite passed 36/36 and focused web suite passed 14/14.
+The isolated E2E release contract passed 2/2: it covers origin/fetch-site
+rejection, receipt-owned duplicate evidence and override lifecycle, and
+export/archive/unarchive/explicit cleanup while the indexed PDF and structured
+backup remain available. API and web typechecks passed. The fake analyzer now
+allows its known cropped synthetic fixture to be analysed only after the user
+has explicitly overridden the pre-analysis duplicate block.
+
+Implementation — mutating HTTP requests require loopback Host, loopback Origin
+when present, and non-cross-site `Sec-Fetch-Site`; read requests remain
+available. Archive history and linked lifecycle operations use persisted
+`batch.month`. Duplicate evidence resolves through a receipt-owned original
+route, and confirmation removes only its duplicate blocker before either
+releasing an analysed receipt or re-queuing an unanalysed one. PDF rendering
+converts accepted WebP signatures in memory. The pool refreshes backend totals
+after each receipt mutation. Acceptance/calibration language now distinguishes
+synthetic lifecycle evidence from unperformed real-receipt metrics and avoids
+claiming measured physical-form fidelity.
+
+Stability — the first two parallel workspace reruns exposed a test-only queue
+race: its `waitUntil` loop exhausted real immediates before Sharp-backed file
+work received a shared worker-pool slot, after which teardown closed its store.
+The helper now yields with a bounded captured real timer. A fresh API suite
+passed 166/166 and the fresh parallel workspace suite passed 211 tests
+(25 contracts, 166 API, 20 web); typecheck, web production build, all four
+isolated/browser E2E tests, and `git diff --check` also passed.

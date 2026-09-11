@@ -14,6 +14,16 @@ type AppDependencies = {
 
 export function createApp(deps?: AppDependencies): express.Express {
   const application = express();
+  application.use((request, response, next) => {
+    if (!isMutation(request.method) || isLocalMutation(request)) {
+      next();
+      return;
+    }
+    response.status(403).json({
+      code: 'CROSS_ORIGIN_MUTATION',
+      message: '拒绝非本机来源的修改请求',
+    });
+  });
   application.use(express.json({ limit: '1mb' }));
 
   application.get('/health', (_request, response) => {
@@ -146,3 +156,35 @@ export function createApp(deps?: AppDependencies): express.Express {
 }
 
 export const app = createApp();
+
+function isMutation(method: string): boolean {
+  return method === 'POST' || method === 'PUT' || method === 'PATCH' || method === 'DELETE';
+}
+
+function isLocalMutation(request: express.Request): boolean {
+  const host = hostname(request.get('host') ?? '');
+  if (host === null || !isLoopback(host)) {
+    return false;
+  }
+  const origin = request.get('origin');
+  if (origin !== undefined) {
+    const originHost = hostname(origin);
+    if (originHost === null || !isLoopback(originHost)) {
+      return false;
+    }
+  }
+  const fetchSite = request.get('sec-fetch-site');
+  return fetchSite === undefined || fetchSite === 'same-origin' || fetchSite === 'same-site' || fetchSite === 'none';
+}
+
+function hostname(value: string): string | null {
+  try {
+    return new URL(value.includes('://') ? value : `http://${value}`).hostname.toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
+function isLoopback(value: string): boolean {
+  return value === 'localhost' || value === '127.0.0.1' || value === '::1' || value === '[::1]';
+}

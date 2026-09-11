@@ -6,6 +6,7 @@ vi.mock('../api', () => ({
   api: {
     receipts: vi.fn(),
     imageUrl: (id: string) => `/api/images/${id}`,
+    receiptOriginalUrl: (id: string) => `/api/receipts/${id}/original-image`,
     updateReceipt: vi.fn(),
     confirmReceipt: vi.fn(),
     confirmDistinct: vi.fn(),
@@ -87,7 +88,7 @@ describe('PendingPage', () => {
     expect(await screen.findByText('疑似重复')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: '查看历史凭证' })).toHaveAttribute(
       'href',
-      '/api/images/historical-image',
+      '/api/receipts/historical-image/original-image',
     );
     fireEvent.click(screen.getByRole('button', { name: '确认不是重复，继续加入' }));
     await waitFor(() => expect(mockedApi.confirmDistinct).toHaveBeenCalledWith('duplicate'));

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import type { Progress, UploadResult } from '@auto-reimbursement/contracts';
 import { api } from '../api';
 
-type UploadClient = Pick<typeof api, 'upload' | 'progress' | 'imageUrl'>;
+type UploadClient = Pick<typeof api, 'upload' | 'progress' | 'imageUrl' | 'receiptOriginalUrl'>;
 
 const EMPTY_PROGRESS: Progress = { total: 0, recognizing: 0, ready: 0, pending: 0 };
 
@@ -133,7 +133,7 @@ export function UploadPage({ client = api }: { client?: UploadClient }): React.J
               {rejected.map((item) => (
                 <li key={`${item.index}-${item.code}`}>
                   {item.duplicateId ? '重复文件' : '未接收文件'}：{batchFiles[item.index]?.name ?? `第 ${item.index + 1} 张`}
-                  {item.duplicateId && <>（<a href={client.imageUrl(item.duplicateId)}>查看重复凭证</a>）</>}
+                  {item.duplicateId && <>（<a href={client.receiptOriginalUrl(item.duplicateId)}>查看重复凭证</a>）</>}
                 </li>
               ))}
             </ul>

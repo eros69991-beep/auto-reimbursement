@@ -441,6 +441,12 @@ describe('ordered receipt image upload', () => {
     );
     expect(evidence.status).toBe(200);
     expect(evidence.body).toEqual(png);
+
+    const receiptEvidence = await request(createApp({ store, config })).get(
+      `/api/receipts/${prior.id}/original-image`,
+    );
+    expect(receiptEvidence.status).toBe(200);
+    expect(receiptEvidence.body).toEqual(png);
   });
 
   it('persists a recompressed visual match as pending without losing evidence', async () => {

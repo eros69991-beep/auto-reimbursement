@@ -86,15 +86,19 @@ function cleanupFailure(affected: number, id: string): Error {
 export function history(store: Store): HistoryMonth[] {
   const grouped = new Map<string, Batch[]>();
   for (const batch of store.list('batches')) {
-    const month = batch.createdAt.slice(0, 7);
+    const month = batch.month;
     grouped.set(month, [...(grouped.get(month) ?? []), batch]);
   }
   return [...grouped.entries()].sort(([a], [b]) => b.localeCompare(a)).map(([month, batches]) => ({ month, batches: batches.sort((a, b) => b.createdAt.localeCompare(a.createdAt)) }));
 }
 
 function linkedSet(store: Store, month: string): LinkedSet {
-  const receiptIds = new Set(store.list('receipts').filter((receipt) => receipt.month === month).map((receipt) => receipt.id));
-  const batchIds = new Set(store.list('batches').filter((batch) => batch.createdAt.slice(0, 7) === month).map((batch) => batch.id));
+  const receiptIds = new Set(store.list('receipts')
+    .filter((receipt) => receipt.batchId === null && receipt.month === month)
+    .map((receipt) => receipt.id));
+  const batchIds = new Set(store.list('batches')
+    .filter((batch) => batch.month === month)
+    .map((batch) => batch.id));
   let changed = true;
   while (changed) {
     changed = false;

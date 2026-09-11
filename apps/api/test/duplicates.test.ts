@@ -285,6 +285,60 @@ describe('historical duplicate detection', () => {
     });
     expect(store.get('receipts', receipt.id)).toEqual(confirmed);
   });
+
+  it('releases an analysed receipt when duplicate review was its only blocker', () => {
+    const receipt = sampleReceipt({
+      id: 'analysed-duplicate',
+      analysis: {
+        amount: '10.00',
+        category: '耗材',
+        merchant: '已识别商户',
+        date: '2026-09-03',
+        confidence: { amount: 0.99, category: 0.99 },
+        ambiguous: false,
+        keywords: [],
+        evidence: '实付 10.00',
+      },
+      status: 'pending',
+      pendingReasons: ['suspected_duplicate'],
+      duplicateIds: ['prior'],
+    });
+    store.put('receipts', receipt);
+
+    expect(confirmDistinct(store, receipt.id)).toMatchObject({
+      status: 'ready',
+      pendingReasons: [],
+      duplicateIds: [],
+      duplicateOverride: true,
+    });
+  });
+
+  it('keeps an analysed receipt review-visible when another reason remains', () => {
+    const receipt = sampleReceipt({
+      id: 'analysed-low-confidence',
+      analysis: {
+        amount: '10.00',
+        category: '耗材',
+        merchant: '已识别商户',
+        date: '2026-09-03',
+        confidence: { amount: 0.99, category: 0.4 },
+        ambiguous: false,
+        keywords: [],
+        evidence: '实付 10.00',
+      },
+      status: 'pending',
+      pendingReasons: ['category_uncertain', 'suspected_duplicate'],
+      duplicateIds: ['prior'],
+    });
+    store.put('receipts', receipt);
+
+    expect(confirmDistinct(store, receipt.id)).toMatchObject({
+      status: 'pending',
+      pendingReasons: ['category_uncertain'],
+      duplicateIds: [],
+      duplicateOverride: true,
+    });
+  });
 });
 
 describe('confirm-distinct HTTP lifecycle', () => {

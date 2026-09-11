@@ -57,7 +57,7 @@ export function PendingPage(): React.JSX.Element {
         {rows.map((receipt) => <ReceiptCard key={receipt.id} receipt={receipt}>
           <ul className="reason-list" aria-label="待处理原因">{receipt.pendingReasons.map((reason) => <li key={reason}>{labels[reason]}</li>)}</ul>
           {receipt.pendingReasons.includes('suspected_duplicate') && <>
-            {receipt.duplicateIds.map((id) => <a key={id} href={api.imageUrl(id)}>查看历史凭证</a>)}
+            {receipt.duplicateIds.map((id) => <a key={id} href={api.receiptOriginalUrl(id)}>查看历史凭证</a>)}
             <button type="button" onClick={() => void confirmDistinct(receipt.id)}>确认不是重复，继续加入</button>
           </>}
           {receipt.pendingReasons.includes('api_failed') && <button type="button" onClick={() => void retry(receipt.id)}>重试识别</button>}

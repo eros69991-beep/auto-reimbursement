@@ -353,6 +353,34 @@ export function createRouter(
     }
   });
 
+  router.get('/receipts/:id/original-image', async (request, response, next) => {
+    try {
+      const receipt = store.get('receipts', request.params.id);
+      if (receipt === null) {
+        throw new HttpError(404, 'RECEIPT_NOT_FOUND', '凭证不存在');
+      }
+      const entry = store.get('files', receipt.original.id);
+      if (
+        entry === null ||
+        entry.kind !== 'original' ||
+        entry.ownerId !== receipt.id ||
+        entry.path !== receipt.original.path
+      ) {
+        throw new HttpError(404, 'IMAGE_NOT_FOUND', '图片不存在');
+      }
+      if (entry.deletedAt !== null) {
+        throw new HttpError(410, 'IMAGE_DELETED', '图片已删除');
+      }
+      response.type(extname(entry.path)).send(await readFile(safePath(config.dataDir, entry.path)));
+    } catch (error) {
+      if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
+        next(new HttpError(404, 'IMAGE_NOT_FOUND', '图片不存在'));
+        return;
+      }
+      next(error);
+    }
+  });
+
   router.post('/receipts/:id/confirm-distinct', (request, response, next) => {
     try {
       const receipt = confirmDistinct(store, request.params.id);

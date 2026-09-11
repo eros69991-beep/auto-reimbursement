@@ -19,7 +19,8 @@ describe('UploadPage', () => {
     const client = {
       upload: vi.fn().mockResolvedValue({ accepted: [], rejected: [] }),
       progress: vi.fn(),
-      imageUrl: (id: string) => `/api/images/${id}`
+      imageUrl: (id: string) => `/api/images/${id}`,
+      receiptOriginalUrl: (id: string) => `/api/receipts/${id}/original-image`,
     };
 
     render(<UploadPage client={client} />);
@@ -41,7 +42,8 @@ describe('UploadPage', () => {
     const client = {
       upload: vi.fn().mockResolvedValue(uploadResult()),
       progress: vi.fn().mockResolvedValue(emptyProgress),
-      imageUrl: (id: string) => `/api/images/${id}`
+      imageUrl: (id: string) => `/api/images/${id}`,
+      receiptOriginalUrl: (id: string) => `/api/receipts/${id}/original-image`,
     };
     const first = new File(['first'], 'first.png', { type: 'image/png' });
     const second = new File(['second'], 'second.webp', { type: 'image/webp' });
@@ -61,7 +63,8 @@ describe('UploadPage', () => {
         rejected: [{ index: 0, code: 'DUPLICATE_EXACT', duplicateId: 'receipt-2' }]
       } satisfies UploadResult),
       progress: vi.fn().mockResolvedValue(emptyProgress),
-      imageUrl: (id: string) => `/api/images/${id}`
+      imageUrl: (id: string) => `/api/images/${id}`,
+      receiptOriginalUrl: (id: string) => `/api/receipts/${id}/original-image`,
     };
 
     render(<UploadPage client={client} />);
@@ -74,7 +77,7 @@ describe('UploadPage', () => {
     );
     expect(screen.getByRole('link', { name: '查看重复凭证' })).toHaveAttribute(
       'href',
-      '/api/images/receipt-2'
+      '/api/receipts/receipt-2/original-image'
     );
   });
 
@@ -85,7 +88,8 @@ describe('UploadPage', () => {
         .fn()
         .mockRejectedValueOnce(new Error('offline'))
         .mockResolvedValue({ total: 1, recognizing: 0, ready: 1, pending: 0 }),
-      imageUrl: (id: string) => `/api/images/${id}`
+      imageUrl: (id: string) => `/api/images/${id}`,
+      receiptOriginalUrl: (id: string) => `/api/receipts/${id}/original-image`,
     };
 
     render(<UploadPage client={client} />);
@@ -103,7 +107,8 @@ describe('UploadPage', () => {
     const client = {
       upload: vi.fn().mockResolvedValue(uploadResult(['receipt-1'])),
       progress: vi.fn().mockResolvedValue({ total: 1, recognizing: 0, ready: 1, pending: 0 }),
-      imageUrl: (id: string) => `/api/images/${id}`
+      imageUrl: (id: string) => `/api/images/${id}`,
+      receiptOriginalUrl: (id: string) => `/api/receipts/${id}/original-image`,
     };
 
     try {
