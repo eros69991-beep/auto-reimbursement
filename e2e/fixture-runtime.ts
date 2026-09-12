@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { once } from 'node:events';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -9,9 +10,9 @@ import { parseFen, type Analysis, type Category, type Reason } from '@auto-reimb
 import { createApp } from '../apps/api/src/app.ts';
 import { AiError, type ReceiptAnalyzer } from '../apps/api/src/ai/types.ts';
 import type { Config } from '../apps/api/src/config.ts';
-import { openStore } from '../apps/api/src/db.ts';
+import { openStore, type Store } from '../apps/api/src/db.ts';
 import { applyAnalysis } from '../apps/api/src/decision.ts';
-import { createQueue } from '../apps/api/src/queue.ts';
+import { createQueue, type RecognitionQueue } from '../apps/api/src/queue.ts';
 
 type Expected = {
   paidFen: number | null;
@@ -53,11 +54,20 @@ class FakeAnalyzer implements ReceiptAnalyzer {
 
 export type FixtureRuntime = {
   baseUrl: string;
+  dataDir: string;
   analyzer: FakeAnalyzer;
+  restart(): Promise<void>;
   close(): Promise<void>;
 };
 
-export async function createFixtureRuntime(port = 0): Promise<FixtureRuntime> {
+type FixtureRuntimeOptions = {
+  port?: number;
+  startQueue?: boolean;
+  ai?: Config['ai'];
+};
+
+export async function createFixtureRuntime(portOrOptions: number | FixtureRuntimeOptions = 0): Promise<FixtureRuntime> {
+  const options = typeof portOrOptions === 'number' ? { port: portOrOptions } : portOrOptions;
   const fixtureDirectory = join(process.cwd(), 'e2e', 'fixtures');
   const fixtureRows = JSON.parse(await readFile(join(fixtureDirectory, 'manifest.json'), 'utf8')) as Fixture[];
   const fixtureMap = new Map<string, Fixture>();
@@ -72,33 +82,63 @@ export async function createFixtureRuntime(port = 0): Promise<FixtureRuntime> {
     dataDir,
     dbPath: join(dataDir, 'app.sqlite'),
     host: '127.0.0.1',
-    port,
-    ai: null,
+    port: options.port ?? 0,
+    ai: options.ai ?? null,
     concurrency: 4,
   };
-  const store = openStore(config.dbPath);
   const analyzer = new FakeAnalyzer(fixtureMap);
-  const queue = createQueue({
-    store,
-    config,
-    analyzer,
-    onAnalyzed: (id, analysis) => applyAnalysis(store, id, analysis),
-  });
-  queue.start();
-  const server = createApp({ store, config, queue }).listen(config.port, config.host);
-  await once(server, 'listening');
-  const address = server.address() as AddressInfo;
+  let store: Store | null = null;
+  let queue: RecognitionQueue | null = null;
+  let server: Server | null = null;
+  let baseUrl = '';
+
+  async function start(startQueue: boolean): Promise<void> {
+    const nextStore = openStore(config.dbPath);
+    const nextQueue = createQueue({
+      store: nextStore,
+      config,
+      analyzer,
+      onAnalyzed: (id, analysis) => applyAnalysis(nextStore, id, analysis),
+    });
+    if (startQueue) nextQueue.start();
+    const nextServer = createApp({ store: nextStore, config, queue: nextQueue }).listen(config.port, config.host);
+    await once(nextServer, 'listening');
+    const address = nextServer.address() as AddressInfo;
+    store = nextStore;
+    queue = nextQueue;
+    server = nextServer;
+    baseUrl = `http://127.0.0.1:${address.port}`;
+  }
+
+  async function stop(): Promise<void> {
+    const currentServer = server;
+    const currentQueue = queue;
+    const currentStore = store;
+    server = null;
+    queue = null;
+    store = null;
+    if (currentServer !== null) {
+      await new Promise<void>((resolve, reject) => currentServer.close((error) => error === undefined ? resolve() : reject(error)));
+    }
+    await currentQueue?.stop();
+    currentStore?.close();
+  }
+
+  await start(options.startQueue ?? true);
 
   let closing: Promise<void> | null = null;
   return {
-    baseUrl: `http://127.0.0.1:${address.port}`,
+    get baseUrl(): string { return baseUrl; },
+    dataDir,
     analyzer,
+    async restart(): Promise<void> {
+      await stop();
+      await start(true);
+    },
     close(): Promise<void> {
       if (closing === null) {
         closing = (async () => {
-          await new Promise<void>((resolve, reject) => server.close((error) => error === undefined ? resolve() : reject(error)));
-          await queue.stop();
-          store.close();
+          await stop();
           await rm(dataDir, { recursive: true, force: true });
         })();
       }

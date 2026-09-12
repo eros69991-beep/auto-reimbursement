@@ -289,3 +289,37 @@ The helper now yields with a bounded captured real timer. A fresh API suite
 passed 166/166 and the fresh parallel workspace suite passed 211 tests
 (25 contracts, 166 API, 20 web); typecheck, web production build, all four
 isolated/browser E2E tests, and `git diff --check` also passed.
+
+### Final release-blocker fix wave
+
+RED — the cross-month maintenance regression used one July-uploaded receipt in
+an August batch and selected the fixed-point set once by July and once by
+August. Before the production change, the July case returned `affected:0`
+while the August case passed because upload-month seeding excluded every
+receipt that already had a `batchId`.
+
+GREEN — `linkedSet` now seeds every receipt whose persisted upload month
+matches the requested month, independently seeds batches by persisted
+`batch.month`, and retains the bidirectional receipt/batch fixed-point walk.
+The focused maintenance suite passed 6/6, including archive, unarchive and
+cleanup from either month for the July/August pair; history remains grouped
+only by the persisted August batch month.
+
+Acceptance — the disposable runtime can now deliberately start with its queue
+stopped and reopen the same SQLite database, while every release scenario still
+owns a fresh temporary data directory, store, queue and loopback server. Seven
+isolated release scenarios cover the duplicate/origin lifecycle; full-refund
+exclusion; durable queued restart; 7+3 automatic sheets and reversible manual
+movement; two notes, blank date and indexed image signer; immutable generated
+history; backend credential absence from captured browser requests and loaded
+assets; archive/unarchive; explicit original cleanup; retained PDF; all ZIP
+members and structured JSON; and an `app.sqlite` reopen that retains settings,
+notes, rules, receipt, batch and file-index content. PDF.js verifies the
+12-page multi-sheet output, exact per-sheet uppercase totals and ordered
+attachment labels. On-disk SHA-256 values prove all ten original fixture files
+remain unchanged after export.
+
+Fresh verification — `pnpm fixtures` generated 53 synthetic fixture records;
+`pnpm test` passed 212 tests (25 contracts, 167 API, 20 web); `pnpm typecheck`
+passed all three workspace packages; the production web build transformed 41
+modules; and `pnpm test:e2e` passed 9/9 in 8.3 seconds.

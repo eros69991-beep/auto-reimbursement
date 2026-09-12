@@ -34,14 +34,25 @@ three corrections, verifies the strong supplier rule, and verifies the
 medium-confidence receipt auto-releases. The representative system-Chrome
 workflow separately waits for the refund-evidence upload before batch creation
 and asserts the 80.00 refund, evidence snapshot, draft-PDF response, option
-save, export, and saved-PDF response. The API PDF suite remains the source of
-text/page-order extraction evidence for original/refund attachment sequencing.
+save, export, and saved-PDF response.
 
-An additional disposable-loopback release contract verifies hostile-origin
-mutation rejection, receipt-owned historical-duplicate evidence, duplicate
-override re-recognition, and export/archive/unarchive/explicit-original-cleanup
-with PDF and structured-backup retention. These are synthetic integration
-checks; they do not establish real receipt-recognition accuracy.
+Seven additional release scenarios each create an independent temporary data
+directory, SQLite store, queue and loopback server. They verify hostile-origin
+mutation rejection and duplicate override; a persisted queued-work restart;
+full-refund exclusion; automatic 7+3 category sheets and reversible manual
+movement; two sheet notes, a blank date and image signer; immutable exported
+history; backend credential absence from browser requests and loaded assets;
+and archive/unarchive/original cleanup with retained PDF plus a reopened backup
+snapshot. PDF.js extracts all 12 pages of the multi-sheet case, including the
+two exact sheet uppercase totals and ordered attachment labels. SHA-256 checks
+also prove every stored original is byte-identical before and after export.
+These are synthetic integration checks; they do not establish real
+receipt-recognition accuracy.
+
+Fresh final-blocker verification generated 53 fixture records, passed 212
+workspace tests (25 contracts, 167 API, 20 web), passed all package typechecks,
+built the production web assets, and passed 9/9 Playwright tests in 8.3
+seconds.
 
 The initial acceptance run exposed synchronization defects in the test itself:
 it could observe the initial `识别中：0` before upload completion and it could

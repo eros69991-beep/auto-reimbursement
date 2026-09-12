@@ -94,7 +94,7 @@ export function history(store: Store): HistoryMonth[] {
 
 function linkedSet(store: Store, month: string): LinkedSet {
   const receiptIds = new Set(store.list('receipts')
-    .filter((receipt) => receipt.batchId === null && receipt.month === month)
+    .filter((receipt) => receipt.month === month)
     .map((receipt) => receipt.id));
   const batchIds = new Set(store.list('batches')
     .filter((batch) => batch.month === month)

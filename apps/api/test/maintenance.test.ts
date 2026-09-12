@@ -54,7 +54,9 @@ describe('maintenance', () => {
     store.close();
   });
 
-  it('uses the persisted local batch month for history, archive, unarchive and cleanup', async () => {
+  it.each(['2026-07', '2026-08'])(
+    'selects a July upload in an August batch by either linked month (%s)',
+    async (selectedMonth) => {
     const temp = await mkdtemp(join(tmpdir(), 'auto-reimbursement-local-month-'));
     const store = openStore(':memory:');
     const config = loadConfig({ DATA_DIR: temp }, temp);
@@ -121,17 +123,18 @@ describe('maintenance', () => {
       });
 
       expect(history(store).map((group) => group.month)).toEqual(['2026-08']);
-      expect(archiveMonth(store, '2026-08', new Date('2026-09-02T00:00:00.000Z')).affected).toBe(1);
+      expect(archiveMonth(store, selectedMonth, new Date('2026-09-02T00:00:00.000Z')).affected).toBe(1);
       expect(store.get('receipts', receipt.id)?.status).toBe('archived');
       expect(store.get('batches', batch.id)?.archivedAt).not.toBeNull();
-      expect((await cleanOriginals(store, config, '2026-08', 'DELETE ORIGINALS 2026-08')).affected).toBe(1);
+      expect((await cleanOriginals(store, config, selectedMonth, `DELETE ORIGINALS ${selectedMonth}`)).affected).toBe(1);
       await expect(readFile(safePath(temp, receipt.original.path))).rejects.toMatchObject({ code: 'ENOENT' });
       expect(await readFile(safePath(temp, pdfPath))).toEqual(pdfBytes);
-      expect(unarchiveMonth(store, '2026-08').affected).toBe(1);
+      expect(unarchiveMonth(store, selectedMonth).affected).toBe(1);
       expect(store.get('receipts', receipt.id)?.status).toBe('generated');
     } finally {
       store.close();
       await rm(temp, { recursive: true, force: true });
     }
-  });
+    },
+  );
 });
