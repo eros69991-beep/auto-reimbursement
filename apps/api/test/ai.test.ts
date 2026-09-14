@@ -26,6 +26,7 @@ const configured: Config = {
   dbPath: 'data/app.sqlite',
   host: '127.0.0.1',
   port: 3000,
+  corsOrigins: [],
   ai: {
     baseUrl: 'https://user:password@vision.example/v1/',
     model: 'vision-model-secret-name',
