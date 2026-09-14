@@ -44,6 +44,9 @@ importers:
       sharp:
         specifier: ^0.35.4
         version: 0.35.4(@types/node@24.13.3)
+      tsx:
+        specifier: ^4.23.13
+        version: 4.23.13
       zod:
         specifier: ^4.5.4
         version: 4.5.4
@@ -69,9 +72,6 @@ importers:
       supertest:
         specifier: ^7.1.4
         version: 7.2.2
-      tsx:
-        specifier: ^4.20.5
-        version: 4.23.13
       typescript:
         specifier: ^5.9.2
         version: 5.9.3

@@ -319,7 +319,7 @@ git commit -m "feat: configure frontend API origin"
 
 **Interfaces:**
 - Produces: root `start:api` script; API `start` script; runtime `tsx` dependency
-- Railway dashboard contract: root `/`, build `pnpm install --frozen-lockfile`, start `pnpm start:api`, health `/health`
+- Railway dashboard contract: root `/`, build `pnpm install --frozen-lockfile`, start `pnpm run start:api`, health `/health`
 
 - [ ] **Step 1: Create a failing Railway startup integration test.** The test creates an isolated temporary data directory, spawns the public root command on an unused port with no AI variables, polls `/health` until it answers, verifies the response, and always terminates the child and removes only its own temporary directory:
 
@@ -332,12 +332,12 @@ import { spawn } from 'node:child_process';
 import test from 'node:test';
 
 const root = new URL('../', import.meta.url);
-test('pnpm start:api serves the Railway health contract', async (context) => {
+test('pnpm run start:api serves the Railway health contract', async (context) => {
   const dataDir = await mkdtemp(join(tmpdir(), 'railway-start-'));
   const port = '3187';
-  const child = spawn('pnpm', ['start:api'], {
+  const child = spawn('pnpm run start:api', {
     cwd: root,
-    shell: process.platform === 'win32',
+    shell: true,
     env: {
       ...process.env,
       HOST: '127.0.0.1',
@@ -524,7 +524,7 @@ The model line is explicitly illustrative; README instructs the user to enter th
 Railway source branch: feature/mvp-implementation (or the merged production branch)
 Root Directory: /
 Build Command: pnpm install --frozen-lockfile
-Start Command: pnpm start:api
+Start Command: pnpm run start:api
 Healthcheck Path: /health
 Restart Policy: Always
 Replicas: 1
@@ -597,7 +597,7 @@ $env:HOST='127.0.0.1'
 $env:PORT='3187'
 $env:DATA_DIR=(Resolve-Path 'work/hosted-smoke-data').Path
 $env:CORS_ORIGINS='https://zidongbx.netlify.app'
-pnpm start:api
+pnpm run start:api
 ```
 
 In a second process call `http://127.0.0.1:3187/health` with and without `Origin: https://zidongbx.netlify.app`. Verify HTTP 200, JSON `{"status":"ok"}`, and exact `Access-Control-Allow-Origin` for the origin-bearing request. Send `SIGTERM`/Ctrl+C, verify clean exit, and remove only the exact `work/hosted-smoke-data` directory after resolving and confirming it is inside the worktree.

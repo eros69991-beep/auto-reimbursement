@@ -4,6 +4,7 @@
   "version": "0.0.0",
   "scripts": {
     "dev": "tsx watch src/server.ts",
+    "start": "node --import tsx src/server.ts",
     "test": "vitest run --configLoader runner",
     "typecheck": "tsc --noEmit"
   },
@@ -14,6 +15,7 @@
     "multer": "^2.3.0",
     "pdfkit": "^0.20.2",
     "sharp": "^0.35.4",
+    "tsx": "^4.23.13",
     "zod": "^4.5.4"
   },
   "devDependencies": {
@@ -24,7 +26,6 @@
     "@types/supertest": "^6.0.3",
     "pdfjs-dist": "^6.3.289",
     "supertest": "^7.1.4",
-    "tsx": "^4.20.5",
     "typescript": "^5.9.2",
     "vitest": "^3.2.4"
   }

@@ -101,11 +101,11 @@ Railway service settings use:
 ```text
 Root Directory: /
 Build Command: pnpm install --frozen-lockfile
-Start Command: pnpm start:api
+Start Command: pnpm run start:api
 Healthcheck Path: /health
 ```
 
-Repository scripts make `pnpm start:api` the stable public entry point. No
+Repository scripts make `pnpm run start:api` the stable public entry point. No
 deprecated `railway.json` or `railway.toml` is added: as of this design date,
 Railway has deprecated Config as Code for new services and scheduled its hard
 cutoff for 2026-12-01. A project-specific `.railway/railway.ts` is also omitted
