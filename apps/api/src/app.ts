@@ -1,7 +1,7 @@
 import express from 'express';
 import { MulterError } from 'multer';
 
-import type { Config } from './config.js';
+import { LOCAL_CORS_ORIGINS, type Config } from './config.js';
 import type { Store } from './db.js';
 import type { RecognitionQueue } from './queue.js';
 import { createRouter, HttpError } from './routes.js';
@@ -14,15 +14,39 @@ type AppDependencies = {
 
 export function createApp(deps?: AppDependencies): express.Express {
   const application = express();
+  const allowedOrigins = deps?.config.corsOrigins ?? [...LOCAL_CORS_ORIGINS];
   application.use((request, response, next) => {
-    if (!isMutation(request.method) || isLocalMutation(request)) {
+    const origin = request.get('origin');
+    const allowed = origin !== undefined && allowedOrigins.includes(origin);
+    if (origin !== undefined) {
+      response.vary('Origin');
+    }
+    if (allowed) {
+      response.set('Access-Control-Allow-Origin', origin);
+    }
+
+    if (request.method === 'OPTIONS') {
+      if (!allowed) {
+        rejectCrossOrigin(response);
+        return;
+      }
+      response.set(
+        'Access-Control-Allow-Methods',
+        'GET,HEAD,POST,PUT,PATCH,DELETE,OPTIONS',
+      );
+      response.set(
+        'Access-Control-Allow-Headers',
+        request.get('access-control-request-headers') ?? 'content-type',
+      );
+      response.status(204).end();
+      return;
+    }
+
+    if (!isMutation(request.method) || origin === undefined || allowed) {
       next();
       return;
     }
-    response.status(403).json({
-      code: 'CROSS_ORIGIN_MUTATION',
-      message: '拒绝非本机来源的修改请求',
-    });
+    rejectCrossOrigin(response);
   });
   application.use(express.json({ limit: '1mb' }));
 
@@ -161,30 +185,9 @@ function isMutation(method: string): boolean {
   return method === 'POST' || method === 'PUT' || method === 'PATCH' || method === 'DELETE';
 }
 
-function isLocalMutation(request: express.Request): boolean {
-  const host = hostname(request.get('host') ?? '');
-  if (host === null || !isLoopback(host)) {
-    return false;
-  }
-  const origin = request.get('origin');
-  if (origin !== undefined) {
-    const originHost = hostname(origin);
-    if (originHost === null || !isLoopback(originHost)) {
-      return false;
-    }
-  }
-  const fetchSite = request.get('sec-fetch-site');
-  return fetchSite === undefined || fetchSite === 'same-origin' || fetchSite === 'same-site' || fetchSite === 'none';
-}
-
-function hostname(value: string): string | null {
-  try {
-    return new URL(value.includes('://') ? value : `http://${value}`).hostname.toLowerCase();
-  } catch {
-    return null;
-  }
-}
-
-function isLoopback(value: string): boolean {
-  return value === 'localhost' || value === '127.0.0.1' || value === '::1' || value === '[::1]';
+function rejectCrossOrigin(response: express.Response): void {
+  response.status(403).json({
+    code: 'CROSS_ORIGIN_MUTATION',
+    message: '拒绝非本机来源的修改请求',
+  });
 }
