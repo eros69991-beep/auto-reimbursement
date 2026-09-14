@@ -315,43 +315,59 @@ git commit -m "feat: configure frontend API origin"
 - Modify: `package.json`
 - Modify: `apps/api/package.json`
 - Modify: `pnpm-lock.yaml`
-- Create: `test/deployment-contract.test.mjs`
+- Create: `test/railway-start.test.mjs`
 
 **Interfaces:**
 - Produces: root `start:api` script; API `start` script; runtime `tsx` dependency
 - Railway dashboard contract: root `/`, build `pnpm install --frozen-lockfile`, start `pnpm start:api`, health `/health`
 
-- [ ] **Step 1: Create a failing repository deployment-contract test.**
+- [ ] **Step 1: Create a failing Railway startup integration test.** The test creates an isolated temporary data directory, spawns the public root command on an unused port with no AI variables, polls `/health` until it answers, verifies the response, and always terminates the child and removes only its own temporary directory:
 
 ```js
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { spawn } from 'node:child_process';
 import test from 'node:test';
 
 const root = new URL('../', import.meta.url);
-const json = (path) => JSON.parse(readFileSync(new URL(path, root), 'utf8'));
-
-test('the monorepo exposes a stable Railway API start command', () => {
-  const workspace = json('package.json');
-  const api = json('apps/api/package.json');
-  assert.equal(workspace.scripts['start:api'], 'pnpm --filter @auto-reimbursement/api start');
-  assert.equal(api.scripts.start, 'node --import tsx src/server.ts');
-  assert.equal(typeof api.dependencies.tsx, 'string', 'tsx must be installed at runtime');
-});
-
-test('deprecated Railway config-as-code files are absent', () => {
-  assert.equal(existsSync(new URL('railway.json', root)), false);
-  assert.equal(existsSync(new URL('railway.toml', root)), false);
+test('pnpm start:api serves the Railway health contract', async (context) => {
+  const dataDir = await mkdtemp(join(tmpdir(), 'railway-start-'));
+  const port = '3187';
+  const child = spawn('pnpm', ['start:api'], {
+    cwd: root,
+    shell: process.platform === 'win32',
+    env: {
+      ...process.env,
+      HOST: '127.0.0.1',
+      PORT: port,
+      DATA_DIR: dataDir,
+      CORS_ORIGINS: 'https://zidongbx.netlify.app',
+      AI_BASE_URL: '', AI_MODEL: '', AI_API_KEY: '',
+    },
+    stdio: 'pipe',
+  });
+  context.after(async () => {
+    child.kill();
+    await rm(dataDir, { recursive: true, force: true });
+  });
+  let response;
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    try { response = await fetch(`http://127.0.0.1:${port}/health`); break; }
+    catch { await new Promise((resolve) => setTimeout(resolve, 100)); }
+  }
+  assert.ok(response, 'API did not start within four seconds');
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { status: 'ok' });
 });
 ```
 
-Import `existsSync` in the test.
-
 - [ ] **Step 2: Run the deployment-contract test and verify RED.**
 
-Run: `node --test test/deployment-contract.test.mjs`
+Run: `node --test test/railway-start.test.mjs`
 
-Expected: root and API start scripts are missing and `tsx` is not a runtime API dependency.
+Expected: the child exits because the root `start:api` script is missing, and the test reports that the API did not start.
 
 - [ ] **Step 3: Add the production scripts and move `tsx` into API runtime dependencies.** Set:
 
@@ -367,14 +383,14 @@ Run `pnpm --filter @auto-reimbursement/api add tsx@^4.23.13` to update the manif
 
 - [ ] **Step 4: Verify the start contract without launching a persistent service.**
 
-Run: `node --test test/deployment-contract.test.mjs && pnpm install --frozen-lockfile --lockfile-only`
+Run: `node --test test/railway-start.test.mjs && pnpm install --frozen-lockfile --lockfile-only`
 
 Expected: the contract test passes and the lockfile is already current.
 
 - [ ] **Step 5: Commit the start contract.**
 
 ```bash
-git add package.json apps/api/package.json pnpm-lock.yaml test/deployment-contract.test.mjs
+git add package.json apps/api/package.json pnpm-lock.yaml test/railway-start.test.mjs
 git commit -m "build: add Railway API start contract"
 ```
 
@@ -473,36 +489,12 @@ git commit -m "build: validate Netlify frontend deployment"
 **Files:**
 - Modify: `.env.example`
 - Modify: `README.md`
-- Modify: `test/deployment-contract.test.mjs`
 
 **Interfaces:**
 - Documents the exact Railway and Netlify dashboard fields
 - Keeps secret values backend-only and uses only non-secret illustrative values
 
-- [ ] **Step 1: Add failing documentation assertions to the deployment contract.**
-
-```js
-test('deployment documentation defines persistence and provider boundaries', () => {
-  const example = readFileSync(new URL('.env.example', root), 'utf8');
-  const readme = readFileSync(new URL('README.md', root), 'utf8');
-  assert.match(example, /^# HOST=0\.0\.0\.0$/m);
-  assert.match(example, /^# CORS_ORIGINS=https:\/\/zidongbx\.netlify\.app$/m);
-  assert.match(example, /^# DATA_DIR=\/app\/data$/m);
-  assert.match(readme, /Start Command:\s*`pnpm start:api`/);
-  assert.match(readme, /Healthcheck Path:\s*`\/health`/);
-  assert.match(readme, /Mount Path:\s*`\/app\/data`/);
-  assert.match(readme, /VITE_API_BASE_URL/);
-  assert.doesNotMatch(readme, /AI_API_KEY\s*=\s*sk-/i);
-});
-```
-
-- [ ] **Step 2: Run the contract test and verify RED.**
-
-Run: `node --test test/deployment-contract.test.mjs`
-
-Expected: the new documentation assertions fail because hosted settings are absent.
-
-- [ ] **Step 3: Update `.env.example` without real secrets.** Include local defaults and commented Railway examples:
+- [ ] **Step 1: Update `.env.example` without real secrets.** Include local defaults and commented Railway examples:
 
 ```dotenv
 # Local defaults
@@ -526,7 +518,7 @@ AI_API_KEY=
 
 The model line is explicitly illustrative; README instructs the user to enter the exact vision-capable model supported by their DeepSeek account rather than treating the example text as a model identifier.
 
-- [ ] **Step 4: Expand README with exact console settings and verification order.** Document:
+- [ ] **Step 2: Expand README with exact console settings and verification order.** Document:
 
 ```text
 Railway source branch: feature/mvp-implementation (or the merged production branch)
@@ -550,16 +542,16 @@ Variable: VITE_API_BASE_URL=https://the-generated-domain.up.railway.app
 
 Explain that the operator first deploys Railway, attaches the volume before real uploads, generates the domain, verifies `/health`, then sets the exact domain in Netlify and redeploys. Include the final persistence smoke test: upload a non-sensitive sample, redeploy Railway, and confirm the record and image remain.
 
-- [ ] **Step 5: Run documentation contract and secret scans.**
+- [ ] **Step 3: Review the rendered Markdown against the approved spec, then run secret scans.** Manually check that every Railway field, Netlify field, volume step, domain step, secret boundary, and smoke check is present and unambiguous.
 
-Run: `node --test test/deployment-contract.test.mjs && rg -n --hidden -g '!node_modules' -g '!apps/web/dist/**' -e 'sk-[A-Za-z0-9_-]{12,}' -e 'VITE_AI_' .`
+Run: `rg -n --hidden -g '!node_modules' -g '!apps/web/dist/**' -e 'sk-[A-Za-z0-9_-]{12,}' -e 'VITE_AI_' .`
 
-Expected: deployment contract passes and the scan returns no matches. `AI_API_KEY=` in `.env.example` is permitted because its value is empty and is covered by the explicit contract test.
+Expected: the scan returns no matches. `AI_API_KEY=` in `.env.example` is permitted because its value is empty.
 
-- [ ] **Step 6: Commit operator documentation.**
+- [ ] **Step 4: Commit operator documentation.**
 
 ```bash
-git add .env.example README.md test/deployment-contract.test.mjs
+git add .env.example README.md
 git commit -m "docs: document Railway and Netlify deployment"
 ```
 
