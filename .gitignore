@@ -10,4 +10,6 @@ test-results/
 *.log
 *.tsbuildinfo
 .worktrees/
+.netlify/
+work/
 data/
