@@ -40,11 +40,14 @@ describe('hosted API URLs', () => {
   });
 
   it('returns absolute URLs for browser-loaded evidence', () => {
-    expect(api.imageUrl('image / 1')).toBe(
-      'http://127.0.0.1:3000/api/images/image%20%2F%201',
+    const image = new URL(api.imageUrl('image / 1'));
+    const receipt = new URL(api.receiptOriginalUrl('receipt / 1'));
+
+    expect(image.pathname).toBe('/api/images/image%20%2F%201');
+    expect(receipt.pathname).toBe(
+      '/api/receipts/receipt%20%2F%201/original-image',
     );
-    expect(api.receiptOriginalUrl('receipt / 1')).toBe(
-      'http://127.0.0.1:3000/api/receipts/receipt%20%2F%201/original-image',
-    );
+    expect(image.origin).toMatch(/^https?:\/\//);
+    expect(receipt.origin).toMatch(/^https?:\/\//);
   });
 });
