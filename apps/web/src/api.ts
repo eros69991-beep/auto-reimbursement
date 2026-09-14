@@ -15,8 +15,29 @@ import type {
   UploadResult,
 } from '@auto-reimbursement/contracts';
 
-export async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(path, init);
+const LOCAL_API_BASE_URL = 'http://127.0.0.1:3000';
+
+export function normalizeApiBaseUrl(value: string | undefined): string {
+  return value?.trim().replace(/\/+$/, '') || LOCAL_API_BASE_URL;
+}
+
+const configuredApiBaseUrl = normalizeApiBaseUrl(
+  import.meta.env.VITE_API_BASE_URL,
+);
+
+export function apiUrl(
+  path: string,
+  baseUrl = configuredApiBaseUrl,
+): string {
+  return `${normalizeApiBaseUrl(baseUrl)}/${path.replace(/^\/+/, '')}`;
+}
+
+export async function requestJson<T>(
+  path: string,
+  init?: RequestInit,
+  baseUrl = configuredApiBaseUrl,
+): Promise<T> {
+  const response = await fetch(apiUrl(path, baseUrl), init);
   if (!response.ok) {
     const error = await response.json().catch(() => null) as Partial<ApiErrorBody> | null;
     const failure = new Error(typeof error?.message === 'string' ? error.message : '请求失败');
@@ -38,11 +59,11 @@ function progress(ids: string[], signal?: AbortSignal): Promise<Progress> {
 }
 
 function imageUrl(id: string): string {
-  return `/api/images/${encodeURIComponent(id)}`;
+  return apiUrl(`/api/images/${encodeURIComponent(id)}`);
 }
 
 function receiptOriginalUrl(id: string): string {
-  return `/api/receipts/${encodeURIComponent(id)}/original-image`;
+  return apiUrl(`/api/receipts/${encodeURIComponent(id)}/original-image`);
 }
 
 function receipts(view: 'pool' | 'pending'): Promise<Receipt[]> {
@@ -91,7 +112,7 @@ async function addRefundImage(id: string, file: File): Promise<Receipt> {
 }
 
 async function deleteReceipt(id: string): Promise<void> {
-  const response = await fetch(`/api/receipts/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  const response = await fetch(apiUrl(`/api/receipts/${encodeURIComponent(id)}`), { method: 'DELETE' });
   if (!response.ok) {
     const error = await response.json().catch(() => null) as Partial<ApiErrorBody> | null;
     throw new Error(typeof error?.message === 'string' ? error.message : '请求失败');
