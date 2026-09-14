@@ -1,0 +1,17 @@
+{
+  "page": { "width": 270, "height": 165, "margin": 5 },
+  "title": { "y": 9, "underlineY": [21, 22] },
+  "metadataY": 29,
+  "table": {
+    "x": 5,
+    "y": 34,
+    "width": 260,
+    "columns": { "project": 50, "summary": 98, "amount": 46, "verticalLabel": 8, "notes": 58 },
+    "headerHeight": 17,
+    "bodyHeight": 58,
+    "totalHeight": 12,
+    "uppercaseHeight": 14,
+    "notesSplitY": 80
+  },
+  "footerY": 146
+}

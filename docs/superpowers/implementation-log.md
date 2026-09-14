@@ -1,0 +1,325 @@
+# Implementation log
+
+## Task 1: Project skeleton and test environment
+
+Task 1 was completed before this plan recovery; historical RED output is not available in this document. Its already-reviewed implementation state is preserved.
+
+## Task 2: Backend-only configuration and local data directories
+
+RED — `pnpm --filter @auto-reimbursement/api test test/config.test.ts` exited 1 before production edits. Vitest could not resolve `../src/config.js`, as expected for the missing configuration module.
+
+GREEN — `pnpm --filter @auto-reimbursement/api test test/config.test.ts` exited 0: 1 test passed with no warnings.
+
+Verification — `pnpm test` exited 0: API 2/2 tests and web 1/1 test passed with no warnings. `pnpm typecheck` exited 0 for both workspace packages. `git check-ignore data/probe .env` reported both paths; `git check-ignore .env.example` exited 1, confirming the example remains tracked.
+
+## Task 3: Shared contracts, money invariants and SQLite persistence
+
+RED — `pnpm --filter @auto-reimbursement/api test test/db.test.ts` exited 1 before production edits because Vitest could not resolve the expected missing `../src/db.js` module. After workspace wiring, `pnpm --filter @auto-reimbursement/contracts test` exited 1 because the expected `./index` money exports did not exist. Mutation RED for synchronous transactions and the table whitelist exited 1 with 2 expected failures: Promise callbacks committed instead of throwing `ASYNC_TRANSACTION`, and a forged table name reached SQLite instead of throwing `INVALID_TABLE`.
+
+GREEN — `pnpm --filter @auto-reimbursement/contracts test` exited 0 with 20/20 tests. `pnpm --filter @auto-reimbursement/api test test/db.test.ts` exited 0 with 8/8 tests using real SQLite, real disk reopen, and the SQLite backup API.
+
+Verification — `pnpm test` exited 0 with 31/31 tests (contracts 20, API 10, web 1) and no warnings or failures. `pnpm typecheck` exited 0 for contracts, API, and web. `git diff --check` exited 0; Git reported only informational Windows line-ending conversion notices.
+
+Commit — `feat: persist reimbursement records in sqlite`; its immutable SHA is recorded in the Task 3 report immediately after Git creates the commit.
+
+## Task 4: Ordered image upload and immutable local storage
+
+RED — `pnpm --filter @auto-reimbursement/api test test/upload.test.ts` exited 1 before production edits because Vitest could not resolve the expected missing `../src/receipts.js` module. No upload production module or route existed at that point.
+
+GREEN — `pnpm --filter @auto-reimbursement/api test test/upload.test.ts` exited 0 with 9/9 tests. The first implementation run exposed and then fixed an image response header bug: Express treated the slash-containing indexed relative path as a literal content type; using only its trusted generated extension made the focused suite pass.
+
+Coverage — the focused suite uses real Sharp-generated/decoded pixels, real Multer multipart parsing, real Supertest requests, a real in-memory SQLite Store, and real temporary-disk bytes. It verifies byte-for-byte preservation and SHA-256, multipart/SQLite order, exact 50-file acceptance and 51-file HTTP 413 rejection, decoded format over claimed MIME/extension, malformed per-item rejection without consuming order, a greater-than-20-MiB limit, a greater-than-40-million-pixel limit, browser-name traversal irrelevance, zero-file rejection, health-only `createApp()`, the 1 MiB JSON limit, same-transaction Receipt/FileIndexEntry writes, exact-orphan cleanup that preserves a sentinel file, sanitized internal errors, and indexed live/missing/deleted image responses.
+
+Implementation — original bytes are written once with `flag: 'wx'` beneath generated UUID month/kind paths and are never recompressed. Validation completes before any path is created. Receipt upload is sequential; `nextOrder()`, the recognizing Receipt, and its FileIndexEntry are persisted in one synchronous transaction. A transaction failure unlinks only the exact newly created path. Image reads require a live file-index row and resolve it through `safePath`; no static directory is exposed. Multer bounds memory to 50 files at 20 MiB each, which can still require substantial local RAM at the maximum request size. The server opens one Store and closes it when the HTTP server shuts down, while dependency-free app creation retains isolated health behavior.
+
+Verification — `pnpm test` exited 0 with 46/46 tests (contracts 25, API 20, web 1), with no failures or runtime warnings. `pnpm typecheck` exited 0 for contracts, API, and web.
+
+Scope review — changes are limited to the Task 4 allowlist: upload/storage/routes/app/server code, the upload integration suite, the API manifest and pnpm lockfile, and this log. No duplicate detection, recognition/AI, queue, frontend, schema expansion, refund, or later-task behavior was added.
+
+Commit — `feat: upload immutable receipt images in order`; its immutable SHA is recorded in the Task 4 report immediately after Git creates the commit.
+
+## Task 5: Historical exact and suspected duplicate detection before AI
+
+RED — `pnpm --filter @auto-reimbursement/api test test/duplicates.test.ts` exited 1 before production edits because Vitest could not resolve the expected missing `../src/duplicates.js` module.
+
+GREEN — the first focused duplicate/upload run exposed two issues and exited 1: a suspected-order test accidentally reused the helper's default SHA-256 and therefore exercised exact matching, while the new pre-transaction Store lookup occurred outside Task 4's orphan-cleanup boundary. After giving the fixture distinct SHA-256 values and widening that cleanup guard, `pnpm --filter @auto-reimbursement/api test test/duplicates.test.ts test/upload.test.ts` exited 0 with 23/23 tests. `pnpm --filter @auto-reimbursement/api test` then exited 0 with 34/34 API tests, and its package typecheck exited 0.
+
+Verification — the final fresh focused duplicate/upload command exited 0 with 23/23 tests. `pnpm test` exited 0 with 60/60 workspace tests (contracts 25, API 34, web 1), and `pnpm typecheck` exited 0 for all three workspace packages.
+
+Coverage — tests use real Sharp-decoded gradient, recompressed PNG, checkerboard, and seeded pixel images; real multipart requests; real temporary disk bytes; and real SQLite transactions. They cover byte SHA-256, 16-digit 64-bit dHash, altered PNG compression, visually unrelated checkerboards, empty hashes, self-exclusion, deterministic ordering, archived/deleted history, exact upload rejection with `duplicateId`, indexed historical evidence, suspected pending state, atomic race recheck, orphan cleanup, metadata-plus-image refinement at Hamming distance 10, local NFKC merchant normalization, override behavior, direct confirmation transitions, and HTTP 404/409 mappings.
+
+Implementation — `storeImage` retains bounded metadata and complete raw decoding, then computes fingerprints before directory/file persistence and writes the untouched bytes exclusively. Upload performs an early historical exact check and repeats duplicate discovery inside the Receipt/FileIndexEntry transaction; a race loser or ordinary exact duplicate removes only its newly created unindexed path. Suspected visual matches persist as pending with `suspected_duplicate` and deterministic evidence IDs. Historical search includes archived and deleted receipts, ignores empty/malformed hashes and the same indexed image, and never invokes `BigInt` before 16-hex validation. `confirmDistinct` clears duplicate state, records the override, and resumes recognition when analysis is absent. Refinement requires the image-distance threshold together with paid amount, normalized nonempty merchant, and nonnull equal date; metadata alone never matches.
+
+Scope review — changes are limited to the Task 5 allowlist and this log. Task 4's full decode, zero multipart-field limit, exclusive-write ownership cleanup, immutable original bytes, and indexed image access remain covered. No AI adapter, recognition queue, decision engine, learning module, schema change, refund behavior, or later-task functionality was added. The no-subagent instruction prevented dispatching the review skill's reviewer, so the BigInt/hash validation, deterministic order, cleanup paths, concurrent transaction window, historical immutability, response shape, and HTTP mapping review was performed locally.
+
+Commit — `feat: block duplicate receipts across history`; its immutable SHA is recorded in the Task 5 report immediately after Git creates the commit.
+
+## Task 6: Replaceable multimodal recognition and strict payment extraction
+
+RED — `pnpm --filter @auto-reimbursement/api test test/ai.test.ts` exited 1 before production edits because Vitest could not resolve the expected missing `../src/ai/openai-compatible.js` module.
+
+GREEN — after adding the provider-neutral interfaces, strict Zod validator, prompt, OpenAI-compatible adapter and safe status route, `pnpm --filter @auto-reimbursement/api test test/ai.test.ts` exited 0 with 15/15 tests. The suite uses only a fetch-boundary fake with complete real `Response` objects and asserts adapter outputs, errors, endpoint joining, request headers/body, image data URLs and response decoding.
+
+Coverage — validation tests cover the exact ten-category enum, shared `parseFen` money rules and overflow, leap-day-aware calendar dates, finite inclusive confidence bounds, ambiguous/null consistency, field and array caps, root/nested unknown keys and non-object inputs. Adapter tests cover configured and unconfigured status, trailing-slash endpoint joining, model/temperature/messages/data URL payloads, upstream-only Authorization, string versus unknown content forms, terminal missing-config/401/403 behavior, and retryability for 429, 5xx, network, timeout, malformed transport JSON, malformed content JSON and schema-invalid JSON. Error and status assertions verify that credentials, model, URL details and upstream bodies are never exposed.
+
+Implementation — `ReceiptAnalyzer` and `AiImage` depend only on shared `Analysis`/`ImageRef` contracts. Vendor response traversal remains private to the one adapter. Successful content is parsed as strict JSON and validated without coercing categories, amounts or dates. The adapter uses `AbortSignal.timeout(45000)`, maps failures to code-only `AiError` values, and never reads error bodies. `GET /api/ai/status` returns only `{configured,provider}` with the constant provider label `openai-compatible`; receipt uploads remain unchanged and never invoke analysis.
+
+Verification — the final focused command exited 0 with 15/15 tests. `pnpm test` exited 0 with 75/75 workspace tests (contracts 25, API 49, web 1), and `pnpm typecheck` exited 0 for all three workspace packages. `git diff --check` exited 0 with only informational Windows line-ending notices.
+
+Scope review — changes are limited to the Task 6 allowlist and this log: AI types/prompt/validation/adapter code, the status route, the AI test suite, Zod manifest/lockfile changes, and this implementation record. No analyzer call was added to upload, and no queue, decision, learning, persistence schema, refund or UI behavior was implemented. The explicit no-subagent instruction required local review of vendor isolation, URL joining, auth secrecy, schema/date strictness, error mapping and status response shape.
+
+Commit — `feat: add replaceable receipt analysis adapter`; its immutable SHA is recorded in the Task 6 report immediately after Git creates the commit.
+
+## Task 7: Durable recognition queue, bounded concurrency and retries
+
+RED — `pnpm --filter @auto-reimbursement/api test test/queue.test.ts` exited 1 before production edits because Vitest could not resolve the expected missing `../src/queue.js` module. The queue scheduler, progress calculation, retry route and lifecycle wiring did not exist.
+
+GREEN — after implementing the durable scheduler and API lifecycle, `pnpm --filter @auto-reimbursement/api test test/queue.test.ts` exited 0 with 12/12 tests. An intermediate run exposed a test-boundary issue: real asynchronous file reads completed after the virtual clock had already advanced, causing retries to be scheduled beyond the advanced time. Condition-based real-I/O waits were added while retaining fake timers for the exact 1-second and 3-second retry delays.
+
+Coverage — the queue suite uses real SQLite stores, real indexed temporary PNG files, real Sharp fingerprints, real multipart upload routes and fake timers. It verifies a four-call active bound across five receipts, exactly three total attempts, persisted attempts before adapter invocation, 1-second then 3-second delays, no transaction across analyzer/callback awaits, terminal versus transient `AiError`, restart recovery from `nextAttemptAt`, attempt-exhausted recovery without an adapter call, Task 7's temporary successful-analysis pending state, completion-order independence from `uploadOrder`, stop/drain timer behavior, missing index/file handling, retry 404/409 guards and reset, progress restricted to requested unique IDs, upload and confirm-distinct enqueue, and exact/suspected duplicate exclusion before analyzer invocation.
+
+Implementation — `createQueue` scans durable recognizing rows in upload order, reserves active IDs synchronously, bounds work by configured concurrency, and maintains one earliest-due timer. It increments attempts in a synchronous transaction before reading the indexed original and awaiting the provider. Retryable adapter failures persist `nextAttemptAt`; terminal or exhausted failures become pending with `api_failed`. `stop` disables launches, clears the timer and waits for active calls; `drain` waits for active and scheduled retry work. `persistAnalysis` is the intentional Task 7 callback: it stores the original analysis and parsed `recognizedFen`, then leaves the row pending with `amount_uncertain` and `category_uncertain` for Task 8 to replace. No credentials, image base64 or upstream bodies are logged.
+
+Integration — accepted upload IDs and confirmed-distinct recognizing IDs wake the queue. Retry is allowed only for pending `api_failed` rows and resets attempts, due time and the failure reason before enqueue. Progress counts only existing receipts among the requested unique IDs. Production constructs the replaceable analyzer and queue once, resumes durable work on startup, and closes the HTTP server, queue and store in safe shutdown order.
+
+Self-review — active-set slot reservation occurs before any asynchronous boundary; completion callbacks cannot oversubscribe the configured bound. Timer clearing and re-scheduling follows each launch, completion and stop. No Store transaction contains an `await`. Failure state is based on the persisted attempt count. HTTP mappings are 404 for missing retry IDs and 409 for ineligible states. Missing, deleted, wrongly owned or path-mismatched original indexes never reach the analyzer. Upload order fields are never rewritten. The implementation contains no Task 8 confidence release, rule learning, refund, UI or unrelated behavior.
+
+Verification — the focused queue suite exited 0 with 12/12 tests. `pnpm --filter @auto-reimbursement/api test` exited 0 with 63/63 API tests, `pnpm --filter @auto-reimbursement/api typecheck` exited 0, and `git diff --check` exited 0 with only informational Windows line-ending notices. Final fresh workspace-wide test and typecheck evidence is recorded in the Task 7 report.
+
+Commit — `feat: queue receipt analysis with durable retries`; its immutable SHA is recorded in the Task 7 report immediately after Git creates the commit.
+
+## Task 8: Confidence decisions and automatic release
+
+RED — `pnpm --filter @auto-reimbursement/api test test/decision.test.ts` exited 1 before production edits because Vitest could not resolve the expected missing `../src/decision.js` module.
+
+GREEN — `pnpm --filter @auto-reimbursement/api test test/decision.test.ts` exited 0 with 17/17 tests. The decision suite uses real decision and SQLite store behavior to cover default high confidence release; strict ambiguity/null/floor ordering; boundary confidences; normalized merchant and keyword strong-rule matches; medium release only with an agreeing strong rule; unconfirmed-rule rejection; category/rule conflicts before high release; no amount inference; duplicate refinement veto; lifecycle guards; and transactional rollback on invalid amounts.
+
+Implementation — `decide` evaluates ambiguity, null fields, medium floors, matching strong-rule conflicts, high thresholds, then medium rule-supported release in that order. Its local NFKC normalizer keeps merchant and keyword matching isolated until Task 9. `applyAnalysis` performs the recognition-to-ready/pending transition in one Store transaction, persists original analysis plus parsed recognized/paid amounts and extracted fields, re-runs duplicate refinement, deduplicates pending reasons, and makes duplicate evidence veto automatic release. No ready row can retain a null amount or category. Production now calls `applyAnalysis`; the Task 7 temporary callback remains only for its existing queue coverage.
+
+Verification — final focused, API, workspace test, and typecheck evidence is recorded in the Task 8 report after the commit is created. `git diff --check` exited 0 before commit.
+
+## Task 9: Local correction learning and editable rules
+
+RED — `pnpm --filter @auto-reimbursement/api test test/learning.test.ts` exited 1 before production edits because Vitest could not resolve the missing `../src/learning.js` module.
+
+GREEN — the focused learning suite exited 0 with 10/10 tests. It verifies three consistent corrections promote a normalized merchant rule; a conflicting correction resets its confirmation count; blank feature data yields no rule; repeated confirmation of one receipt/category is counted only once; keyword fallback is normalized; and explicit receipt confirmation, rule CRUD, invalid categories, archived edits, and unresolved duplicates follow their required guards.
+
+Implementation — schema version 2 adds a vendor-neutral `corrections` SQLite table, using `INSERT OR IGNORE` for one audit record per receipt/category. Local learning prefers a normalized merchant, otherwise the first usable AI keyword, and persists the original AI category, latest user category, count, strong flag and timestamp in ordinary rules. Receipt PATCH remains pending; explicit confirmation validates mutable state, final amount/category and duplicate resolution, preserves the original analysis, clears pending reasons, then records the correction in the same transaction. Rules are editable through GET/PUT/DELETE API endpoints, and decision matching now uses the shared feature normalizer.
+
+Verification — `pnpm --filter @auto-reimbursement/api test` exited 0 with 92/92 tests and `pnpm --filter @auto-reimbursement/api typecheck` exited 0. `git diff --check` exited 0 with only informational line-ending notices.
+
+## Task 10: Full and partial refunds with evidence
+
+RED — `pnpm --filter @auto-reimbursement/api test test/refunds.test.ts` exited 1 before production edits because Vitest could not resolve the missing `../src/refunds.js` module.
+
+GREEN — the focused refund suite exited 0 with 5/5 tests. It covers partial, full and reset refunds; eligibility guards; immutable financial history; ordered, indexed refund-image evidence; original-hash preservation; persistence-failure cleanup; strict HTTP validation; and the one-file multipart boundary.
+
+Implementation — refunds change only `refundFen`, retaining the receipt's existing status and recognition data. Eligibility uses the shared net amount and excludes non-ready, deleted, archived, batched, uncategorized and fully refunded rows. Refund evidence is stored below the receipt's original upload month, appended in request order, indexed as `refund` evidence and cleaned up only at its newly created path if the synchronous database transaction fails. HTTP routes expose strict `PUT /receipts/:id/refund` and one-file, 20 MiB `POST /receipts/:id/refund-images` endpoints; generated and archived receipts return conflict responses.
+
+Verification — `pnpm --filter @auto-reimbursement/api test` exited 0 with 104/104 tests, `pnpm --filter @auto-reimbursement/api typecheck` exited 0, and `git diff --check` exited 0 (informational Windows line-ending notices only).
+
+## Task 11: Reimbursement defaults, signer modes and note library
+
+RED — `pnpm --filter @auto-reimbursement/api test test/settings.test.ts` exited 1 before production edits because Vitest could not resolve the missing `../src/settings.js` module.
+
+GREEN — `pnpm --filter @auto-reimbursement/api test test/settings.test.ts` exited 0 with 5/5 tests. It covers default values, blank/custom local-calendar dates, indexed signature mode and text-mode masking, multiline and invalid notes, durable reopen, generated note IDs, route ID matching, settings response secrecy, and persistence-failure cleanup.
+
+Implementation — the fixed `default` settings row now supplies decision thresholds and validated reimbursement options. Signature source bytes are decoded, exclusively written under the configured data root's `settings/signatures/` directory, indexed in the same transaction as their Settings reference, and cleaned up precisely if persistence fails. Note content retains line breaks; route POST generates IDs and PUT requires a matching path ID. Existing decision analysis uses persisted settings instead of a temporary default object.
+
+Verification — the API suite passed 110/110 tests and API typecheck passed; `git diff --check` passed.
+
+## Task 12: Pool totals, manual batch creation and immutable snapshots
+
+RED — `pnpm --filter @auto-reimbursement/api test test/batches.test.ts` exited 1 before production edits because Vitest could not resolve the missing `../src/batches.js` module. The later expanded RED run also failed only on the absent totals, receipt-list/deletion, batch lookup, and HTTP route operations.
+
+GREEN — `pnpm --filter @auto-reimbursement/api test test/batches.test.ts` exited 0 with 8/8 tests. The suite uses an in-memory SQLite Store and Supertest routes to cover integer net totals across all ten categories, partial/full refunds, sorted pool and pending filters, non-destructive deletion, selected-only atomic closure and rollback, duplicate/double generation guards, single-fen cross-month snapshots, immutable stored lookup, canonical image signatures, text-mode signature clearing, and the new API endpoints.
+
+Implementation — batch closure first validates the complete selected ID set before writing anything, then sorts by upload order, snapshots receipt image/refund data and current notes, validates safe totals, writes the immutable batch, and marks every selected receipt generated in one transaction. It has no amount threshold or automatic month-close behavior. Options are validated server-side; image-signature metadata is reconstructed only from the persisted Settings/FileIndex record, while text mode strips a client signature. Pool totals exclude ineligible/full-refund records while the pool still shows unbatched ready fully refunded receipts for editing. Deletion sets only `deletedAt`, retaining receipt hashes and file references, and rejects generated/archived records. No preview or sheet generation was added; `sheets` intentionally remains empty for Task 14.
+
+Verification — `pnpm --filter @auto-reimbursement/api test` exited 0 with 121/121 tests; `pnpm --filter @auto-reimbursement/api typecheck` exited 0; `git diff --check` exited 0 (only informational Windows line-ending notices).
+
+## Task 13: Programmatic Chinese uppercase currency
+
+RED — `pnpm --filter @auto-reimbursement/api test test/uppercase.test.ts` exited 1 before production edits because Vitest could not resolve the expected missing `../src/uppercase.js` module; no tests were collected.
+
+GREEN — `pnpm --filter @auto-reimbursement/api test test/uppercase.test.ts` exited 0 with 18/18 tests. The table-driven suite covers all specified amounts, 亿/万/unit section boundaries, and negative, fractional, overflow, non-finite and NaN rejection.
+
+Implementation — `chineseUppercase(fen)` delegates validation to `formatFen` before arithmetic, converts yuan with four-digit sections and 亿/万/unit groups, and emits exact 元/角/分/整 text with collapsed zero insertion. It is deterministic and makes no API or AI calls.
+
+Verification — `pnpm --filter @auto-reimbursement/api test` exited 0 with 142/142 tests; `pnpm --filter @auto-reimbursement/api typecheck` exited 0; focused tests and `git diff --check` also passed.
+
+Commit — `feat: format exact Chinese uppercase amounts`; its immutable SHA is recorded in the Task 13 report after Git creates the commit.
+
+## Task 14: Deterministic category grouping, measured packing and manual moves
+
+RED — `pnpm --filter @auto-reimbursement/api test test/layout.test.ts` exited 1 before production edits because Vitest could not resolve the expected missing `../src/render/layout.js` module. The revised Task 12 batch assertion then failed as intended while `sheets` was still blank, and the move endpoint test initially returned 404.
+
+GREEN — the focused layout and batch suites passed 18/18 tests. They cover upload-order category grouping, whole-token measured wrapping, single-token overflow, exact measured fitting, category capacity failures, whole-category moves, destination overflow, receipt-order preservation, first-sheet creation, per-sheet note selection, and finalized draft protection.
+
+Implementation — layout groups snapshots by first category occurrence after upload-order sorting and keeps each category intact. Greedy packing uses provisional deterministic character measurement, whole amount tokens, measured heights, and the nine-digit amount-grid maximum; oversized categories expose `CATEGORY_TOO_LARGE` details before a batch is written. Draft batches now persist deterministic sheet IDs. Manual moves retain existing sheet IDs and notes, create only a trailing sheet when moving right from the last sheet, remove empty sources, and never silently repack other categories. Server-side layout validation checks every original category, receipt ID, amount, capacity and sheet-note invariant. Draft-only move and options routes validate category/direction/options/note choices and reject exported batches. Task 15 PDF output and font measurement were not added.
+
+Verification — `pnpm --filter @auto-reimbursement/api test` exited 0 with 149/149 tests; API typecheck exited 0. Fresh workspace `pnpm test` passed 175 tests (25 contracts, 149 API, 1 web), `pnpm typecheck` exited 0, and `git diff --check` exited 0.
+
+Commit — `feat: pack categories into measured reimbursement sheets`; its immutable SHA is recorded in the Task 14 report after Git creates the commit.
+
+## Task 15: Measured Chinese reimbursement forms
+
+RED — `pnpm --filter @auto-reimbursement/api test test/form.test.ts` failed because the expected form renderer was absent. GREEN — the PDF.js fixture test extracts every mandated Chinese printed label and the sheet-specific uppercase total using an embedded Noto Sans SC font with system fonts disabled.
+
+Implementation — `form.ts` creates a 270 x 165 mm landscape PDFKit document with an official Noto Sans SC TTF, exposes PDF-accurate packing metrics, counts per-sheet original/refund attachment images, and draws literal-text field content into the measured printed structure. Batch creation now packs with the same registered-font measurement as the renderer. The template contains the double title rule, metadata, five body guides, category regions and numeric subtotals, nine amount-digit cells, notes/approval split, total and uppercase/loan strip, plus a text or aspect-fit image signer cell.
+
+Calibration — the two supplied private paper forms were inspected without copying them. Geometry, font source/checksum, rasterizer command, and visual review evidence are recorded in `docs/form-calibration.md`; the documented 270 x 165 mm size is an assumption rather than an exact claim from perspective photos.
+
+## Task 16: Full preview PDFs with ordered refund evidence
+
+GREEN — `pnpm --filter @auto-reimbursement/api test test/pdf.test.ts` passed 2/2 tests. It covers original/refund attachment ordering, multi-sheet form/attachment order, labels with refund breakdowns, WebP in-memory embedding without source mutation, text and image signer rendering, immutable export/idempotence, preview/download endpoints, saved-PDF bytes, file indexing, and missing-evidence failure without a partial export.
+
+Implementation — attachment pages follow every form page in stored group/receipt/refund order. They use portrait A4, 12 mm margins, an 18 mm non-overlapping label band, and aspect-fit images. Required indexed attachments use safe paths; WebP is converted only in renderer memory. Export first renders the complete buffer, writes an exclusive temporary file below the batch month, atomically renames it to a UUID PDF, then transactionally indexes the SHA-256 and saves `pdfPath`; an existing export is returned unchanged. Draft preview renders the same output, while an exported batch serves its immutable saved bytes. Missing receipt evidence maps to HTTP 409 and identifies the receipt ID.
+
+Verification — the API typecheck, workspace test suite (180 tests), workspace typecheck, `git diff --check`, and fresh five-page 144-DPI visual PDF inspection all passed. The local QA PDFs/PNGs/scripts remain untracked under `tmp/` and `apps/api/tmp/`.
+
+## Task 17: Browser upload screen and batch-specific progress
+
+RED — `pnpm --filter @auto-reimbursement/web test src/pages/UploadPage.test.tsx` exited 1 before implementation because Vitest could not resolve the missing `./UploadPage` module.
+
+GREEN — `pnpm --filter @auto-reimbursement/web test src/pages/UploadPage.test.tsx` exited 0 with 5/5 tests. It covers the client-side 50-file cap, input-order-preserving drag/drop upload, duplicate rejection/link rendering, failed progress polling retry, and terminating the polling loop when recognition completes.
+
+Implementation — the typed browser client posts ordered FormData without manually setting a multipart header, polls only batch-local accepted IDs, exposes image routes, and converts only a safe API error message into an Error. The upload page has accessible file selection and drop interaction, HTTP upload disable/count, received/rejected file details, exact duplicate links, total/recognizing/ready/pending counts, abortable timer cleanup, and a stopped-loop retry control. Upload network errors remain distinct from AI pending progress. The shell retains its accessible English application heading, adds 首页 / 上传凭证 navigation, responsive Chinese-font fallback/focus styling, and Vite development proxies for `/api` and `/health`. No backend configuration or keys are provided to the browser and no Task 18+ UI was added.
+
+Verification — the full web suite passed 6/6 tests, workspace `pnpm typecheck` passed for contracts/API/web, and the web production build exited 0. A case-insensitive scan of generated `apps/web/dist` files found no API-key, OpenAI-key, secret, or `sk-` strings. The full evidence and scope note are recorded in the Task 17 report.
+
+## Task 18: Reimbursement pool and exception-only pending UI
+
+Implementation — the browser API client now exposes the pool, totals, receipt correction, duplicate confirmation, retry, refund, deletion, settings, and batch endpoints. `formOptionsFromSettings` derives the batch form date from the browser's local calendar and keeps blank/custom date rules explicit. The shell routes to the reimbursement pool and exception review pages. Reusable receipt cards link the original image, show status, merchant/date/category, separate original/refund/net amounts, and expose analysis evidence and confidence details.
+
+The pool reads its backend totals and all ten category subtotals, selects only ready positive-net receipts, and creates a batch with the current settings-derived options. The pending view requests only pending records and renders reason labels, historical duplicate-image evidence, duplicate override, and failed-analysis retry actions. The editor keeps a blank amount for unknown values, requires an explicit category selection, sends save and confirmation as sequential distinct requests, preserves values and server errors on failure, provides partial/full refund, refund-evidence upload, and confirmation-gated deletion controls.
+
+Coverage — focused UI tests use complete receipt fixtures and mocked API calls to verify precise decimal correction, explicit category options, blank initial unknown amount, disabled full-refund control for an unknown payment, original-image links, separate correction/confirmation calls, duplicate history evidence and retry actions, backend totals, full-refund exclusion from batch selection, and empty batch prevention. Ready results are not rendered in the pending page.
+
+Verification — final focused tests, the full web test suite, web typecheck/build, and `git diff --check` are run immediately before the Task 18 commit.
+
+### Review fix round 1
+
+Receipt deletion now removes the deleted row from both pool and pending state; the pool also removes its ID from the in-memory selection so a just-deleted receipt cannot be included in a subsequent batch request. Receipt correction retains the successful server response before attempting confirmation. A failed confirmation therefore reports that the correction was saved and remains retryable without repeating the PATCH request; changing the fields clears that saved phase and requires a new save. Focused page tests cover deletion from each page, selection clearing, persisted server response, explicit confirmation failure messaging, and confirmation-only retry.
+
+## Task 19: Preview, history, settings, archive and local maintenance
+
+RED — `pnpm --filter @auto-reimbursement/api test test/maintenance.test.ts` failed before the archive module existed. `pnpm --filter @auto-reimbursement/web test src/pages/WorkflowPages.test.tsx` likewise failed before the settings page existed.
+
+GREEN — archive history preserves receipts, duplicate evidence and immutable financial snapshots while selecting linked receipt/batch records to a fixed point. Archive refuses recognizing/pending receipts and unexported batches atomically; unarchive restores the recorded prior receipt state. Original-image cleanup requires the exact month phrase, an archived set and exported batches, validates indexed owner/path association, resolves only through `safePath`, never touches refund evidence or PDFs, and records successful/idempotent deletion metadata.
+
+Backup — schema version 3 indexes generated ZIP downloads separately. A SQLite `backupTo` snapshot is reopened before packing `app.sqlite`, settings, rules, file-index JSON, and a manifest; the temporary snapshot handle is closed before ZIP generation and no configured AI credentials or media files are included. The settings UI explains this structured-backup scope and the need to copy the entire data folder for media recovery.
+
+Browser — Preview fetches a batch and renders the full PDF, supports server-validated draft options, sheet-specific notes and category moves, refreshes preview cache revision after saved edits, and becomes read-only after export. History groups batches by creation month and provides archive/unarchive plus a typed cleanup dialog. Settings provides defaults, signer upload, note/rule management, API configuration status and backup download. The shell now has six required navigation entries.
+
+Verification — focused maintenance and workflow tests passed. Fresh workspace `pnpm test` passed 200 tests (25 contracts, 160 API, 15 web); `pnpm typecheck`, web production build and `git diff --check` passed. An earlier workspace run exposed a pre-existing timing-sensitive queue test (`CONDITION_NOT_REACHED`); its isolated suite and the immediately repeated full workspace suite passed without code changes.
+
+## Task 20: End-to-end validation and representative acceptance fixtures
+
+RED — the first browser acceptance run exposed an E2E synchronization defect:
+the scenario could match the initial `识别中：0` before upload completion, and
+could navigate before the correction confirmation completed. A later run
+proved export creates an in-page immutable PDF link rather than a browser
+download event. The scenario was revised to wait for observable completion and
+to assert the exported endpoint's 200 `application/pdf` response.
+
+GREEN — `pnpm fixtures` generated 49 synthetic PNGs for 50 manifest records;
+its dHash checks passed. Isolated system-Chrome `pnpm test:e2e` passed 1/1 in
+6.4 seconds. The workflow uses a disposable SHA-256 keyed fake analyzer and
+real queue/store/app composition, and covers upload, correction, totals,
+partial refund/evidence, manual selection, preview options, export and the
+saved PDF endpoint.
+
+Verification — workspace `pnpm test` passed 206 tests (25 contracts, 162 API,
+19 web); `pnpm typecheck`, `pnpm --filter @auto-reimbursement/web build`, and
+`git diff --check` passed. README documents local start, backend-only provider
+settings, safe backup/restore and shutdown; `docs/acceptance.md` records the
+synthetic fixture scope and absence of consented real-world fixtures.
+
+### Review fix round 1
+
+The fixture contract is now a real direct-loopback acceptance run rather than
+unused manifest data. It uploads all first-run records, asserts each final
+receipt expectation and analyzer retry count, blocks the exact duplicate before
+analysis, verifies the 51-file boundary, and then exercises three corrections
+plus a strong-rule medium-confidence release. The representative browser flow
+waits for refund-evidence persistence and asserts the 80.00 refund/evidence
+batch snapshot before checking the draft and exported PDF endpoints. The
+separate API PDF suite retains detailed extracted attachment-page ordering
+assertions.
+
+Fresh verification — `pnpm fixtures` generated 53 synthetic records;
+system-Chrome `pnpm test:e2e` passed 2/2 in 9.5 seconds; workspace `pnpm test`
+passed 206 tests; `pnpm typecheck` and the production web build exited 0.
+
+### Final release-fix wave
+
+RED — the focused API regression run failed on five release blockers: hostile
+non-loopback mutation origin was not rejected; history used `createdAt` instead
+of persisted `batch.month`; confirming an analysed suspected duplicate did not
+release it; a receipt-ID duplicate evidence link was unresolved; and a WebP
+signature reached PDFKit without conversion. A new isolated loopback E2E
+contract initially exposed that its fake fixture analyzer rejected the
+post-override cropped receipt solely because its pre-override expected state
+was intentionally pending.
+
+GREEN — the focused API suite passed 36/36 and focused web suite passed 14/14.
+The isolated E2E release contract passed 2/2: it covers origin/fetch-site
+rejection, receipt-owned duplicate evidence and override lifecycle, and
+export/archive/unarchive/explicit cleanup while the indexed PDF and structured
+backup remain available. API and web typechecks passed. The fake analyzer now
+allows its known cropped synthetic fixture to be analysed only after the user
+has explicitly overridden the pre-analysis duplicate block.
+
+Implementation — mutating HTTP requests require loopback Host, loopback Origin
+when present, and non-cross-site `Sec-Fetch-Site`; read requests remain
+available. Archive history and linked lifecycle operations use persisted
+`batch.month`. Duplicate evidence resolves through a receipt-owned original
+route, and confirmation removes only its duplicate blocker before either
+releasing an analysed receipt or re-queuing an unanalysed one. PDF rendering
+converts accepted WebP signatures in memory. The pool refreshes backend totals
+after each receipt mutation. Acceptance/calibration language now distinguishes
+synthetic lifecycle evidence from unperformed real-receipt metrics and avoids
+claiming measured physical-form fidelity.
+
+Stability — the first two parallel workspace reruns exposed a test-only queue
+race: its `waitUntil` loop exhausted real immediates before Sharp-backed file
+work received a shared worker-pool slot, after which teardown closed its store.
+The helper now yields with a bounded captured real timer. A fresh API suite
+passed 166/166 and the fresh parallel workspace suite passed 211 tests
+(25 contracts, 166 API, 20 web); typecheck, web production build, all four
+isolated/browser E2E tests, and `git diff --check` also passed.
+
+### Final release-blocker fix wave
+
+RED — the cross-month maintenance regression used one July-uploaded receipt in
+an August batch and selected the fixed-point set once by July and once by
+August. Before the production change, the July case returned `affected:0`
+while the August case passed because upload-month seeding excluded every
+receipt that already had a `batchId`.
+
+GREEN — `linkedSet` now seeds every receipt whose persisted upload month
+matches the requested month, independently seeds batches by persisted
+`batch.month`, and retains the bidirectional receipt/batch fixed-point walk.
+The focused maintenance suite passed 6/6, including archive, unarchive and
+cleanup from either month for the July/August pair; history remains grouped
+only by the persisted August batch month.
+
+Acceptance — the disposable runtime can now deliberately start with its queue
+stopped and reopen the same SQLite database, while every release scenario still
+owns a fresh temporary data directory, store, queue and loopback server. Seven
+isolated release scenarios cover the duplicate/origin lifecycle; full-refund
+exclusion; durable queued restart; 7+3 automatic sheets and reversible manual
+movement; two notes, blank date and indexed image signer; immutable generated
+history; backend credential absence from captured browser requests and loaded
+assets; archive/unarchive; explicit original cleanup; retained PDF; all ZIP
+members and structured JSON; and an `app.sqlite` reopen that retains settings,
+notes, rules, receipt, batch and file-index content. PDF.js verifies the
+12-page multi-sheet output, exact per-sheet uppercase totals and ordered
+attachment labels. On-disk SHA-256 values prove all ten original fixture files
+remain unchanged after export.
+
+Fresh verification — `pnpm fixtures` generated 53 synthetic fixture records;
+`pnpm test` passed 212 tests (25 contracts, 167 API, 20 web); `pnpm typecheck`
+passed all three workspace packages; the production web build transformed 41
+modules; and `pnpm test:e2e` passed 9/9 in 8.3 seconds.

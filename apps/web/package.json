@@ -9,6 +9,7 @@
     "typecheck": "tsc -b --pretty false"
   },
   "dependencies": {
+    "@auto-reimbursement/contracts": "workspace:*",
     "@vitejs/plugin-react": "^5.0.2",
     "vite": "^7.1.5",
     "react": "^19.1.1",

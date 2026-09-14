@@ -1,9 +1,15 @@
 node_modules/
 dist/
 coverage/
+tmp/
+apps/api/tmp/
+test-results/
 .env
 .env.*
 !.env.example
 *.log
 *.tsbuildinfo
 .worktrees/
+.netlify/
+work/
+data/

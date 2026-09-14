@@ -1,0 +1,4 @@
+CREATE TABLE IF NOT EXISTS backups (
+  id TEXT PRIMARY KEY,
+  path TEXT NOT NULL
+);

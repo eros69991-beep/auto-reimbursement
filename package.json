@@ -3,8 +3,23 @@
   "private": true,
   "version": "0.0.0",
   "packageManager": "pnpm@11.19.0",
+  "engines": {
+    "node": ">=24 <25"
+  },
   "scripts": {
+    "dev:api": "pnpm --filter @auto-reimbursement/api exec node --env-file-if-exists=../../.env --import tsx src/server.ts",
+    "dev:web": "pnpm --filter @auto-reimbursement/web dev",
+    "start:api": "pnpm --filter @auto-reimbursement/api start",
     "test": "pnpm -r run test",
-    "typecheck": "pnpm -r run typecheck"
+    "typecheck": "pnpm -r run typecheck",
+    "test:e2e": "playwright test",
+    "fixtures": "tsx e2e/fixtures/generate.ts"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0",
+    "fflate": "^0.8.3",
+    "pdfjs-dist": "^6.3.289",
+    "sharp": "^0.35.4",
+    "tsx": "^4.23.13"
   }
 }
