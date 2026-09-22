@@ -230,8 +230,8 @@ test('renders isolated multi-sheet form options and preserves every stored origi
       },
     });
     expect(batch.sheets.map((sheet) => sheet.groups.map((group) => group.category))).toEqual([
-      ['食材', '耗材', '日常用品', '肉类', '酒水', '能耗费', '人工费用'],
-      ['租金及管理费', '员工餐', '百慕达食材'],
+      ['食材', '耗材', '日常用品', '肉类', '酒水'],
+      ['能耗费', '人工费用', '租金及管理费', '员工餐', '百慕达食材'],
     ]);
 
     const movedCategory = '百慕达食材';
@@ -262,13 +262,15 @@ test('renders isolated multi-sheet form options and preserves every stored origi
     const pdfBytes = Buffer.from(await pdfResponse.arrayBuffer());
     const pageText = await pdfPageText(pdfBytes);
     expect(pageText).toHaveLength(12);
-    expect(pageText[0]).toContain('伍佰贰拾柒元叁角叁分');
+    const firstPage = pageText[0]!.replace(/\s+/g, '');
+    expect(firstPage).toContain('33533');
+    expect(firstPage).toContain('佰拾万仟佰拾元角分');
     expect(pageText[0]).toContain(firstNote.content);
-    expect(pageText[0].replace(/\s+/g, '')).toContain('日期：单据及附件共');
+    expect(firstPage).toContain('年月日单据及附件共');
     expect(pageText[0]).not.toContain('不应打印的文字签名');
     expect(await pdfPageHasImage(pdfBytes, 1)).toBe(true);
-    expect(pageText[8]).toContain('壹佰捌拾捌元整');
-    expect(pageText[8]).toContain(secondNote.content);
+    expect(pageText[6]!.replace(/\s+/g, '')).toContain('38000');
+    expect(pageText[6]).toContain(secondNote.content);
     expect(attachmentLabels(pageText, saved)).toEqual([
       '食材:120.00',
       '耗材:36.33',

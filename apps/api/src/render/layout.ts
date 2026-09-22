@@ -9,6 +9,7 @@ import {
 export interface LayoutMetrics {
   summaryWidth: number;
   bodyHeight: number;
+  rowHeight?: number;
   lineHeight: number;
   groupPadding: number;
   maxSheetFen: number;
@@ -26,8 +27,9 @@ export class LayoutError extends Error {
 
 export function defaultMetrics(): LayoutMetrics {
   return {
-    summaryWidth: (98 * 72) / 25.4 - 12,
-    bodyHeight: (58 * 72) / 25.4,
+    summaryWidth: (91.15 * 72) / 25.4 - 12,
+    bodyHeight: (55.14 * 72) / 25.4,
+    rowHeight: ((55.14 / 5) * 72) / 25.4,
     lineHeight: 14,
     groupPadding: 8,
     maxSheetFen: 999999999,
@@ -58,30 +60,12 @@ export function groupItems(items: Snapshot[]): FormGroup[] {
   return [...groups.values()];
 }
 
-export function wrapAmounts(amountsFen: number[], metrics: LayoutMetrics): string[] {
-  const lines: string[] = [];
-  let line = '';
-  for (const amount of amountsFen) {
-    const token = formatFen(amount);
-    if (metrics.measure(token) > metrics.summaryWidth) {
-      throw new LayoutError('LAYOUT_OVERFLOW', { requiredWidth: metrics.measure(token) });
-    }
-    const next = line === '' ? token : `${line}  ${token}`;
-    if (metrics.measure(next) <= metrics.summaryWidth) {
-      line = next;
-    } else {
-      lines.push(line);
-      line = token;
-    }
-  }
-  return line === '' ? lines : [...lines, line];
-}
-
 export function groupHeight(group: FormGroup, metrics: LayoutMetrics): number {
-  return (
-    Math.max(metrics.lineHeight, wrapAmounts(group.amountsFen, metrics).length * metrics.lineHeight) +
-    metrics.groupPadding
-  );
+  const raw =
+    Math.max(metrics.lineHeight, group.amountsFen.length * metrics.lineHeight) +
+    metrics.groupPadding;
+  if (metrics.rowHeight === undefined) return raw;
+  return Math.ceil(raw / metrics.rowHeight - 1e-9) * metrics.rowHeight;
 }
 
 export function packGroups(groups: FormGroup[], metrics: LayoutMetrics): FormSheet[] {

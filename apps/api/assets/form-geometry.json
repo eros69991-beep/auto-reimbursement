@@ -1,17 +1,35 @@
 {
   "page": { "width": 270, "height": 165, "margin": 5 },
-  "title": { "y": 9, "underlineY": [21, 22] },
-  "metadataY": 29,
+  "title": {
+    "fontSize": 28,
+    "y": 4.0,
+    "charStartX": 90,
+    "charStep": 19.9,
+    "underlineY": [17.1, 19],
+    "underlineX": [66.3, 193.9]
+  },
+  "metadata": {
+    "y": 26.7,
+    "departmentX": 9.3,
+    "dateCenterX": 135.6,
+    "dateWidth": 70,
+    "attachmentsX": 198,
+    "attachmentsLine": [228.5, 255],
+    "pageLabelX": 256.4
+  },
   "table": {
     "x": 5,
     "y": 34,
     "width": 260,
-    "columns": { "project": 50, "summary": 98, "amount": 46, "verticalLabel": 8, "notes": 58 },
-    "headerHeight": 17,
-    "bodyHeight": 58,
-    "totalHeight": 12,
-    "uppercaseHeight": 14,
-    "notesSplitY": 80
+    "columns": { "project": 51.27, "summary": 91.15, "amount": 48.31, "verticalLabel": 7.75, "notes": 61.52 },
+    "headerHeight": 16.86,
+    "headerSplit": 7.75,
+    "bodyHeight": 55.14,
+    "bodyRows": 5,
+    "totalHeight": 10.94,
+    "uppercaseHeight": 13.67,
+    "notesSplitY": 74.56
   },
-  "footerY": 146
+  "uppercaseStrip": { "labelX": 4, "unitsStart": 22, "unitsEnd": 142.4, "loanEnd": 199.4 },
+  "footer": { "y": 134.3, "approverX": 12.1, "reviewerX": 84.9, "cashierX": 146, "signerX": 204.8 }
 }

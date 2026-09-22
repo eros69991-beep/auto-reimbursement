@@ -99,10 +99,10 @@ describe('full reimbursement PDFs', () => {
     expect(after).toEqual(before);
     const pages = await pageText(rendered);
     expect(pages).toHaveLength(5);
-    expect(pages[0]).toContain('费用报销单');
+    expect(pages[0]!.replace(/\s+/g, '')).toContain('费用报销单');
     expect(pages[1]).toContain('原始凭证');
     expect(pages[2]).toContain('退款凭证');
-    expect(pages[3]).toContain('费用报销单');
+    expect(pages[3]!.replace(/\s+/g, '')).toContain('费用报销单');
     expect(pages[4]).toContain('原始凭证');
     expect(pages.join('\n')).not.toContain('2026-09/');
     expect(pages.join('\n')).not.toContain('qa-a');

@@ -133,6 +133,8 @@ export interface Snapshot {
   receiptId: string;
   uploadOrder: number;
   category: Category;
+  /** Absent in older batches; the form falls back to the category as summary text. */
+  merchant?: string | null;
   paidFen: number;
   refundFen: number;
   netFen: number;

@@ -6,7 +6,6 @@ import {
   groupHeight,
   moveGroup,
   packGroups,
-  wrapAmounts,
   type LayoutMetrics,
 } from '../src/render/layout.js';
 import { sampleReceipt } from './support.js';
@@ -49,11 +48,12 @@ describe('measured reimbursement layout', () => {
     expect(sheets[0]!.groups[0]!.totalFen).toBe(5363);
   });
 
-  it('wraps only whole formatted amounts and rejects a token wider than the summary', () => {
-    expect(wrapAmounts([100, 200, 300], metrics)).toEqual(['1.00  2.00', '3.00']);
-    expect(() => wrapAmounts([100], { ...metrics, summaryWidth: 10 })).toThrow(
-      'LAYOUT_OVERFLOW',
-    );
+  it('gives every receipt its own line when measuring group height', () => {
+    expect(groupHeight(groupItems([
+      snapshot('one', '耗材', 1, 100),
+      snapshot('two', '耗材', 2, 200),
+      snapshot('three', '耗材', 3, 300),
+    ])[0]!, metrics)).toBe(40);
   });
 
   it('rejects a category that cannot fit a sheet before creating a partial layout', () => {
@@ -76,9 +76,9 @@ describe('measured reimbursement layout', () => {
       snapshot('second', '耗材', 2, 200),
       snapshot('third', '食材', 3, 300),
     ]);
-    const sheets = packGroups(groups, metrics);
+    const sheets = packGroups(groups, { ...metrics, bodyHeight: 60 });
 
-    const moved = moveGroup(sheets, '耗材', 1, metrics);
+    const moved = moveGroup(sheets, '耗材', 1, { ...metrics, bodyHeight: 60 });
 
     expect(moved).toEqual([
       {
@@ -120,13 +120,6 @@ describe('measured reimbursement layout', () => {
     );
   });
 
-  it('calculates group height from measured wrapped lines', () => {
-    expect(groupHeight(groupItems([
-      snapshot('one', '耗材', 1, 100),
-      snapshot('two', '耗材', 2, 200),
-      snapshot('three', '耗材', 3, 300),
-    ])[0]!, metrics)).toBe(30);
-  });
 });
 
 function snapshot(

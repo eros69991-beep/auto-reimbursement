@@ -177,7 +177,7 @@ describe('manual batches', () => {
   it('uses embedded-font metrics when moving a packed category back to its form sheet', () => {
     const store = openStore(':memory:');
     try {
-      for (let index = 0; index < 55; index += 1) {
+      for (let index = 0; index < 8; index += 1) {
         store.put('receipts', sampleReceipt({
           id: `supply-${index}`,
           category: '耗材',
@@ -186,11 +186,11 @@ describe('manual batches', () => {
         }));
       }
       store.put('receipts', sampleReceipt({
-        id: 'food', category: '食材', paidFen: 10000, uploadOrder: 56,
+        id: 'food', category: '食材', paidFen: 10000, uploadOrder: 9,
       }));
       const batch = createBatch(
         store,
-        [...Array.from({ length: 55 }, (_, index) => `supply-${index}`), 'food'],
+        [...Array.from({ length: 8 }, (_, index) => `supply-${index}`), 'food'],
         resolveOptions(getSettings(store), new Date('2026-09-04T00:00:00.000Z')),
         new Date('2026-09-04T00:00:00.000Z'),
       );

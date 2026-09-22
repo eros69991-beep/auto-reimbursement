@@ -63,6 +63,7 @@ export function createBatch(
       receiptId: receipt.id,
       uploadOrder: receipt.uploadOrder,
       category: receipt.category!,
+      merchant: receipt.merchant ?? null,
       paidFen: receipt.paidFen!,
       refundFen: receipt.refundFen,
       netFen: netFen(receipt),

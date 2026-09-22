@@ -6,13 +6,20 @@
 
 * { box-sizing: border-box; }
 
+html, body { overflow-x: hidden; }
+
 body { margin: 0; }
+
+img, iframe, table { max-width: 100%; }
+
+input, select, textarea { max-width: 100%; }
 
 button, input, select { font: inherit; }
 textarea { font: inherit; min-height: 6rem; }
 label { display: grid; gap: .25rem; margin: .5rem 0; }
 fieldset { margin: 1rem 0; }
-.pdf-preview { width: 100%; min-height: 42rem; border: 1px solid #d9e0ea; background: #fff; }
+.pdf-preview-stack { margin: 1rem 0; }
+.finalized-notice { margin: 1rem 0; padding: 1rem; background: #fff8ec; border: 1px solid #e8d5a8; border-radius: .75rem; }
 .history-month { margin: 1rem 0; padding: 1rem; background: #fff; border: 1px solid #d9e0ea; border-radius: .75rem; }
 .history-month article { margin-top: .75rem; padding-top: .75rem; border-top: 1px solid #d9e0ea; }
 
@@ -31,6 +38,8 @@ fieldset { margin: 1rem 0; }
 .app-header h1 { margin: 0; font-size: clamp(1.2rem, 3vw, 1.75rem); }
 
 .app-header nav { display: flex; gap: 1rem; }
+
+.app-header nav button { white-space: nowrap; }
 
 .page-content { width: min(100% - 2rem, 56rem); margin: 2rem auto; }
 
@@ -65,7 +74,7 @@ fieldset { margin: 1rem 0; }
 
 .receipt-card {
   display: grid;
-  grid-template-columns: minmax(6rem, 10rem) 1fr;
+  grid-template-columns: minmax(6rem, 10rem) minmax(0, 1fr);
   gap: 1rem;
   padding: 1rem;
   background: #fff;
@@ -90,9 +99,13 @@ fieldset { margin: 1rem 0; }
 .receipt-select { display: flex !important; grid-template-columns: auto 1fr; align-items: center; gap: .4rem; margin-top: 1rem; }
 
 @media (max-width: 38rem) {
-  .app-header { align-items: flex-start; flex-direction: column; }
-  .page-content { margin-top: 1rem; }
+  .app-header { align-items: stretch; flex-direction: column; gap: .5rem; padding: .75rem 1rem; }
+  .app-header h1 { font-size: 1.05rem; }
+  .app-header nav { width: 100%; gap: .5rem; overflow-x: auto; padding-bottom: .25rem; }
+  .app-header nav button { flex: 0 0 auto; padding: .4rem .75rem; }
+  .page-content { width: min(100% - 1rem, 56rem); margin-top: 1rem; }
   .receipt-card { grid-template-columns: 1fr; }
   .receipt-thumbnail { max-width: 16rem; }
   .pool-totals ul { columns: 1; }
+  .history-month p { overflow-wrap: anywhere; }
 }

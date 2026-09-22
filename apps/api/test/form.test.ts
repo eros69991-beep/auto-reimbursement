@@ -6,7 +6,6 @@ import { createBatch } from '../src/batches.js';
 import { openStore } from '../src/db.js';
 import { createFormDocument, drawForm, sheetAttachmentCount } from '../src/render/form.js';
 import { getSettings, resolveOptions } from '../src/settings.js';
-import { chineseUppercase } from '../src/uppercase.js';
 import { sampleReceipt } from './support.js';
 
 describe('Chinese reimbursement form', () => {
@@ -43,13 +42,16 @@ describe('Chinese reimbursement form', () => {
       }).promise;
       const content = await (await pdf.getPage(1)).getTextContent();
       const text = content.items.flatMap((item) => ('str' in item ? [item.str] : [])).join('');
+      const compact = text.replace(/\s+/g, '');
+      expect(compact).toContain('费用报销单');
       for (const label of [
-        '费用报销单', '报销部门', '报销项目', '摘要', '金额', '合计', '大写',
+        '报销部门', '报销项目', '摘要', '金额', '(大写)',
         '单据及附件共', '备注', '报销人', '会计主管', '复核', '出纳', '领导审批',
       ]) {
-        expect(text).toContain(label);
+        expect(compact).toContain(label);
       }
-      expect(text).toContain('壹佰叁拾元柒角肆分');
+      expect(compact).toContain('佰拾万仟佰拾元角分');
+      expect(compact).toContain('13074');
     } finally {
       store.close();
     }
@@ -92,21 +94,17 @@ describe('Chinese reimbursement form', () => {
     }
   });
 
-  it('rejects a maximum sheet total when its measured uppercase amount cannot fit', () => {
+  it('rejects an over-wide department at render time', () => {
     const store = openStore(':memory:');
     try {
-      store.put('receipts', sampleReceipt({ id: 'maximum', paidFen: 999999999, category: '耗材' }));
+      store.put('receipts', sampleReceipt({ id: 'wide', paidFen: 999999999, category: '耗材' }));
       const batch = createBatch(
         store,
-        ['maximum'],
-        { department: '', date: null, signerMode: 'text', signerName: '', signature: null },
+        ['wide'],
+        { department: '超'.repeat(90), date: null, signerMode: 'text', signerName: '', signature: null },
         new Date('2026-09-04T00:00:00.000Z'),
       );
       const doc = createFormDocument();
-      const measured = doc.widthOfString.bind(doc);
-      const uppercase = chineseUppercase(999999999);
-      doc.widthOfString = (text: string) => text === uppercase ? 500 : measured(text);
-
       expect(() => drawForm(doc, batch, batch.sheets[0]!, null)).toThrow('FORM_TEXT_OVERFLOW');
       doc.destroy();
     } finally {
