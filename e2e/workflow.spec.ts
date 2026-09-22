@@ -59,7 +59,8 @@ test('uploads, resolves exceptions, refunds, previews and exports', async ({ pag
     await exportResponse;
     const pdfLink = page.getByRole('link', { name: '打开或下载 PDF' });
     await expect(pdfLink).toHaveAttribute('href', /\/api\/batches\/[^/]+\/pdf$/);
-    const pdfResponse = await fetch(new URL(await pdfLink.getAttribute('href') ?? '', runtime.baseUrl));
+    const pdfHref = new URL(await pdfLink.getAttribute('href') ?? '', runtime.baseUrl);
+    const pdfResponse = await fetch(`${runtime.baseUrl}${pdfHref.pathname}${pdfHref.search}`);
     expect(pdfResponse.status).toBe(200);
     expect(pdfResponse.headers.get('content-type')).toContain('application/pdf');
   } finally {

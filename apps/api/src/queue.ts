@@ -310,7 +310,7 @@ export function getProgress(store: Store, ids: string[]): Progress {
   const requested = new Set(ids.filter((id) => id.length > 0));
   const receipts = store
     .list('receipts')
-    .filter((receipt) => requested.has(receipt.id));
+    .filter((receipt) => requested.has(receipt.id) && receipt.deletedAt === null);
   return {
     recognizing: receipts.filter((receipt) => receipt.status === 'recognizing')
       .length,

@@ -66,7 +66,7 @@ function receiptOriginalUrl(id: string): string {
   return apiUrl(`/api/receipts/${encodeURIComponent(id)}/original-image`);
 }
 
-function receipts(view: 'pool' | 'pending'): Promise<Receipt[]> {
+function receipts(view: 'pool' | 'pending' | 'excluded' | 'deleted'): Promise<Receipt[]> {
   return requestJson<Receipt[]>(`/api/receipts?view=${view}`);
 }
 
@@ -92,6 +92,18 @@ function confirmDistinct(id: string): Promise<Receipt> {
 
 function retryReceipt(id: string): Promise<Receipt> {
   return requestJson<Receipt>(`/api/receipts/${encodeURIComponent(id)}/retry`, { method: 'POST' });
+}
+
+function setPoolMembership(id: string, included: boolean): Promise<Receipt> {
+  return requestJson<Receipt>(`/api/receipts/${encodeURIComponent(id)}/pool`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ included }),
+  });
+}
+
+function restoreReceipt(id: string): Promise<Receipt> {
+  return requestJson<Receipt>(`/api/receipts/${encodeURIComponent(id)}/restore`, { method: 'POST' });
 }
 
 function setRefund(id: string, refundFen: number): Promise<Receipt> {
@@ -135,6 +147,7 @@ function batch(id: string): Promise<Batch> { return requestJson(`/api/batches/${
 function moveGroup(id: string, category: Category, direction: -1 | 1): Promise<Batch> { return requestJson(`/api/batches/${encodeURIComponent(id)}/move`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ category, direction }) }); }
 function saveBatchOptions(id: string, options: FormOptions, noteBySheet: Record<string, string | null>): Promise<Batch> { return requestJson(`/api/batches/${encodeURIComponent(id)}/options`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ options, noteBySheet }) }); }
 function exportBatch(id: string): Promise<Batch> { return requestJson(`/api/batches/${encodeURIComponent(id)}/export`, { method: 'POST' }); }
+function cancelBatch(id: string): Promise<Batch> { return requestJson(`/api/batches/${encodeURIComponent(id)}/cancel`, { method: 'POST' }); }
 function history(): Promise<HistoryMonth[]> { return requestJson('/api/history'); }
 function saveSettings(settings: Settings): Promise<Settings> { return requestJson('/api/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(settings) }); }
 async function saveSignature(file: File): Promise<Settings> { const data = new FormData(); data.append('file', file); return requestJson('/api/settings/signature', { method: 'POST', body: data }); }
@@ -180,6 +193,8 @@ export const api = {
   confirmReceipt,
   confirmDistinct,
   retryReceipt,
+  setPoolMembership,
+  restoreReceipt,
   setRefund,
   addRefundImage,
   deleteReceipt,
@@ -189,6 +204,7 @@ export const api = {
   moveGroup,
   saveBatchOptions,
   exportBatch,
+  cancelBatch,
   history,
   saveSettings,
   saveSignature,

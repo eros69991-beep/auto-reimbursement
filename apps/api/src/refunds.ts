@@ -8,6 +8,7 @@ import {
 
 import type { Config } from './config.js';
 import type { Store } from './db.js';
+import { assertMutable } from './receipts.js';
 import { safePath, storeImage, type InputImage } from './storage.js';
 
 export function setRefund(
@@ -72,6 +73,7 @@ export async function addRefundImage(
 export function isEligible(receipt: Receipt): boolean {
   return (
     receipt.status === 'ready' &&
+    !receipt.poolExcluded &&
     !receipt.deletedAt &&
     !receipt.archivedAt &&
     !receipt.batchId &&
@@ -86,8 +88,6 @@ function requiredMutableReceipt(store: Store, id: string): Receipt {
   if (receipt === null) {
     throw new Error('NOT_FOUND');
   }
-  if (receipt.status === 'generated' || receipt.status === 'archived') {
-    throw new Error('IMMUTABLE_RECEIPT');
-  }
+  assertMutable(receipt);
   return receipt;
 }

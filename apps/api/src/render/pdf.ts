@@ -4,7 +4,7 @@ import { unlink } from 'node:fs/promises';
 import type { Batch, FileIndexEntry } from '@auto-reimbursement/contracts';
 import sharp from 'sharp';
 
-import { getBatch } from '../batches.js';
+import { assertActiveBatch, getBatch } from '../batches.js';
 import type { Config } from '../config.js';
 import type { Store } from '../db.js';
 import { readVerifiedFile, storeExportPdf } from '../storage.js';
@@ -16,6 +16,7 @@ export async function renderBatchPdf(
   config: Config,
   batch: Batch,
 ): Promise<Buffer> {
+  assertActiveBatch(batch);
   const doc = createFormDocument();
   const chunks: Buffer[] = [];
   const done = new Promise<Buffer>((resolve, reject) => {
@@ -46,6 +47,7 @@ export async function exportBatchPdf(
   id: string,
 ): Promise<Batch> {
   const existing = getBatch(store, id);
+  assertActiveBatch(existing);
   if (existing.pdfPath !== null) {
     return existing;
   }
@@ -61,6 +63,7 @@ export async function exportBatchPdf(
 
     const exported = store.transact(() => {
       const current = getBatch(store, id);
+      assertActiveBatch(current);
       if (current.pdfPath !== null) {
         return current;
       }

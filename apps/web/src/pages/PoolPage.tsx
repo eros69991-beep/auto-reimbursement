@@ -14,7 +14,10 @@ export function PoolPage({ onBatch }: { onBatch: (id: string) => void }): React.
   const [settings, setSettings] = useState<Settings | null>(null);
   const [selected, setSelected] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [binOpen, setBinOpen] = useState(false);
+  const [binRows, setBinRows] = useState<Receipt[]>([]);
 
   useEffect(() => {
     void Promise.all([api.receipts('pool'), api.totals(), api.settings()]).then(
@@ -52,6 +55,51 @@ export function PoolPage({ onBatch }: { onBatch: (id: string) => void }): React.
     setSelected((current) => checked ? [...current, id] : current.filter((selectedId) => selectedId !== id));
   }
 
+  async function removeFromPool(id: string): Promise<void> {
+    setError(null);
+    setMessage(null);
+    try {
+      await api.setPoolMembership(id, false);
+      setRows((current) => current.filter((receipt) => receipt.id !== id));
+      setSelected((current) => current.filter((selectedId) => selectedId !== id));
+      refreshTotals();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : '移出报销池失败');
+    }
+  }
+
+  async function toggleBin(): Promise<void> {
+    const next = !binOpen;
+    setBinOpen(next);
+    if (!next) return;
+    setError(null);
+    try {
+      const [excluded, deleted] = await Promise.all([
+        api.receipts('excluded'),
+        api.receipts('deleted'),
+      ]);
+      setBinRows([...excluded, ...deleted]);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : '加载已移出与回收站失败');
+    }
+  }
+
+  async function restore(row: Receipt): Promise<void> {
+    setError(null);
+    try {
+      if (row.deletedAt !== null) {
+        await api.restoreReceipt(row.id);
+      } else {
+        await api.setPoolMembership(row.id, true);
+      }
+      setBinRows((current) => current.filter((receipt) => receipt.id !== row.id));
+      setMessage(`已恢复 ${row.merchant ?? row.id}`);
+      refreshTotals();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : '恢复凭证失败');
+    }
+  }
+
   async function create(): Promise<void> {
     if (selected.length === 0) {
       setError('请选择至少一张可报销凭证');
@@ -80,6 +128,15 @@ export function PoolPage({ onBatch }: { onBatch: (id: string) => void }): React.
         <ul>{CATEGORIES.map((category) => <li key={category}>{category}：{formatFen(totals.byCategory[category])}</li>)}</ul>
       </section>}
       <button type="button" disabled={busy || settings === null} onClick={() => void create()}>生成报销单</button>
+      <button type="button" onClick={() => void toggleBin()}>查看已移出 / 回收站</button>
+      {message && <p role="status">{message}</p>}
+      {binOpen && <section className="pool-bin" aria-label="已移出与回收站">
+        <h3>已移出 / 回收站</h3>
+        {binRows.length === 0 && <p>没有已移出或已删除的凭证。</p>}
+        {binRows.map((row) => <ReceiptCard key={row.id} receipt={row}>
+          <button type="button" onClick={() => void restore(row)}>恢复凭证</button>
+        </ReceiptCard>)}
+      </section>}
       <div className="receipt-list">
         {rows.map((receipt) => {
           const selectable = eligibleIds.has(receipt.id);
@@ -95,6 +152,7 @@ export function PoolPage({ onBatch }: { onBatch: (id: string) => void }): React.
               加入本次报销
             </label>
             <ReceiptEditor receipt={receipt} onSaved={replace} />
+            <button type="button" disabled={busy} onClick={() => void removeFromPool(receipt.id)}>移出本次报销池</button>
           </ReceiptCard>;
         })}
       </div>

@@ -18,6 +18,8 @@ import { archiveMonth, cleanOriginals, history, unarchiveMonth } from './archive
 import { backupAll } from './backup.js';
 import {
   createBatch,
+  cancelBatch,
+  assertActiveBatch,
   getBatch,
   moveBatchGroup,
   poolTotals,
@@ -33,6 +35,8 @@ import {
   confirmReceipt,
   deleteReceipt,
   listReceipts,
+  restoreReceipt,
+  setPoolMembership,
   updateReceipt,
   uploadReceipts,
 } from './receipts.js';
@@ -207,7 +211,7 @@ export function createRouter(
   });
 
   router.get('/receipts', (request, response, next) => {
-    if (request.query.view !== 'pool' && request.query.view !== 'pending') {
+    if (request.query.view !== 'pool' && request.query.view !== 'pending' && request.query.view !== 'excluded' && request.query.view !== 'deleted') {
       next(new HttpError(400, 'INVALID_RECEIPT_VIEW', '请求参数无效'));
       return;
     }
@@ -225,6 +229,26 @@ export function createRouter(
     } catch (error) {
       next(correctionHttpError(error));
     }
+  });
+
+  router.post('/receipts/:id/restore', (request, response, next) => {
+    try {
+      const receipt = restoreReceipt(store, request.params.id);
+      if (receipt.status === 'recognizing') queue?.enqueue([receipt.id]);
+      response.json(receipt);
+    } catch (error) { next(correctionHttpError(error)); }
+  });
+
+  router.post('/receipts/:id/pool', (request, response, next) => {
+    try {
+      if (typeof request.body?.included !== 'boolean') throw new Error('INVALID_RECEIPT_PATCH');
+      response.json(setPoolMembership(store, request.params.id, request.body.included));
+    } catch (error) { next(correctionHttpError(error)); }
+  });
+
+  router.post('/batches/:id/cancel', (request, response, next) => {
+    try { response.json(cancelBatch(store, request.params.id, new Date())); }
+    catch (error) { next(batchHttpError(error)); }
   });
 
   router.post('/batches', (request, response, next) => {
@@ -247,6 +271,7 @@ export function createRouter(
   router.get('/batches/:id/preview.pdf', async (request, response, next) => {
     try {
       const batch = getBatch(store, request.params.id);
+      assertActiveBatch(batch);
       const bytes = batch.pdfPath === null
         ? await renderBatchPdf(store, config, batch)
         : await readSavedBatchPdf(store, config, batch);
@@ -642,6 +667,9 @@ function batchHttpError(error: unknown): Error {
   if (error.message === 'BATCH_NOT_FOUND') {
     return new HttpError(404, 'BATCH_NOT_FOUND', '报销批次不存在');
   }
+  if (error.message === 'BATCH_CANCELLED') return new HttpError(409, error.message, '报销单已撤销，请从本次报销池重新生成');
+  if (error.message === 'ORIGINAL_CLEANED') return new HttpError(409, error.message, '原始图片已永久清理，不能恢复报销；请先从备份恢复');
+  if (error.message === 'BATCH_RECEIPT_CONFLICT') return new HttpError(409, error.message, '凭证关联已改变，未执行撤销');
   if (error.message === 'NOT_ELIGIBLE') {
     return new HttpError(409, 'NOT_ELIGIBLE', '凭证当前状态不可生成');
   }
@@ -685,6 +713,7 @@ function correctionHttpError(error: unknown): Error {
   if (error.message === 'NOT_FOUND') {
     return new HttpError(404, 'RECEIPT_NOT_FOUND', '凭证不存在');
   }
+  if (error.message === 'ORIGINAL_CLEANED') return new HttpError(409, error.message, '原始图片已永久清理，无法恢复');
   if (
     error.message === 'IMMUTABLE_RECEIPT' ||
     error.message === 'INCOMPLETE_RECEIPT' ||

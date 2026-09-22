@@ -65,6 +65,8 @@ export interface ImageRef {
 }
 
 export interface Receipt {
+  /** Absent in older data means included once ready. */
+  poolExcluded?: boolean;
   id: string;
   original: ImageRef;
   refundImages: ImageRef[];
@@ -152,6 +154,8 @@ export interface FormSheet {
 }
 
 export interface Batch {
+  /** Retains the original snapshot/PDF for audit; never an active reimbursement. */
+  cancelledAt?: string | null;
   id: string;
   month: string;
   createdAt: string;

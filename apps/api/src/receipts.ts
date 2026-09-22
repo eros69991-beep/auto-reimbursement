@@ -190,17 +190,19 @@ export function confirmReceipt(store: Store, id: string): Receipt {
 
 export function listReceipts(
   store: Store,
-  view: 'pool' | 'pending',
+  view: 'pool' | 'pending' | 'excluded' | 'deleted',
 ): Receipt[] {
   return store
     .list('receipts')
     .filter((receipt) => {
+      if (view === 'deleted') return receipt.deletedAt !== null;
       if (receipt.deletedAt !== null || receipt.archivedAt !== null) {
         return false;
       }
+      if (view === 'excluded') return receipt.poolExcluded === true && receipt.batchId === null;
       return view === 'pool'
-        ? receipt.status === 'ready' && receipt.batchId === null
-        : receipt.status === 'pending';
+        ? receipt.status === 'ready' && receipt.batchId === null && !receipt.poolExcluded
+        : receipt.status === 'pending' || receipt.status === 'recognizing';
     })
     .sort((left, right) => left.uploadOrder - right.uploadOrder);
 }
@@ -216,10 +218,34 @@ export function deleteReceipt(store: Store, id: string, now: Date): void {
   });
 }
 
-function assertMutable(receipt: Receipt): void {
-  if (receipt.status === 'generated' || receipt.status === 'archived') {
+export function assertMutable(receipt: Receipt): void {
+  if (receipt.deletedAt !== null || receipt.batchId !== null || receipt.status === 'generated' || receipt.status === 'archived') {
     throw new Error('IMMUTABLE_RECEIPT');
   }
+}
+
+export function setPoolMembership(store: Store, id: string, included: boolean): Receipt {
+  return store.transact(() => {
+    const receipt = store.get('receipts', id);
+    if (receipt === null) throw new Error('NOT_FOUND');
+    assertMutable(receipt);
+    const updated = { ...receipt, poolExcluded: !included };
+    store.put('receipts', updated);
+    return updated;
+  });
+}
+
+export function restoreReceipt(store: Store, id: string): Receipt {
+  return store.transact(() => {
+    const receipt = store.get('receipts', id);
+    if (receipt === null) throw new Error('NOT_FOUND');
+    if (receipt.deletedAt === null) return receipt;
+    if (receipt.original.deletedAt !== null) throw new Error('ORIGINAL_CLEANED');
+    const restored = { ...receipt, deletedAt: null };
+    assertMutable(restored);
+    store.put('receipts', restored);
+    return restored;
+  });
 }
 
 function validFen(value: number): boolean {

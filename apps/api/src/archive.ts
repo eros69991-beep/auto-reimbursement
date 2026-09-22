@@ -93,22 +93,24 @@ export function history(store: Store): HistoryMonth[] {
 }
 
 function linkedSet(store: Store, month: string): LinkedSet {
-  const receiptIds = new Set(store.list('receipts')
+  const receipts = store.list('receipts').filter((receipt) => receipt.deletedAt === null);
+  const batches = store.list('batches').filter((batch) => !batch.cancelledAt);
+  const receiptIds = new Set(receipts
     .filter((receipt) => receipt.month === month)
     .map((receipt) => receipt.id));
-  const batchIds = new Set(store.list('batches')
+  const batchIds = new Set(batches
     .filter((batch) => batch.month === month)
     .map((batch) => batch.id));
   let changed = true;
   while (changed) {
     changed = false;
-    for (const receipt of store.list('receipts')) {
+    for (const receipt of receipts) {
       if (receiptIds.has(receipt.id) && receipt.batchId !== null && !batchIds.has(receipt.batchId)) { batchIds.add(receipt.batchId); changed = true; }
       if (receipt.batchId !== null && batchIds.has(receipt.batchId) && !receiptIds.has(receipt.id)) { receiptIds.add(receipt.id); changed = true; }
     }
-    for (const batch of store.list('batches')) {
+    for (const batch of batches) {
       if (batchIds.has(batch.id)) for (const item of batch.items) if (!receiptIds.has(item.receiptId)) { receiptIds.add(item.receiptId); changed = true; }
     }
   }
-  return { receipts: store.list('receipts').filter((receipt) => receiptIds.has(receipt.id)), batches: store.list('batches').filter((batch) => batchIds.has(batch.id)) };
+  return { receipts: receipts.filter((receipt) => receiptIds.has(receipt.id)), batches: batches.filter((batch) => batchIds.has(batch.id)) };
 }

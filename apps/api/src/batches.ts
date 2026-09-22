@@ -338,9 +338,32 @@ function nextSheetId(sheets: FormSheet[]): string {
 }
 
 function assertDraft(batch: Batch): void {
+  assertActiveBatch(batch);
   if (batch.pdfPath !== null) {
     throw new Error('BATCH_FINALIZED');
   }
+}
+
+export function assertActiveBatch(batch: Batch): void {
+  if (batch.cancelledAt) throw new Error('BATCH_CANCELLED');
+}
+
+export function cancelBatch(store: Store, id: string, now: Date): Batch {
+  return store.transact(() => {
+    const batch = getBatch(store, id);
+    if (batch.cancelledAt) return batch;
+    const receipts = batch.items.map((item) => store.get('receipts', item.receiptId));
+    if (receipts.some((receipt) => receipt === null || receipt.batchId !== id || receipt.deletedAt !== null)) {
+      throw new Error('BATCH_RECEIPT_CONFLICT');
+    }
+    if (receipts.some((receipt) => receipt!.original.deletedAt !== null)) throw new Error('ORIGINAL_CLEANED');
+    for (const receipt of receipts) {
+      store.put('receipts', { ...receipt!, status: 'ready', batchId: null, archivedAt: null, statusBeforeArchive: null, poolExcluded: false });
+    }
+    const cancelled = { ...batch, cancelledAt: now.toISOString() };
+    store.put('batches', cancelled);
+    return cancelled;
+  });
 }
 
 function hasExactKeys(value: Record<string, unknown>, expected: string[]): boolean {
