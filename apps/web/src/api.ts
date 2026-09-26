@@ -146,6 +146,8 @@ function createBatch(ids: string[], options: FormOptions): Promise<Batch> {
 function batch(id: string): Promise<Batch> { return requestJson(`/api/batches/${encodeURIComponent(id)}`); }
 function moveGroup(id: string, category: Category, direction: -1 | 1): Promise<Batch> { return requestJson(`/api/batches/${encodeURIComponent(id)}/move`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ category, direction }) }); }
 function saveBatchOptions(id: string, options: FormOptions, noteBySheet: Record<string, string | null>): Promise<Batch> { return requestJson(`/api/batches/${encodeURIComponent(id)}/options`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ options, noteBySheet }) }); }
+function createBatchNote(id: string, input: { name: string; content: string }): Promise<Batch> { return requestJson(`/api/batches/${encodeURIComponent(id)}/notes`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) }); }
+function updateBatchNote(id: string, noteId: string, input: { content: string; name?: string }): Promise<Batch> { return requestJson(`/api/batches/${encodeURIComponent(id)}/notes/${encodeURIComponent(noteId)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) }); }
 function exportBatch(id: string): Promise<Batch> { return requestJson(`/api/batches/${encodeURIComponent(id)}/export`, { method: 'POST' }); }
 function cancelBatch(id: string): Promise<Batch> { return requestJson(`/api/batches/${encodeURIComponent(id)}/cancel`, { method: 'POST' }); }
 function history(): Promise<HistoryMonth[]> { return requestJson('/api/history'); }
@@ -203,6 +205,8 @@ export const api = {
   batch,
   moveGroup,
   saveBatchOptions,
+  createBatchNote,
+  updateBatchNote,
   exportBatch,
   cancelBatch,
   history,

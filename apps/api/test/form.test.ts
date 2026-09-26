@@ -111,4 +111,71 @@ describe('Chinese reimbursement form', () => {
       store.close();
     }
   });
+
+  it('shrinks a long department to fit instead of rejecting it', async () => {
+    const store = openStore(':memory:');
+    try {
+      store.put('receipts', sampleReceipt({ id: 'long-dept', paidFen: 100, category: '耗材' }));
+      const department = '华东区门店运营管理部综合行政组';
+      const batch = createBatch(
+        store,
+        ['long-dept'],
+        { department, date: null, signerMode: 'text', signerName: '', signature: null },
+        new Date('2026-09-04T00:00:00.000Z'),
+      );
+      const doc = createFormDocument();
+      const chunks: Buffer[] = [];
+      doc.on('data', (chunk: Buffer) => chunks.push(chunk));
+      const done = new Promise<Buffer>((resolve) => doc.on('end', () => resolve(Buffer.concat(chunks))));
+      drawForm(doc, batch, batch.sheets[0]!, null);
+      doc.end();
+      const pdf = await getDocument({ data: new Uint8Array(await done), useSystemFonts: false }).promise;
+      const content = await (await pdf.getPage(1)).getTextContent();
+      const compact = content.items.flatMap((item) => ('str' in item ? [item.str] : [])).join('').replace(/\s+/g, '');
+      expect(compact).toContain(department);
+    } finally {
+      store.close();
+    }
+  });
+
+  it('paginates an over-long note onto continuation pages counted in the page total', async () => {
+    const store = openStore(':memory:');
+    try {
+      store.put('receipts', sampleReceipt({ id: 'noted', paidFen: 100, category: '耗材' }));
+      const batch = createBatch(
+        store,
+        ['noted'],
+        { department: '', date: null, signerMode: 'text', signerName: '', signature: null },
+        new Date('2026-09-04T00:00:00.000Z'),
+      );
+      const note = `备注开头。${'这是一段很长的手写备注内容，用来验证续页分页逻辑是否正常工作。'.repeat(12)}备注结尾。`;
+      const noted = {
+        ...batch,
+        notes: [{ id: 'note-long', name: '长备注', content: note }],
+        sheets: [{ ...batch.sheets[0]!, noteId: 'note-long' }],
+      };
+      const doc = createFormDocument();
+      const chunks: Buffer[] = [];
+      doc.on('data', (chunk: Buffer) => chunks.push(chunk));
+      const done = new Promise<Buffer>((resolve) => doc.on('end', () => resolve(Buffer.concat(chunks))));
+      drawForm(doc, noted, noted.sheets[0]!, null);
+      doc.end();
+      const pdf = await getDocument({ data: new Uint8Array(await done), useSystemFonts: false }).promise;
+      expect(pdf.numPages).toBe(2);
+      const pageText = async (pageNumber: number): Promise<string> => {
+        const content = await (await pdf.getPage(pageNumber)).getTextContent();
+        return content.items.flatMap((item) => ('str' in item ? [item.str] : [])).join('').replace(/\s+/g, '');
+      };
+      const first = await pageText(1);
+      const second = await pageText(2);
+      expect(first).toContain('（接续页）');
+      // 1 张凭证附件 + 1 页备注续页 → 单据及附件共 3 页
+      expect(first).toContain('单据及附件共3页');
+      expect(second).toContain('备注续页');
+      expect(second).toContain('备注结尾。');
+      expect(first + second).toContain('备注开头。');
+    } finally {
+      store.close();
+    }
+  });
 });

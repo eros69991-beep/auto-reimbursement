@@ -27,9 +27,9 @@ export class LayoutError extends Error {
 
 export function defaultMetrics(): LayoutMetrics {
   return {
-    summaryWidth: (91.15 * 72) / 25.4 - 12,
-    bodyHeight: (55.14 * 72) / 25.4,
-    rowHeight: ((55.14 / 5) * 72) / 25.4,
+    summaryWidth: (90.8 * 72) / 25.4 - 12,
+    bodyHeight: (55.22 * 72) / 25.4,
+    rowHeight: ((55.22 / 5) * 72) / 25.4,
     lineHeight: 14,
     groupPadding: 8,
     maxSheetFen: 999999999,

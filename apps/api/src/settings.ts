@@ -243,7 +243,7 @@ function hasExactKeys(value: object, expected: string[]): boolean {
   return keys.length === expected.length && expected.every((key) => Object.hasOwn(value, key));
 }
 
-function validateNote(note: Note): void {
+export function validateNote(note: Note): void {
   if (
     note === null ||
     typeof note !== 'object' ||

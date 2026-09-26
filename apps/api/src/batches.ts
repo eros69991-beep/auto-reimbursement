@@ -22,7 +22,7 @@ import {
 } from './render/layout.js';
 import { createFormDocument, formMetrics } from './render/form.js';
 import { isEligible } from './refunds.js';
-import { getSettings } from './settings.js';
+import { getSettings, validateNote } from './settings.js';
 
 export function poolTotals(receipts: Receipt[]): Totals {
   const byCategory = Object.fromEntries(
@@ -166,6 +166,56 @@ export function updateBatchOptions(
       ...batch,
       options: canonicalOptions(store, options),
       sheets,
+    };
+    store.put('batches', updated);
+    return updated;
+  });
+}
+
+// 批次内备注：只改当前批次的快照（batch.notes），不触碰全局模板，
+// 因此 A/B 批次与设置页模板天然隔离。定稿后随 BATCH_FINALIZED 锁定。
+export function createBatchNote(
+  store: Store,
+  id: string,
+  input: { name: unknown; content: unknown },
+): Batch {
+  return store.transact(() => {
+    const batch = getBatch(store, id);
+    assertDraft(batch);
+    const note = {
+      id: randomUUID(),
+      name: input.name,
+      content: input.content,
+    } as Parameters<typeof validateNote>[0];
+    validateNote(note);
+    const updated: Batch = { ...batch, notes: [...batch.notes, note] };
+    store.put('batches', updated);
+    return updated;
+  });
+}
+
+export function updateBatchNote(
+  store: Store,
+  id: string,
+  noteId: string,
+  input: { name?: unknown; content: unknown },
+): Batch {
+  return store.transact(() => {
+    const batch = getBatch(store, id);
+    assertDraft(batch);
+    const existing = batch.notes.find((note) => note.id === noteId);
+    if (existing === undefined) {
+      throw new Error('NOTE_NOT_FOUND');
+    }
+    const note = {
+      id: noteId,
+      name: input.name === undefined ? existing.name : input.name,
+      content: input.content,
+    } as Parameters<typeof validateNote>[0];
+    validateNote(note);
+    const updated: Batch = {
+      ...batch,
+      notes: batch.notes.map((item) => (item.id === noteId ? note : item)),
     };
     store.put('batches', updated);
     return updated;

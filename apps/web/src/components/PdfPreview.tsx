@@ -30,6 +30,7 @@ export function PdfPreview({ url }: { url: string }): React.JSX.Element {
           const base = page.getViewport({ scale: 1 });
           const viewport = page.getViewport({ scale: (width / base.width) * pixelRatio });
           const canvas = document.createElement('canvas');
+          canvas.dataset.pageNumber = String(pageNumber);
           canvas.width = viewport.width;
           canvas.height = viewport.height;
           canvas.style.display = 'block';

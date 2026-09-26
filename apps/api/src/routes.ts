@@ -18,11 +18,13 @@ import { archiveMonth, cleanOriginals, history, unarchiveMonth } from './archive
 import { backupAll } from './backup.js';
 import {
   createBatch,
+  createBatchNote,
   cancelBatch,
   assertActiveBatch,
   getBatch,
   moveBatchGroup,
   poolTotals,
+  updateBatchNote,
   updateBatchOptions,
 } from './batches.js';
 import type { Config } from './config.js';
@@ -311,6 +313,31 @@ export function createRouter(
     try {
       const { options, noteBySheet } = batchOptionsRequest(request.body);
       response.json(updateBatchOptions(store, request.params.id, options, noteBySheet));
+    } catch (error) {
+      next(batchHttpError(error));
+    }
+  });
+
+  router.post('/batches/:id/notes', (request, response, next) => {
+    try {
+      const body = (request.body ?? {}) as { name?: unknown; content?: unknown };
+      response
+        .status(201)
+        .json(createBatchNote(store, request.params.id, { name: body.name, content: body.content }));
+    } catch (error) {
+      next(batchHttpError(error));
+    }
+  });
+
+  router.put('/batches/:id/notes/:noteId', (request, response, next) => {
+    try {
+      const body = (request.body ?? {}) as { name?: unknown; content?: unknown };
+      response.json(
+        updateBatchNote(store, request.params.id, request.params.noteId, {
+          name: body.name,
+          content: body.content,
+        }),
+      );
     } catch (error) {
       next(batchHttpError(error));
     }
@@ -676,6 +703,9 @@ function batchHttpError(error: unknown): Error {
   if (error.message === 'BATCH_FINALIZED') {
     return new HttpError(409, 'BATCH_FINALIZED', '已导出的报销单不可修改');
   }
+  if (error.message === 'NOTE_NOT_FOUND') {
+    return new HttpError(404, 'NOTE_NOT_FOUND', '批次内备注不存在');
+  }
   if (error.message === 'PDF_NOT_FOUND') {
     return new HttpError(404, 'PDF_NOT_FOUND', '导出文件不存在');
   }
@@ -697,6 +727,7 @@ function batchHttpError(error: unknown): Error {
     error.message === 'INVALID_LAYOUT' ||
     error.message === 'INVALID_NOTE_BY_SHEET' ||
     error.message === 'INVALID_BATCH_OPTIONS' ||
+    error.message === 'INVALID_NOTE' ||
     error.message === 'LAYOUT_OVERFLOW' ||
     error.message === 'CATEGORY_TOO_LARGE' ||
     error.message === 'NOTE_OVERFLOW'

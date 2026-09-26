@@ -27,6 +27,7 @@ interface Geometry {
     attachmentsX: number;
     attachmentsLine: [number, number];
     pageLabelX: number;
+    underlineOffset: number;
   };
   table: {
     x: number;
@@ -57,6 +58,8 @@ export function createFormDocument(): PDFKit.PDFDocument {
     autoFirstPage: false,
     size: [mm(geometry.page.width), mm(geometry.page.height)],
     margin: 0,
+    // 固定 CreationDate 使 PDFKit 的文档 ID 恒定，同一数据连续生成的 PDF 字节一致（幂等）。
+    info: { CreationDate: new Date(0) },
   });
   try {
     doc.registerFont('NotoSansSC', fontPath);
@@ -115,18 +118,27 @@ export function drawForm(
   const digits = String(total).padStart(3, '0').padStart(9, ' ');
   if (digits.length > 9) throw new Error('FORM_AMOUNT_OVERFLOW');
   const note = batch.notes.find((item) => item.id === sheet.noteId)?.content ?? '';
+  const notePages = paginateNote(
+    doc,
+    note,
+    mm(columns.notes) - 12,
+    notesSplit - y - 12,
+    mm(page.width - page.margin * 2),
+    mm(page.height - page.margin * 2 - 12),
+  );
 
   doc.addPage({ size: [mm(page.width), mm(page.height)], margin: 0 });
   doc.font('NotoSansSC').fontSize(10).fillColor(PRINTED_BLUE);
   drawTitle(doc);
-  drawMetadata(doc, batch, sheet);
+  drawMetadata(doc, batch, sheet, notePages.continuation.length);
   drawStructure(doc, { x, y, projectX, summaryX, amountX, verticalLabelX, notesX, right, headerSplit, headerBottom, bodyBottom, totalBottom, formBottom, notesSplit });
   drawHeaders(doc, { projectX, summaryX, amountX, verticalLabelX, notesX, right, headerSplit, headerBottom, y, notesSplit, totalBottom });
   drawGroups(doc, batch, sheet, metrics, { projectX, summaryX, amountX, verticalLabelX, headerBottom, bodyBottom });
   drawTotal(doc, digits, x, amountX, bodyBottom, mm(columns.amount), mm(table.totalHeight));
   drawUppercase(doc, digits, x, right, totalBottom, formBottom);
-  drawNote(doc, note, notesX, y, mm(columns.notes), notesSplit - y);
+  drawNote(doc, notePages.firstPage, notesX, y, mm(columns.notes), notesSplit - y);
   drawFooter(doc, batch, signatureBytes);
+  drawNoteContinuationPages(doc, notePages.continuation);
 }
 
 function drawTitle(doc: PDFKit.PDFDocument): void {
@@ -144,7 +156,7 @@ function drawTitle(doc: PDFKit.PDFDocument): void {
   doc.fontSize(10);
 }
 
-function drawMetadata(doc: PDFKit.PDFDocument, batch: Batch, sheet: FormSheet): void {
+function drawMetadata(doc: PDFKit.PDFDocument, batch: Batch, sheet: FormSheet, continuationPages: number): void {
   const meta = geometry.metadata;
   const y = mm(meta.y);
   const date = batch.options.date;
@@ -157,23 +169,24 @@ function drawMetadata(doc: PDFKit.PDFDocument, batch: Batch, sheet: FormSheet): 
   doc.text('报销部门：', mm(meta.departmentX), y, { lineBreak: false });
   const departmentX = mm(meta.departmentX) + doc.widthOfString('报销部门：');
   const departmentWidth = mm(meta.dateCenterX - meta.dateWidth / 2) - departmentX - 4;
-  assertFits(doc, batch.options.department, departmentWidth, 'FORM_TEXT_OVERFLOW');
-  doc.fillColor(BLACK).text(batch.options.department, departmentX, y, { width: departmentWidth, lineBreak: false });
+  const departmentHeight = mm(geometry.table.y) - y;
+  doc.fillColor(BLACK);
+  drawFittedText(doc, batch.options.department, departmentX, y, departmentWidth, departmentHeight, 'FORM_TEXT_OVERFLOW');
 
-  doc.fillColor(BLACK).text(dateText, mm(meta.dateCenterX - meta.dateWidth / 2), y, {
+  doc.fillColor(BLACK).fontSize(10).text(dateText, mm(meta.dateCenterX - meta.dateWidth / 2), y, {
     width: mm(meta.dateWidth),
     align: 'center',
     lineBreak: false,
   });
 
   doc.fillColor(PRINTED_BLUE).text('单据及附件共', mm(meta.attachmentsX), y, { lineBreak: false });
-  const count = String(1 + sheetAttachmentCount(batch, sheet));
+  const count = String(1 + continuationPages + sheetAttachmentCount(batch, sheet));
   const [lineStart, lineEnd] = meta.attachmentsLine;
   doc.fillColor(BLACK).text(count, mm(lineStart), y, { width: mm(lineEnd - lineStart), align: 'center', lineBreak: false });
   doc.fillColor(PRINTED_BLUE).text('页', mm(meta.pageLabelX), y, { lineBreak: false });
   doc.lineWidth(0.5).strokeColor(BLACK)
-    .moveTo(mm(lineStart), y + 11)
-    .lineTo(mm(lineEnd), y + 11)
+    .moveTo(mm(lineStart), y + meta.underlineOffset)
+    .lineTo(mm(lineEnd), y + meta.underlineOffset)
     .stroke();
 }
 
@@ -214,7 +227,7 @@ function drawStructure(doc: PDFKit.PDFDocument, bounds: Bounds): void {
 
   // Horizontal rules.
   doc.moveTo(x, y).lineTo(right, y).stroke();
-  doc.moveTo(amountX, headerSplit).lineTo(verticalLabelX, headerSplit).stroke();
+  doc.moveTo(amountX, headerSplit).lineTo(notesX, headerSplit).stroke();
   doc.moveTo(x, headerBottom).lineTo(verticalLabelX, headerBottom).stroke();
   const rows = geometry.table.bodyRows;
   for (let row = 1; row < rows; row += 1) {
@@ -240,8 +253,8 @@ function drawHeaders(doc: PDFKit.PDFDocument, bounds: Pick<Bounds, 'projectX' | 
   const digitWidth = (verticalLabelX - amountX) / 9;
   doc.fontSize(9);
   labels.forEach((label, index) => centered(doc, label, amountX + digitWidth * index, headerSplit + mm(1.3), digitWidth));
-  verticalText(doc, '备注', verticalLabelX, y, notesSplit - y, mm(10));
-  verticalText(doc, '领导审批', verticalLabelX, notesSplit, totalBottom - notesSplit, mm(6.8));
+  verticalText(doc, '备注', verticalLabelX, headerBottom, notesSplit - headerBottom, mm(6));
+  verticalText(doc, '领导审批', verticalLabelX, notesSplit, totalBottom - notesSplit, mm(7.4));
 }
 
 function drawGroups(
@@ -320,29 +333,85 @@ function drawUppercase(doc: PDFKit.PDFDocument, digits: string, left: number, ri
   });
 
   doc.fillColor(PRINTED_BLUE).fontSize(9);
-  drawLoanField(doc, '原借款：', unitsEnd, loanEnd, top, bottom);
-  drawLoanField(doc, '应退(补)款：', loanEnd, right, top, bottom);
+  const loanStart = left + mm(geometry.table.columns.project + geometry.table.columns.summary);
+  drawLoanField(doc, '原借款：', loanStart, loanEnd, top);
+  drawLoanField(doc, '应退(补)款：', loanEnd, right, top);
   doc.fontSize(10);
 }
 
-function drawLoanField(doc: PDFKit.PDFDocument, label: string, start: number, end: number, top: number, bottom: number): void {
+function drawLoanField(doc: PDFKit.PDFDocument, label: string, start: number, end: number, top: number): void {
   const y = top + mm(2.4);
   doc.text(label, start + mm(1.6), y, { width: end - start - mm(3.2), lineBreak: false });
-  const labelWidth = doc.widthOfString(label);
   const yuanWidth = doc.widthOfString('元');
   doc.text('元', end - yuanWidth - mm(1.6), y, { width: yuanWidth, lineBreak: false });
-  doc.lineWidth(0.5).strokeColor(BLACK)
-    .moveTo(start + mm(1.6) + labelWidth + 4, bottom - mm(2.6))
-    .lineTo(end - yuanWidth - mm(3.2), bottom - mm(2.6))
-    .stroke();
+}
+
+interface NotePagination {
+  firstPage: string;
+  continuation: string[];
+}
+
+// 备注超出批注区时不报错：第一页画放得下的前缀并标注「（接续页）」，剩余内容分页画到续页。
+function paginateNote(
+  doc: PDFKit.PDFDocument,
+  note: string,
+  firstWidth: number,
+  firstHeight: number,
+  continuationWidth: number,
+  continuationHeight: number,
+): NotePagination {
+  if (note === '') return { firstPage: '', continuation: [] };
+  const firstOptions = { width: firstWidth, lineGap: 4 };
+  doc.fontSize(10);
+  if (doc.heightOfString(note, firstOptions) <= firstHeight) {
+    return { firstPage: note, continuation: [] };
+  }
+  const suffix = '（接续页）';
+  const fitPrefix = (text: string, options: { width: number; lineGap: number }, height: number): number => {
+    let low = 0;
+    let high = text.length;
+    while (low < high) {
+      const mid = Math.ceil((low + high) / 2);
+      if (doc.heightOfString(text.slice(0, mid), options) <= height) low = mid;
+      else high = mid - 1;
+    }
+    return low;
+  };
+  const prefixLength = fitPrefix(note, firstOptions, firstHeight - doc.heightOfString(suffix, firstOptions) - 4);
+  const firstPage = `${note.slice(0, prefixLength)}${suffix}`;
+  let rest = note.slice(prefixLength);
+  const continuation: string[] = [];
+  const continuationOptions = { width: continuationWidth, lineGap: 4 };
+  while (rest.length > 0) {
+    const take = fitPrefix(rest, continuationOptions, continuationHeight);
+    if (take === 0) throw new Error('NOTE_OVERFLOW');
+    continuation.push(rest.slice(0, take));
+    rest = rest.slice(take);
+  }
+  return { firstPage, continuation };
 }
 
 function drawNote(doc: PDFKit.PDFDocument, note: string, x: number, top: number, width: number, height: number): void {
   if (note === '') return;
   doc.fontSize(10);
   const options = { width: width - 12, lineGap: 4 };
-  if (doc.heightOfString(note, options) > height - 12) throw new Error('NOTE_OVERFLOW');
+  if (doc.heightOfString(note, options) > height - 12 + 0.01) throw new Error('NOTE_OVERFLOW');
   doc.fillColor(BLACK).text(note, x + 6, top + 6, options);
+}
+
+function drawNoteContinuationPages(doc: PDFKit.PDFDocument, pages: string[]): void {
+  const page = geometry.page;
+  for (const text of pages) {
+    doc.addPage({ size: [mm(page.width), mm(page.height)], margin: 0 });
+    doc.font('NotoSansSC').fontSize(12).fillColor(PRINTED_BLUE);
+    const title = '备注续页';
+    const titleWidth = doc.widthOfString(title);
+    doc.text(title, (mm(page.width) - titleWidth) / 2, mm(page.margin), { width: titleWidth, lineBreak: false });
+    doc.fillColor(BLACK).fontSize(10).text(text, mm(page.margin), mm(page.margin) + mm(8), {
+      width: mm(page.width - page.margin * 2),
+      lineGap: 4,
+    });
+  }
 }
 
 function drawFooter(doc: PDFKit.PDFDocument, batch: Batch, signatureBytes: Buffer | null): void {
@@ -361,8 +430,8 @@ function drawFooter(doc: PDFKit.PDFDocument, batch: Batch, signatureBytes: Buffe
   const signerX = mm(footer.signerX) + doc.widthOfString('报销人') + 6;
   const signerWidth = mm(geometry.page.width - geometry.page.margin) - signerX;
   if (batch.options.signerMode === 'text') {
-    assertFits(doc, batch.options.signerName, signerWidth, 'FORM_TEXT_OVERFLOW');
-    doc.fillColor(BLACK).text(batch.options.signerName, signerX, y, { width: signerWidth, lineBreak: false });
+    doc.fillColor(BLACK);
+    drawFittedText(doc, batch.options.signerName, signerX, y, signerWidth, 14, 'FORM_TEXT_OVERFLOW');
   } else if (signatureBytes !== null) {
     try {
       doc.image(signatureBytes, signerX, y - 2, { fit: [signerWidth, 14], align: 'center', valign: 'center' });
@@ -398,4 +467,30 @@ function verticalText(doc: PDFKit.PDFDocument, text: string, x: number, top: num
 
 function assertFits(doc: PDFKit.PDFDocument, text: string, width: number, code: 'FORM_TEXT_OVERFLOW'): void {
   if (text !== '' && doc.widthOfString(text) > width) throw new Error(code);
+}
+
+// 长文本自适应：10→7pt 逐级缩字号单行放下；仍超宽则用 7pt 在 maxHeight 内换行；再超才抛错。
+function drawFittedText(
+  doc: PDFKit.PDFDocument,
+  text: string,
+  x: number,
+  y: number,
+  width: number,
+  maxHeight: number,
+  code: 'FORM_TEXT_OVERFLOW',
+): void {
+  if (text === '') return;
+  for (const size of [10, 9, 8, 7]) {
+    doc.fontSize(size);
+    if (doc.widthOfString(text) <= width) {
+      doc.text(text, x, y, { width, lineBreak: false });
+      return;
+    }
+  }
+  doc.fontSize(7);
+  if (doc.heightOfString(text, { width }) <= maxHeight) {
+    doc.text(text, x, y, { width });
+    return;
+  }
+  throw new Error(code);
 }
