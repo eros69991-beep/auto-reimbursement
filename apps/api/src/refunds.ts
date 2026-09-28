@@ -1,7 +1,7 @@
 import { unlink } from 'node:fs/promises';
 
 import {
-  netFen,
+  netFenOrNull,
   type FileIndexEntry,
   type Receipt,
 } from '@auto-reimbursement/contracts';
@@ -71,6 +71,11 @@ export async function addRefundImage(
 }
 
 export function isEligible(receipt: Receipt): boolean {
+  // 防御式：单条脏数据（如历史遗留的退款大于实付）只影响自己，不能拖垮整个接口
+  const net = netFenOrNull(receipt);
+  if (receipt.paidFen !== null && net === null) {
+    console.warn(`[data] receipt ${receipt.id} 退款大于实付，视为不可报销，请修正数据`);
+  }
   return (
     receipt.status === 'ready' &&
     !receipt.poolExcluded &&
@@ -79,7 +84,8 @@ export function isEligible(receipt: Receipt): boolean {
     !receipt.batchId &&
     receipt.category !== null &&
     receipt.paidFen !== null &&
-    netFen(receipt) > 0
+    net !== null &&
+    net > 0
   );
 }
 

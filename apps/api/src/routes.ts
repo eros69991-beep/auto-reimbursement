@@ -745,6 +745,7 @@ function correctionHttpError(error: unknown): Error {
     return new HttpError(404, 'RECEIPT_NOT_FOUND', '凭证不存在');
   }
   if (error.message === 'ORIGINAL_CLEANED') return new HttpError(409, error.message, '原始图片已永久清理，无法恢复');
+  if (error.message === 'REFUND_EXCEEDS_PAID') return new HttpError(409, error.message, '退款金额不能大于实付金额，请先调整退款');
   if (
     error.message === 'IMMUTABLE_RECEIPT' ||
     error.message === 'INCOMPLETE_RECEIPT' ||

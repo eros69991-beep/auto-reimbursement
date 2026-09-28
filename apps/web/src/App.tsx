@@ -2,6 +2,7 @@ import './styles.css';
 import { useEffect, useState } from 'react';
 import { UNAUTHORIZED_EVENT } from './api';
 import { AccessGate } from './components/AccessGate';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { PendingPage } from './pages/PendingPage';
 import { PoolPage } from './pages/PoolPage';
 import { UploadPage } from './pages/UploadPage';
@@ -57,7 +58,7 @@ export default function App() {
           <button type="button" onClick={() => { window.location.hash = '#settings'; }}>设置</button>
         </nav>
       </header>
-      {content}
+      <ErrorBoundary>{content}</ErrorBoundary>
     </>
   );
 }

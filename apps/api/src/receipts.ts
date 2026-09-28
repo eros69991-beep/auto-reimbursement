@@ -145,6 +145,9 @@ export function updateReceipt(
     if (patch.paidFen !== undefined && !validFen(patch.paidFen)) {
       throw new Error('INVALID_PAID_FEN');
     }
+    if (patch.paidFen !== undefined && patch.paidFen < receipt.refundFen) {
+      throw new Error('REFUND_EXCEEDS_PAID');
+    }
     if (patch.category !== undefined && !CATEGORIES.includes(patch.category)) {
       throw new Error('INVALID_CATEGORY');
     }
@@ -172,6 +175,9 @@ export function confirmReceipt(store: Store, id: string): Receipt {
     }
     if (!validFen(receipt.paidFen) || !CATEGORIES.includes(category)) {
       throw new Error('INCOMPLETE_RECEIPT');
+    }
+    if (receipt.refundFen > receipt.paidFen) {
+      throw new Error('REFUND_EXCEEDS_PAID');
     }
     if (receipt.duplicateIds.length > 0 && !receipt.duplicateOverride) {
       throw new Error('UNRESOLVED_DUPLICATE');

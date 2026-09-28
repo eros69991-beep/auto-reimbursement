@@ -276,3 +276,17 @@ export function netFen(
   }
   return receipt.paidFen - receipt.refundFen;
 }
+
+/**
+ * 不抛异常的净额计算：数据异常（如退款大于实付的存量脏数据）时返回 null，
+ * 调用方据此降级展示，不能让单条脏数据拖垮整个页面或接口。
+ */
+export function netFenOrNull(
+  receipt: Pick<Receipt, 'paidFen' | 'refundFen'>,
+): number | null {
+  try {
+    return netFen(receipt);
+  } catch {
+    return null;
+  }
+}

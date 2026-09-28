@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
-import { CATEGORIES, formatFen, netFen, type Receipt, type Settings, type Totals } from '@auto-reimbursement/contracts';
+import { CATEGORIES, formatFen, netFenOrNull, type Receipt, type Settings, type Totals } from '@auto-reimbursement/contracts';
 import { api, formOptionsFromSettings } from '../api';
 import { ReceiptCard } from '../components/ReceiptCard';
 import { ReceiptEditor } from '../components/ReceiptEditor';
 
 function eligible(receipt: Receipt): boolean {
-  return receipt.status === 'ready' && receipt.category !== null && receipt.paidFen !== null && netFen(receipt) > 0;
+  const net = receipt.paidFen === null ? null : netFenOrNull(receipt);
+  return receipt.status === 'ready' && receipt.category !== null && net !== null && net > 0;
 }
 
 export function PoolPage({ onBatch }: { onBatch: (id: string) => void }): React.JSX.Element {

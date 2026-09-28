@@ -1,10 +1,15 @@
-import { formatFen, netFen, STATUS_LABELS, type Receipt } from '@auto-reimbursement/contracts';
+import { formatFen, netFenOrNull, STATUS_LABELS, type Receipt } from '@auto-reimbursement/contracts';
 import { api } from '../api';
 import { AuthedImage } from './AuthedImage';
 
 export function ReceiptCard({ receipt, children }: { receipt: Receipt; children?: React.ReactNode }): React.JSX.Element {
   const originalAmount = receipt.paidFen === null ? '待确认' : formatFen(receipt.paidFen);
-  const netAmount = receipt.paidFen === null ? '待确认' : formatFen(netFen(receipt));
+  const net = receipt.paidFen === null ? null : netFenOrNull(receipt);
+  const netAmount = receipt.paidFen === null
+    ? '待确认'
+    : net === null
+      ? '退款大于实付，请修正'
+      : formatFen(net);
   const imagePath = `/api/images/${encodeURIComponent(receipt.original.id)}`;
 
   return (

@@ -28,6 +28,10 @@ export function ReceiptEditor({ receipt, onSaved }: EditorProps): React.JSX.Elem
       setError('请输入正确的金额');
       return;
     }
+    if (paidFen < receipt.refundFen) {
+      setError(`实付金额不能小于已登记的退款 ${formatFen(receipt.refundFen)}，请先调整退款`);
+      return;
+    }
     setBusy(true);
     setError(null);
     let saved = savedReceipt;
