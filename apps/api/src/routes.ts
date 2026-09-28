@@ -59,10 +59,14 @@ import { safePath } from './storage.js';
 import { thumbnailWebp } from './thumbs.js';
 
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
+// P-12：凭证上传的 multer 上限放宽到 25MB，让 20–25MB 的文件进入按文件拒绝流程
+// （storeImage 仍按 20MB 拒绝单个文件并继续处理其余文件），不再整单 413。
+// 内存上界 50 x 25 MiB；超过 25MB 的恶意/异常文件仍整单 413。
+const UPLOAD_MULTER_FILE_SIZE = 25 * 1024 * 1024;
 
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fields: 0, files: 50, fileSize: MAX_IMAGE_BYTES },
+  limits: { fields: 0, files: 50, fileSize: UPLOAD_MULTER_FILE_SIZE },
 });
 const refundUpload = multer({
   storage: multer.memoryStorage(),

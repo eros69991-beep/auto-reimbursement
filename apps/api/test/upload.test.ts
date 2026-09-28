@@ -287,12 +287,31 @@ describe('ordered receipt image upload', () => {
     ).rejects.toThrow('IMAGE_TOO_LARGE');
     expect(await filesUnder(temp)).toEqual([]);
 
+    // P-12：超限文件按单个拒绝（201 + rejected），不再整单 413
     const response = await request(createApp({ store, config }))
       .post('/api/receipts/upload')
       .attach('files', tooLarge, 'large.png');
-    expect(response.status).toBe(413);
+    expect(response.status).toBe(201);
+    expect(response.body.accepted).toEqual([]);
+    expect(response.body.rejected).toEqual([{ index: 0, code: 'IMAGE_TOO_LARGE' }]);
     expect(store.list('receipts')).toEqual([]);
     expect(await filesUnder(temp)).toEqual([]);
+  });
+
+  it('rejects only the oversize file and still accepts the valid ones (P-12)', async () => {
+    const good = await pixelPng('#102030');
+    const good2 = await pixelPng('#405060');
+    const tooLarge = Buffer.alloc(20 * 1024 * 1024 + 1);
+    const response = await request(createApp({ store, config }))
+      .post('/api/receipts/upload')
+      .attach('files', good, 'good.png')
+      .attach('files', tooLarge, 'large.png')
+      .attach('files', good2, 'good2.png');
+
+    expect(response.status).toBe(201);
+    expect(response.body.rejected).toEqual([{ index: 1, code: 'IMAGE_TOO_LARGE' }]);
+    expect(response.body.accepted).toHaveLength(2);
+    expect(store.list('receipts')).toHaveLength(2);
   });
 
   it('rejects images over 40 million decoded pixels without writing bytes', async () => {

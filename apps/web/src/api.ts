@@ -119,10 +119,40 @@ export async function openAuthed(path: string): Promise<void> {
   window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
 
-async function upload(files: File[]): Promise<UploadResult> {
-  const data = new FormData();
-  for (const file of files) data.append('files', file);
-  return requestJson<UploadResult>('/api/receipts/upload', { method: 'POST', body: data });
+// P-12：用 XHR 上传以拿到字节级进度（fetch 不支持上传进度）；
+// 调用方分批（每批 1–3 张），单批失败可单独重试。
+function upload(
+  files: File[],
+  onProgress?: (loaded: number, total: number) => void,
+): Promise<UploadResult> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', apiUrl('/api/receipts/upload'));
+    xhr.responseType = 'json';
+    const auth = authHeaders();
+    if (auth.Authorization !== undefined) {
+      xhr.setRequestHeader('Authorization', auth.Authorization);
+    }
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable) onProgress?.(event.loaded, event.total);
+    };
+    xhr.onload = () => {
+      const body = xhr.response as (UploadResult & Partial<ApiErrorBody>) | null;
+      if (xhr.status >= 200 && xhr.status < 300 && body !== null) {
+        resolve(body);
+        return;
+      }
+      if (xhr.status === 401) {
+        notifyUnauthorized();
+      }
+      reject(new Error(typeof body?.message === 'string' ? body.message : '请求失败'));
+    };
+    xhr.onerror = () => reject(new Error('无法连接服务器，请检查网络后重试'));
+    xhr.ontimeout = () => reject(new Error('上传超时，请检查网络后重试'));
+    const data = new FormData();
+    for (const file of files) data.append('files', file);
+    xhr.send(data);
+  });
 }
 
 function progress(ids: string[], signal?: AbortSignal): Promise<Progress> {

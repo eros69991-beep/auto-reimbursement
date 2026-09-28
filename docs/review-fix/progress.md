@@ -132,3 +132,11 @@ P-20 统一错误表：
 - 前端 api.ts：`ReceiptPatch` 类型同步；ReceiptEditor 新增「商户」（maxLength 50）与「日期」（type="date"）输入，随确认原子提交，空商户/空日期前端先拦截。
 - 测试：api `test/receipt-patch.test.ts` 3 例（PATCH 修剪与降级、非法商户/日期全拒且原值不变、confirm 后学习规则按修正商户建档）；PendingPage.test.tsx 两处断言同步带 merchant/date。
 - 验证：typecheck 绿；contracts 25 + api 225 + web 45 全过；web build 过；e2e 14/14（834px 导航用例曾在高负载并行下偶发 45s 超时，单独与全量重跑均过，列入观察）。
+
+## T14 — P-12 上传可靠性
+
+- 前端 UploadPage 重写提交流程：①逐文件校验（类型仅 JPEG/PNG/WebP、单张 ≤20MB），不合格文件直接列入「上传失败」并给出原因，不拖累其他文件；②`src/compress.ts` 客户端压缩（createImageBitmap+canvas，长边 2000px、JPEG 0.85，>2MB 才压，任何失败回退原图）；③每 3 张一个请求、并发 2（`runPool`），单批网络失败只影响本批；④XHR 上传拿字节级进度（api.ts `upload(files, onProgress)`），drop 区实时显示「正在上传 x/N 张（a/b MB）」；⑤网络失败文件可点「重试失败文件」单独重传（校验失败不重试）；⑥每次选择后重置 `input.value`，重选同批文件也能触发 change；⑦服务端拒绝码翻译为中文原因（格式不支持或图片损坏/超过 20 MB 限制）。
+- 服务端：凭证上传 multer fileSize 放宽到 25MB，20–25MB 文件进入 storeImage 按单文件拒绝（201 + rejected IMAGE_TOO_LARGE），不再整单 413；>25MB 仍整单 413 兜底；refund/signature 维持 20MB。
+- 测试：UploadPage.test.tsx 新增 3 例（逐文件校验+原因、input 重置、失败文件单独重试）+ 1 例改断言；upload.test.ts 改 20MiB 用例为 201 按个拒绝、新增混合大小用例；合并逻辑对 accepted 数量不一致做了防御。
+- 验证：typecheck 绿；contracts 25 + api 226 + web 48 全过；web build 过；e2e 14/14。
+- 暂缓（按计划）：PDF/HEIC 上传支持（M–L，列入后续迭代）。

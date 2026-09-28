@@ -1,10 +1,58 @@
 import { useEffect, useState } from 'react';
 import type { Progress, UploadResult } from '@auto-reimbursement/contracts';
 import { api } from '../api';
+import { compressForUpload } from '../compress';
 
 type UploadClient = Pick<typeof api, 'upload' | 'progress' | 'imageUrl' | 'receiptOriginalUrl'>;
 
 const EMPTY_PROGRESS: Progress = { total: 0, recognizing: 0, ready: 0, pending: 0 };
+const MAX_FILES = 50;
+const MAX_FILE_BYTES = 20 * 1024 * 1024;
+const ACCEPTED_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
+// P-12：每 3 张一个请求、并发 2，单批失败只影响本批，可单独重试
+const CHUNK_SIZE = 3;
+const CONCURRENCY = 2;
+
+interface FileFailure {
+  name: string;
+  reason: string;
+  file: File;
+  retryable: boolean;
+}
+
+function rejectionReason(code: string): string {
+  switch (code) {
+    case 'INVALID_IMAGE':
+      return '格式不支持或图片损坏';
+    case 'IMAGE_TOO_LARGE':
+      return '超过 20 MB 限制';
+    default:
+      return '服务器未接收';
+  }
+}
+
+function formatMb(bytes: number): string {
+  return (bytes / 1024 / 1024).toFixed(1);
+}
+
+async function runPool<T>(
+  items: T[],
+  concurrency: number,
+  worker: (item: T, index: number) => Promise<void>,
+): Promise<void> {
+  let next = 0;
+  const runners = Array.from(
+    { length: Math.min(concurrency, items.length) },
+    async () => {
+      while (next < items.length) {
+        const index = next;
+        next += 1;
+        await worker(items[index]!, index);
+      }
+    },
+  );
+  await Promise.all(runners);
+}
 
 export function UploadPage({ client = api }: { client?: UploadClient }): React.JSX.Element {
   const [progress, setProgress] = useState<Progress>(EMPTY_PROGRESS);
@@ -14,7 +62,10 @@ export function UploadPage({ client = api }: { client?: UploadClient }): React.J
   const [accepted, setAccepted] = useState<UploadResult['accepted']>([]);
   const [acceptedFiles, setAcceptedFiles] = useState<File[]>([]);
   const [rejected, setRejected] = useState<UploadResult['rejected']>([]);
+  const [failedFiles, setFailedFiles] = useState<FileFailure[]>([]);
   const [batchFiles, setBatchFiles] = useState<File[]>([]);
+  const [uploadDone, setUploadDone] = useState(0);
+  const [uploadBytes, setUploadBytes] = useState({ loaded: 0, total: 0 });
   const [activeIds, setActiveIds] = useState<string[]>([]);
   const [retryVersion, setRetryVersion] = useState(0);
 
@@ -45,30 +96,105 @@ export function UploadPage({ client = api }: { client?: UploadClient }): React.J
     };
   }, [activeIds, client, pollError, retryVersion]);
 
-  async function submit(files: File[]): Promise<void> {
-    if (files.length > 50) {
+  async function submit(incoming: File[], carry: FileFailure[] = []): Promise<void> {
+    if (incoming.length === 0 || isUploading) return;
+    setError(null);
+    setPollError(null);
+    if (incoming.length > MAX_FILES) {
       setError('单次最多 50 张');
       return;
     }
-    if (files.length === 0 || isUploading) return;
 
-    setError(null);
-    setPollError(null);
+    // P-12：逐文件校验，不合格的直接给出原因，不拖累其他文件
+    const valid: File[] = [];
+    const failures: FileFailure[] = [];
+    for (const file of incoming) {
+      if (!ACCEPTED_TYPES.has(file.type)) {
+        failures.push({ name: file.name, reason: '格式不支持（仅 JPEG、PNG、WebP）', file, retryable: false });
+      } else if (file.size > MAX_FILE_BYTES) {
+        failures.push({ name: file.name, reason: '超过 20 MB 限制', file, retryable: false });
+      } else {
+        valid.push(file);
+      }
+    }
+    setFailedFiles([...carry, ...failures]);
+    if (valid.length === 0) return;
+
     setIsUploading(true);
-    setBatchFiles(files);
+    setUploadDone(0);
     try {
-      const result = await client.upload(files);
-      setAccepted(result.accepted);
-      setRejected(result.rejected);
-      const rejectedIndexes = new Set(result.rejected.map((item) => item.index));
-      setAcceptedFiles(files.filter((_, index) => !rejectedIndexes.has(index)));
-      const ids = result.accepted.map((receipt) => receipt.id);
+      // P-12：先压缩（长边 2000px、JPEG 0.85），失败自动回退原图
+      const prepared = await Promise.all(valid.map((file) => compressForUpload(file)));
+      setBatchFiles(prepared);
+      const chunks: File[][] = [];
+      for (let start = 0; start < prepared.length; start += CHUNK_SIZE) {
+        chunks.push(prepared.slice(start, start + CHUNK_SIZE));
+      }
+      const results: (UploadResult | null)[] = chunks.map(() => null);
+      const chunkTotals = chunks.map((chunk) => chunk.reduce((sum, file) => sum + file.size, 0));
+      const chunkLoaded = chunks.map(() => 0);
+      const totalBytes = chunkTotals.reduce((sum, value) => sum + value, 0);
+      setUploadBytes({ loaded: 0, total: totalBytes });
+      let completed = 0;
+      await runPool(chunks, CONCURRENCY, async (chunkFiles, index) => {
+        try {
+          results[index] = await client.upload(chunkFiles, (loaded) => {
+            chunkLoaded[index] = Math.min(loaded, chunkTotals[index]!);
+            setUploadBytes({
+              loaded: chunkLoaded.reduce((sum, value) => sum + value, 0),
+              total: totalBytes,
+            });
+          });
+          chunkLoaded[index] = chunkTotals[index]!;
+        } catch {
+          // 单批失败不拖累其他批，记入失败列表稍后重试
+          results[index] = null;
+        } finally {
+          completed += chunkFiles.length;
+          setUploadDone(completed);
+          setUploadBytes({
+            loaded: chunkLoaded.reduce((sum, value) => sum + value, 0),
+            total: totalBytes,
+          });
+        }
+      });
+
+      const acceptedAll: UploadResult['accepted'] = [];
+      const acceptedFilesAll: File[] = [];
+      const rejectedAll: UploadResult['rejected'] = [];
+      const networkFailures: FileFailure[] = [];
+      chunks.forEach((chunkFiles, chunkIndex) => {
+        const result = results[chunkIndex];
+        if (result === null) {
+          for (const file of chunkFiles) {
+            networkFailures.push({ name: file.name, reason: '网络错误或服务器不可用', file, retryable: true });
+          }
+          return;
+        }
+        const rejectedIndexes = new Map(result.rejected.map((item) => [item.index, item]));
+        let acceptedCursor = 0;
+        chunkFiles.forEach((file, localIndex) => {
+          const rejection = rejectedIndexes.get(localIndex);
+          if (rejection !== undefined) {
+            rejectedAll.push({ ...rejection, index: chunkIndex * CHUNK_SIZE + localIndex });
+            return;
+          }
+          const receipt = result.accepted[acceptedCursor];
+          if (receipt !== undefined) {
+            acceptedAll.push(receipt);
+            acceptedFilesAll.push(file);
+            acceptedCursor += 1;
+          }
+        });
+      });
+
+      setAccepted(acceptedAll);
+      setAcceptedFiles(acceptedFilesAll);
+      setRejected(rejectedAll);
+      setFailedFiles([...carry, ...failures, ...networkFailures]);
+      const ids = acceptedAll.map((receipt) => receipt.id);
       setProgress({ total: ids.length, recognizing: ids.length, ready: 0, pending: 0 });
       setActiveIds(ids);
-    } catch (reason) {
-      setError(`上传失败：${reason instanceof Error ? reason.message : '网络错误'}`);
-      setActiveIds([]);
-      setProgress(EMPTY_PROGRESS);
     } finally {
       setIsUploading(false);
     }
@@ -79,11 +205,19 @@ export function UploadPage({ client = api }: { client?: UploadClient }): React.J
     setRetryVersion((version) => version + 1);
   }
 
+  // P-12：只重传网络失败的文件，校验失败的（格式/大小）重传也没有意义
+  async function retryFailed(): Promise<void> {
+    const retryable = failedFiles.filter((failure) => failure.retryable);
+    if (retryable.length === 0) return;
+    const keep = failedFiles.filter((failure) => !failure.retryable);
+    await submit(retryable.map((failure) => failure.file), keep);
+  }
+
   return (
     <main className="page-content">
       <section aria-labelledby="upload-heading" className="upload-panel">
         <h2 id="upload-heading">上传凭证</h2>
-        <p>一次可上传最多 50 张 JPEG、PNG 或 WebP 图片。</p>
+        <p>一次可上传最多 50 张 JPEG、PNG 或 WebP 图片，单张不超过 20 MB；大图会自动压缩后分批上传。</p>
         <label
           aria-label="拖放凭证图片"
           className="drop-target"
@@ -93,14 +227,21 @@ export function UploadPage({ client = api }: { client?: UploadClient }): React.J
             void submit(Array.from(event.dataTransfer.files));
           }}
         >
-          <strong>{isUploading ? `正在上传 ${batchFiles.length} 张…` : '拖放图片到这里，或点击选择文件'}</strong>
+          <strong>{isUploading
+            ? `正在上传 ${uploadDone}/${batchFiles.length} 张（${formatMb(uploadBytes.loaded)}/${formatMb(uploadBytes.total)} MB）…`
+            : '拖放图片到这里，或点击选择文件'}</strong>
           <input
             aria-label="选择凭证图片"
             type="file"
             multiple
             accept="image/jpeg,image/png,image/webp"
             disabled={isUploading}
-            onChange={(event) => void submit(Array.from(event.target.files ?? []))}
+            onChange={(event) => {
+              const files = Array.from(event.target.files ?? []);
+              // P-12：重置 input，重新选择同一批文件也能触发 change
+              event.target.value = '';
+              void submit(files);
+            }}
           />
         </label>
         {error && <p role="alert">{error}</p>}
@@ -133,10 +274,25 @@ export function UploadPage({ client = api }: { client?: UploadClient }): React.J
               {rejected.map((item) => (
                 <li key={`${item.index}-${item.code}`}>
                   {item.duplicateId ? '重复文件' : '未接收文件'}：{batchFiles[item.index]?.name ?? `第 ${item.index + 1} 张`}
+                  {!item.duplicateId && `（${rejectionReason(item.code)}）`}
                   {item.duplicateId && <>（<a href={client.receiptOriginalUrl(item.duplicateId)} onClick={(event) => { event.preventDefault(); void api.openAuthed(`/api/receipts/${encodeURIComponent(item.duplicateId!)}/original-image`); }}>查看重复凭证</a>）</>}
                 </li>
               ))}
             </ul>
+          )}
+        </section>
+      )}
+
+      {failedFiles.length > 0 && (
+        <section aria-label="上传失败" className="upload-results">
+          <h2>上传失败</h2>
+          <ul aria-label="上传失败文件">
+            {failedFiles.map((failure, index) => (
+              <li key={`${failure.name}-${index}`}>{failure.name}：{failure.reason}</li>
+            ))}
+          </ul>
+          {failedFiles.some((failure) => failure.retryable) && (
+            <button type="button" disabled={isUploading} onClick={() => void retryFailed()}>重试失败文件</button>
           )}
         </section>
       )}

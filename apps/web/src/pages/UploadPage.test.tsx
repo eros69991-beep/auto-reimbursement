@@ -53,7 +53,9 @@ describe('UploadPage', () => {
       dataTransfer: { files: [first, second] }
     });
 
-    await waitFor(() => expect(client.upload).toHaveBeenCalledWith([first, second]));
+    // P-12：upload 第二参是 XHR 进度回调，这里只断言文件顺序
+    await waitFor(() => expect(client.upload).toHaveBeenCalled());
+    expect(client.upload.mock.calls[0]?.[0]).toEqual([first, second]);
   });
 
   it('shows rejected duplicate filenames with a link to the exact duplicate', async () => {
@@ -128,5 +130,75 @@ describe('UploadPage', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('validates each file before upload and reports per-file reasons (P-12)', async () => {
+    const client = {
+      upload: vi.fn().mockResolvedValue(uploadResult(['receipt-1'])),
+      progress: vi.fn().mockResolvedValue(emptyProgress),
+      imageUrl: (id: string) => `/api/images/${id}`,
+      receiptOriginalUrl: (id: string) => `/api/receipts/${id}/original-image`,
+    };
+    const good = new File(['x'], 'good.png', { type: 'image/png' });
+    const gif = new File(['x'], 'ani.gif', { type: 'image/gif' });
+    const big = new File([new Uint8Array(20 * 1024 * 1024 + 1)], 'big.png', { type: 'image/png' });
+
+    render(<UploadPage client={client} />);
+    fireEvent.change(screen.getByLabelText('选择凭证图片'), {
+      target: { files: [good, gif, big] }
+    });
+
+    // 只有合法文件进入上传
+    await waitFor(() => expect(client.upload).toHaveBeenCalled());
+    expect(client.upload.mock.calls[0]?.[0]).toEqual([good]);
+    const failures = await screen.findByRole('list', { name: '上传失败文件' });
+    expect(failures).toHaveTextContent('ani.gif：格式不支持');
+    expect(failures).toHaveTextContent('big.png：超过 20 MB 限制');
+    // 校验失败不可重试，不显示重试按钮
+    expect(screen.queryByRole('button', { name: '重试失败文件' })).not.toBeInTheDocument();
+  });
+
+  it('resets the file input so re-selecting the same files fires change again (P-12)', async () => {
+    const client = {
+      upload: vi.fn().mockResolvedValue(uploadResult()),
+      progress: vi.fn().mockResolvedValue(emptyProgress),
+      imageUrl: (id: string) => `/api/images/${id}`,
+      receiptOriginalUrl: (id: string) => `/api/receipts/${id}/original-image`,
+    };
+
+    render(<UploadPage client={client} />);
+    const input = screen.getByLabelText('选择凭证图片') as HTMLInputElement;
+    fireEvent.change(input, {
+      target: { files: [new File(['x'], 'a.png', { type: 'image/png' })] }
+    });
+
+    await waitFor(() => expect(client.upload).toHaveBeenCalled());
+    expect(input.value).toBe('');
+  });
+
+  it('retries only the network-failed files without re-uploading the rest (P-12)', async () => {
+    const client = {
+      upload: vi.fn()
+        .mockRejectedValueOnce(new Error('无法连接服务器，请检查网络后重试'))
+        .mockResolvedValue(uploadResult(['receipt-1'])),
+      progress: vi.fn().mockResolvedValue(emptyProgress),
+      imageUrl: (id: string) => `/api/images/${id}`,
+      receiptOriginalUrl: (id: string) => `/api/receipts/${id}/original-image`,
+    };
+    const file = new File(['x'], 'retry.png', { type: 'image/png' });
+
+    render(<UploadPage client={client} />);
+    fireEvent.change(screen.getByLabelText('选择凭证图片'), {
+      target: { files: [file] }
+    });
+
+    const failures = await screen.findByRole('list', { name: '上传失败文件' });
+    expect(failures).toHaveTextContent('retry.png：网络错误或服务器不可用');
+
+    fireEvent.click(screen.getByRole('button', { name: '重试失败文件' }));
+    await waitFor(() => expect(client.upload).toHaveBeenCalledTimes(2));
+    expect(client.upload.mock.calls[1]?.[0]).toEqual([file]);
+    await waitFor(() => expect(screen.queryByRole('list', { name: '上传失败文件' })).not.toBeInTheDocument());
+    expect(await screen.findByRole('list', { name: '已接收文件' })).toHaveTextContent('已接收：retry.png');
   });
 });
