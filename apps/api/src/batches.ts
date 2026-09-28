@@ -13,6 +13,7 @@ import {
 } from '@auto-reimbursement/contracts';
 
 import type { Store } from './db.js';
+import { businessMonth } from './time.js';
 import {
   groupItems,
   moveGroup,
@@ -77,7 +78,7 @@ export function createBatch(
     const sheets = withPdfMetrics((metrics) => packGroups(groupItems(items), metrics));
     const batch: Batch = {
       id: randomUUID(),
-      month: `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`,
+      month: businessMonth(now),
       createdAt: now.toISOString(),
       totalFen,
       items,

@@ -159,3 +159,12 @@ P-20 统一错误表：
 - 测试：`test/version.test.ts` 2 例（有/无注入 SHA）。
 - 验证：typecheck 绿；contracts 25 + api 232 + web 48 全过；web build 过；e2e 14/14。
 - 运维部分（控制台操作，不在代码内）：GitHub Apps 恢复 Railway 仓库访问、Railway 重连仓库开自动部署、前端页脚显示 Netlify COMMIT_REF（后续迭代）。
+
+## T17 — P-23 时区修正（Asia/Shanghai）
+
+- 新增 `apps/api/src/time.ts`：`BUSINESS_TIME_ZONE='Asia/Shanghai'`，模块级 `Intl.DateTimeFormat('en-CA', …)`（en-CA 输出 YYYY-MM-DD），导出 `businessDate(now)` / `businessMonth(now)`，业务日期/月份与服务器所在时区彻底解耦。
+- receipts.ts：删除本地 `localMonth()`，上传归月改用 `businessMonth(now)`；batches.ts：建批 month 同样改 `businessMonth(now)`；settings.ts：`resolveOptions` 默认日期改 `businessDate(now)`，与归月口径一致。
+- 问题根因：Railway 默认 TZ=UTC，原 `getFullYear()/getMonth()` 用服务器时区，月初北京时间 0–8 点上传/建批的记录会被错归上个月（如 UTC 9/30 16:30 = 北京 10/1 00:30，旧代码归 2026-09）。
+- 测试：`test/time.test.ts` 4 例——跨月边界（UTC 9/30 16:30 → 2026-10）、临界前一秒（15:59:59 → 2026-09）、UTC 零点不跨天、集成（该时刻上传的凭证 month === '2026-10'）。
+- 验证：typecheck 绿；contracts 25 + api 236 + web 48 全过；web build 过；e2e 14/14。
+- 运维提示（部署时做）：Railway 设 `TZ=Asia/Shanghai` 可让日志时间戳同步为北京时间；代码层面已不再依赖该变量。

@@ -14,10 +14,7 @@ import type { Store } from './db.js';
 import { findDuplicates } from './duplicates.js';
 import { recordCorrectionInTransaction } from './learning.js';
 import { safePath, storeImage, type InputImage } from './storage.js';
-
-function localMonth(now: Date): string {
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-}
+import { businessMonth } from './time.js';
 
 function rejectionCode(error: unknown): string | null {
   if (!(error instanceof Error)) {
@@ -36,7 +33,7 @@ export async function uploadReceipts(
 ): Promise<UploadResult> {
   const accepted: Receipt[] = [];
   const rejected: UploadResult['rejected'] = [];
-  const month = localMonth(now);
+  const month = businessMonth(now);
   const uploadedAt = now.toISOString();
 
   for (const [index, file] of files.entries()) {

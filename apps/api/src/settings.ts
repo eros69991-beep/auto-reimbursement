@@ -11,6 +11,7 @@ import {
 import type { Config } from './config.js';
 import type { Store } from './db.js';
 import { safePath, storeSignatureImage, type InputImage } from './storage.js';
+import { businessDate } from './time.js';
 
 const AMOUNT_FLOOR = 0.8;
 const CATEGORY_FLOOR = 0.7;
@@ -103,11 +104,8 @@ export function createNote(store: Store, input: Omit<Note, 'id'>): Note {
 }
 
 export function resolveOptions(settings: Settings, now: Date): FormOptions {
-  const today = [
-    now.getFullYear(),
-    String(now.getMonth() + 1).padStart(2, '0'),
-    String(now.getDate()).padStart(2, '0'),
-  ].join('-');
+  // P-23：与归月逻辑保持一致，默认日期也按上海时区计算
+  const today = businessDate(now);
   return {
     department: settings.department,
     date:
