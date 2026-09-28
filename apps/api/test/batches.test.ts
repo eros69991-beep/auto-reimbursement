@@ -383,6 +383,7 @@ function noUndefinedFileLookupStore(base: Store): Store {
     nextOrder: base.nextOrder.bind(base),
     recordConfirmation: base.recordConfirmation.bind(base),
     backupTo: base.backupTo.bind(base),
+    ping: base.ping.bind(base),
     close: base.close.bind(base),
   };
 }

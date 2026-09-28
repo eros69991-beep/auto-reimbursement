@@ -140,3 +140,13 @@ P-20 统一错误表：
 - 测试：UploadPage.test.tsx 新增 3 例（逐文件校验+原因、input 重置、失败文件单独重试）+ 1 例改断言；upload.test.ts 改 20MiB 用例为 201 按个拒绝、新增混合大小用例；合并逻辑对 accepted 数量不一致做了防御。
 - 验证：typecheck 绿；contracts 25 + api 226 + web 48 全过；web build 过；e2e 14/14。
 - 暂缓（按计划）：PDF/HEIC 上传支持（M–L，列入后续迭代）。
+
+## T15 — P-09 启动自检 + /health 深查（代码部分）
+
+- db.ts：Store 新增 `ping()`（SELECT 1）；四个手工 Store 字面量测试同步补 ping。
+- app.ts：/health 在有依赖时做深度检查——store.ping() + DATA_DIR 写探针文件，任一失败返回 503 `{ status: 'error', checks: { database, dataDir } }`；健康时仍返回 `{ status: 'ok' }`（保持监控兼容）；无依赖的裸 app 维持原样。
+- server.ts + 新增 `src/volume.ts`：`REQUIRE_VOLUME=1` 时 DATA_DIR 下必须存在 `.volume-id` 标记文件，否则 fatal 日志并拒绝启动（防止卷未挂载时数据静默写到容器临时盘）。
+- 测试：`test/health-deep.test.ts` 4 例（健康 200、库挂 503、目录不可写 503、卷标记检测）；health.test.ts 的 hostedConfig 改用真实可写临时 DATA_DIR。
+- 验证：typecheck 绿；contracts 25 + api 230 + web 48 全过；web build 过；e2e 14/14。
+- 观察：本轮全量测试遇到一次 vitest worker `ERR_IPC_CHANNEL_CLOSED`（高负载并行下的 IPC 崩溃，非测试失败），重跑全绿；与 P-29 一并观察。
+- 运维部分（部署时做，不在代码内）：Railway 确认 Volume 挂载并在卷上写入 `.volume-id`、设 `REQUIRE_VOLUME=1`、Litestream/rclone 异地备份、恢复演练手册。

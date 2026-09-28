@@ -1,3 +1,6 @@
+import { unlink, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
+
 import express from 'express';
 import rateLimit from 'express-rate-limit';
 import helmet from 'helmet';
@@ -64,8 +67,32 @@ export function createApp(deps?: AppDependencies): express.Express {
   // 请求日志（P-17）：每个请求一条结构化日志，Authorization 已脱敏
   application.use(pinoHttp({ logger }));
 
-  application.get('/health', (_request, response) => {
-    response.status(200).json({ status: 'ok' });
+  // P-09：/health 深度检查——数据库 SELECT 1 + DATA_DIR 可写性，任一失败返回 503，
+  // 避免卷没挂上时健康检查全程绿灯、数据静默写到容器临时盘。
+  application.get('/health', async (_request, response) => {
+    if (deps === undefined) {
+      response.status(200).json({ status: 'ok' });
+      return;
+    }
+    const checks: Record<string, 'ok' | 'fail'> = { database: 'ok', dataDir: 'ok' };
+    try {
+      deps.store.ping();
+    } catch {
+      checks.database = 'fail';
+    }
+    try {
+      const probe = join(deps.config.dataDir, `.health-probe-${process.pid}`);
+      await writeFile(probe, 'ok');
+      await unlink(probe);
+    } catch {
+      checks.dataDir = 'fail';
+    }
+    const healthy = checks.database === 'ok' && checks.dataDir === 'ok';
+    if (healthy) {
+      response.status(200).json({ status: 'ok' });
+      return;
+    }
+    response.status(503).json({ status: 'error', checks });
   });
 
   if (deps !== undefined) {

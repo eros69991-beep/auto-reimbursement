@@ -1,4 +1,7 @@
 import request from 'supertest';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import { app } from '../src/app.js';
 import { createApp } from '../src/app.js';
@@ -6,8 +9,9 @@ import { loadConfig } from '../src/config.js';
 import { openStore } from '../src/db.js';
 
 const netlifyOrigin = 'https://zidongbx.netlify.app';
+// P-09：/health 会探测 DATA_DIR 可写性，hostedConfig 需要一个真实可写目录
 const hostedConfig = loadConfig(
-  { CORS_ORIGINS: netlifyOrigin },
+  { CORS_ORIGINS: netlifyOrigin, DATA_DIR: mkdtempSync(join(tmpdir(), 'auto-reimbursement-hosted-')) },
   process.cwd(),
 );
 const store = openStore(':memory:');

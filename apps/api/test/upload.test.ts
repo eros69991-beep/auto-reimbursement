@@ -530,6 +530,7 @@ describe('ordered receipt image upload', () => {
       nextOrder: store.nextOrder.bind(store),
       recordConfirmation: store.recordConfirmation.bind(store),
       backupTo: store.backupTo.bind(store),
+      ping: store.ping.bind(store),
       close: store.close.bind(store),
     };
 

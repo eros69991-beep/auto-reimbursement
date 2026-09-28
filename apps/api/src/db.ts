@@ -32,6 +32,8 @@ export interface Store {
   backupTo(path: string): Promise<void>;
   putBackup?(id: string, path: string): void;
   getBackup?(id: string): string | null;
+  /** P-09：/health 深度检查用，执行 SELECT 1，数据库不可用时抛错 */
+  ping(): void;
   close(): void;
 }
 
@@ -106,6 +108,10 @@ class SqliteStore implements Store {
   remove(table: Table, id: string): void {
     const tableName = getTableName(table);
     this.database.prepare(`DELETE FROM ${tableName} WHERE id = ?`).run(id);
+  }
+
+  ping(): void {
+    this.database.prepare('SELECT 1').get();
   }
 
   transact<T>(fn: () => T): T {

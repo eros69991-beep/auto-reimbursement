@@ -8,9 +8,19 @@ import { openStore } from './db.js';
 import { applyAnalysis } from './decision.js';
 import { logger } from './logger.js';
 import { createQueue } from './queue.js';
+import { VOLUME_MARKER, volumeMarkerMissing } from './volume.js';
 
 const config = loadConfig(process.env, resolve(process.cwd(), '../..'));
 mkdirSync(config.dataDir, { recursive: true });
+// P-09：REQUIRE_VOLUME=1 时卷标记文件必须存在，否则拒绝启动——
+// 卷没挂上时数据会静默写到容器临时盘，重新部署后全部丢失。
+if (process.env.REQUIRE_VOLUME === '1' && volumeMarkerMissing(config.dataDir)) {
+  logger.fatal(
+    { dataDir: config.dataDir, marker: VOLUME_MARKER },
+    `REQUIRE_VOLUME=1 但 ${config.dataDir}/${VOLUME_MARKER} 不存在：卷未挂载，拒绝启动`,
+  );
+  process.exit(1);
+}
 const store = openStore(config.dbPath);
 const queue = createQueue({
   store,
