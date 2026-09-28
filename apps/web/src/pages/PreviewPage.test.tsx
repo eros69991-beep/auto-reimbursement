@@ -3,11 +3,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Batch } from '@auto-reimbursement/contracts';
 
-const { batchApi, saveBatchOptions, createBatchNote, updateBatchNote } = vi.hoisted(() => ({
+const { batchApi, saveBatchOptions, createBatchNote, updateBatchNote, moveGroup, exportBatch } = vi.hoisted(() => ({
   batchApi: vi.fn(),
   saveBatchOptions: vi.fn(),
   createBatchNote: vi.fn(),
   updateBatchNote: vi.fn(),
+  moveGroup: vi.fn(),
+  exportBatch: vi.fn(),
 }));
 
 vi.mock('../api', () => ({
@@ -16,8 +18,8 @@ vi.mock('../api', () => ({
     saveBatchOptions,
     createBatchNote,
     updateBatchNote,
-    moveGroup: vi.fn(),
-    exportBatch: vi.fn(),
+    moveGroup,
+    exportBatch,
     cancelBatch: vi.fn(),
   },
   apiUrl: (path: string) => `http://api.test${path}`,
@@ -213,5 +215,74 @@ describe('preview page note editing', () => {
 
     await waitFor(() => expect(updateBatchNote).toHaveBeenCalledWith('batch-1', 'note-own', { content: '新内容' }));
     await waitFor(() => expect(screen.getByLabelText('部门')).toHaveValue('未保存的新部门'));
+  });
+});
+
+describe('preview page unsaved-changes handling (P-05)', () => {
+  afterEach(() => cleanup());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    batchApi.mockResolvedValue(sampleBatch());
+  });
+
+  it('shows a dirty hint after editing and a saved notice after saving', async () => {
+    saveBatchOptions.mockImplementation(async (_id: string, options: { department: string }) =>
+      sampleBatch({ options: { ...sampleBatch().options, department: options.department } }),
+    );
+
+    render(<PreviewPage batchId="batch-1" />);
+    fireEvent.change(await screen.findByLabelText('部门'), { target: { value: '新部门' } });
+    expect(screen.getByRole('status')).toHaveTextContent('有未保存的修改');
+
+    fireEvent.click(screen.getByRole('button', { name: '保存预览设置' }));
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('已保存'));
+  });
+
+  it('saves unsaved edits before exporting and asks for confirmation (P-05)', async () => {
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    saveBatchOptions.mockImplementation(async (_id: string, options: { department: string }) =>
+      sampleBatch({ options: { ...sampleBatch().options, department: options.department } }),
+    );
+    exportBatch.mockResolvedValue(sampleBatch({ pdfPath: 'exports/batch-1.pdf' }));
+
+    render(<PreviewPage batchId="batch-1" />);
+    fireEvent.change(await screen.findByLabelText('部门'), { target: { value: '未保存的新部门' } });
+    fireEvent.click(screen.getByRole('button', { name: '生成 PDF' }));
+
+    // 先保存（带本地未保存的部门），再导出；顺序不能反
+    await waitFor(() => expect(exportBatch).toHaveBeenCalledWith('batch-1'));
+    expect(saveBatchOptions).toHaveBeenCalledWith(
+      'batch-1',
+      expect.objectContaining({ department: '未保存的新部门' }),
+      expect.anything(),
+    );
+    expect(saveBatchOptions.mock.invocationCallOrder[0]!).toBeLessThan(exportBatch.mock.invocationCallOrder[0]!);
+    expect(confirmSpy).toHaveBeenCalledWith(expect.stringContaining('未保存的新部门'));
+    confirmSpy.mockRestore();
+  });
+
+  it('does not export when the confirmation is declined', async () => {
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
+
+    render(<PreviewPage batchId="batch-1" />);
+    fireEvent.click(await screen.findByRole('button', { name: '生成 PDF' }));
+
+    await waitFor(() => expect(confirmSpy).toHaveBeenCalled());
+    expect(exportBatch).not.toHaveBeenCalled();
+    expect(saveBatchOptions).not.toHaveBeenCalled();
+    confirmSpy.mockRestore();
+  });
+
+  it('keeps unsaved option edits when moving a category across sheets (P-05)', async () => {
+    moveGroup.mockResolvedValue(sampleBatch());
+
+    render(<PreviewPage batchId="batch-1" />);
+    fireEvent.change(await screen.findByLabelText('部门'), { target: { value: '未保存的新部门' } });
+    fireEvent.click(screen.getByRole('button', { name: '下一页' }));
+
+    await waitFor(() => expect(moveGroup).toHaveBeenCalledWith('batch-1', '百慕达食材', 1));
+    // 服务器返回的旧快照不能覆盖本地未保存输入
+    await waitFor(() => expect(screen.getByLabelText('部门')).toHaveValue('未保存的新部门'));
+    expect(screen.getByRole('status')).toHaveTextContent('有未保存的修改');
   });
 });

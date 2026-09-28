@@ -72,6 +72,17 @@ P-20 统一错误表：
 - 前端 `api.ts`：`fetch` 网络层失败（TypeError 'Failed to fetch'）统一翻译为「无法连接服务器，请检查网络后重试」。
 - 新增 `test/errors.test.ts` 5 例：JSON 404、两处 INVALID_JSON、路径特化 code 保留、INVALID_UPLOAD。
 
+## T07 — P-05 未保存修改被吞 + 定稿确认（完成）
+
+- `PreviewPage.tsx`：
+  - 新增 `saved` 快照（options + noteBySheet），加载/保存/导出/备注持久化后同步推进；`dirty` 由本地与快照 diff 得出。
+  - 「生成 PDF」：dirty 时先 `saveBatchOptions`（顺序断言保证先保存后导出），再弹确认框「生成后将锁定：部门 X、报销人 Y、日期 Z」，取消则不导出。
+  - `move()`：合并服务器返回的 sheets 与本地未保存的 options、noteId 选择，不再回写旧值。
+  - 保存成功显示「已保存」，编辑后显示「有未保存的修改（生成 PDF 前会自动保存）」。
+  - dirty 时 `beforeunload` 拦截关闭/刷新，`hashchange` 拦截站内离开（取消则跳回预览）。
+- `e2e/workflow.spec.ts`：自动接受定稿确认框。
+- `PreviewPage.test.tsx` 新增 4 例：dirty 提示与已保存反馈、未保存直接生成先保存再导出且弹确认、取消确认不导出、move 保留未保存输入。
+
 ## 验证（T03–T05）
 
 - `pnpm typecheck`：3 包全绿。

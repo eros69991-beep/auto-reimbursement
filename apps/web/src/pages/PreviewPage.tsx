@@ -4,6 +4,19 @@ import { api, apiUrl, openAuthed } from '../api';
 import { NoteEditor } from '../components/NoteEditor';
 import { ReconcileWorkspace } from '../components/ReconcileWorkspace';
 
+interface SavedSnapshot {
+  options: FormOptions;
+  noteBySheet: Record<string, string | null>;
+}
+
+function noteBySheetOf(batch: Batch): Record<string, string | null> {
+  return Object.fromEntries(batch.sheets.map((sheet) => [sheet.id, sheet.noteId]));
+}
+
+function snapshotOf(batch: Batch): SavedSnapshot {
+  return { options: batch.options, noteBySheet: noteBySheetOf(batch) };
+}
+
 export function PreviewPage({ batchId }: { batchId: string | null }): React.JSX.Element {
   const [batch, setBatch] = useState<Batch | null>(null);
   const [revision, setRevision] = useState(0);
@@ -11,16 +24,50 @@ export function PreviewPage({ batchId }: { batchId: string | null }): React.JSX.
   const [busy, setBusy] = useState(false);
   const [editingSheetId, setEditingSheetId] = useState<string | null>(null);
   const [noteError, setNoteError] = useState<string | null>(null);
+  // P-05：记录最近一次保存到服务器的快照，用于 dirty 判断与「已保存」反馈
+  const [saved, setSaved] = useState<SavedSnapshot | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
   useEffect(() => {
     if (batchId === null) {
       setBatch(null);
+      setSaved(null);
       return;
     }
-    void api.batch(batchId).then(setBatch, (reason: unknown) =>
+    void api.batch(batchId).then((loaded) => {
+      setBatch(loaded);
+      setSaved(snapshotOf(loaded));
+    }, (reason: unknown) =>
       setError(reason instanceof Error ? reason.message : '加载预览失败'),
     );
   }, [batchId]);
+
+  const dirty =
+    batch !== null &&
+    saved !== null &&
+    (JSON.stringify(batch.options) !== JSON.stringify(saved.options) ||
+      JSON.stringify(noteBySheetOf(batch)) !== JSON.stringify(saved.noteBySheet));
+
+  // P-05：有未保存修改时，关闭/刷新页面与站内跳转都要提示
+  useEffect(() => {
+    if (!dirty) return;
+    const onBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+    };
+    const onHashChange = (event: HashChangeEvent) => {
+      const target = new URL(event.newURL).hash;
+      const leaving = !target.startsWith('#preview') && !/^#batches\/[^/]+\/preview$/.test(target);
+      if (leaving && !window.confirm('有未保存的修改，确定离开吗？')) {
+        window.location.hash = new URL(event.oldURL).hash;
+      }
+    };
+    window.addEventListener('beforeunload', onBeforeUnload);
+    window.addEventListener('hashchange', onHashChange);
+    return () => {
+      window.removeEventListener('beforeunload', onBeforeUnload);
+      window.removeEventListener('hashchange', onHashChange);
+    };
+  }, [dirty]);
 
   const errorText = (reason: unknown, fallback: string) =>
     reason instanceof Error
@@ -31,7 +78,10 @@ export function PreviewPage({ batchId }: { batchId: string | null }): React.JSX.
     if (!batch) return;
     setBusy(true);
     try {
-      setBatch(await api.saveBatchOptions(batch.id, options, notes));
+      const savedBatch = await api.saveBatchOptions(batch.id, options, notes);
+      setBatch(savedBatch);
+      setSaved(snapshotOf(savedBatch));
+      setNotice('已保存');
       setRevision((value) => value + 1);
     } catch (reason) {
       setError(errorText(reason, '保存失败'));
@@ -44,7 +94,16 @@ export function PreviewPage({ batchId }: { batchId: string | null }): React.JSX.
     if (!batch) return;
     setBusy(true);
     try {
-      setBatch(await api.moveGroup(batch.id, category, direction));
+      const moved = await api.moveGroup(batch.id, category, direction);
+      // P-05：服务器返回的是旧快照，必须合并回本地未保存的选项与备注选择
+      setBatch({
+        ...moved,
+        options: batch.options,
+        sheets: moved.sheets.map((sheet) => {
+          const local = batch.sheets.find((item) => item.id === sheet.id);
+          return local === undefined ? sheet : { ...sheet, noteId: local.noteId };
+        }),
+      });
       setRevision((value) => value + 1);
     } catch (reason) {
       setError(errorText(reason, '调整失败'));
@@ -55,9 +114,36 @@ export function PreviewPage({ batchId }: { batchId: string | null }): React.JSX.
 
   async function exportCurrent(): Promise<void> {
     if (!batch) return;
+    // P-05：有未保存修改时先保存再导出，避免按服务器旧值定稿
+    if (dirty) {
+      setBusy(true);
+      try {
+        const savedBatch = await api.saveBatchOptions(batch.id, batch.options, noteBySheetOf(batch));
+        setBatch(savedBatch);
+        setSaved(snapshotOf(savedBatch));
+        setNotice('已保存');
+        setRevision((value) => value + 1);
+      } catch (reason) {
+        setError(errorText(reason, '保存失败'));
+        setBusy(false);
+        return;
+      }
+      setBusy(false);
+    }
+    // P-05：导出即定稿，点击前二次确认将锁定的内容
+    const { department, signerName, date } = batch.options;
+    if (
+      !window.confirm(
+        `生成后将锁定：部门 ${department || '（空）'}、报销人 ${signerName || '（空）'}、日期 ${date || '（空）'}。确定生成 PDF 吗？`,
+      )
+    ) {
+      return;
+    }
     setBusy(true);
     try {
-      setBatch(await api.exportBatch(batch.id));
+      const exported = await api.exportBatch(batch.id);
+      setBatch(exported);
+      setSaved(snapshotOf(exported));
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : '生成失败');
     } finally {
@@ -87,7 +173,10 @@ export function PreviewPage({ batchId }: { batchId: string | null }): React.JSX.
     try {
       if (content === '') {
         const noteBySheet = Object.fromEntries(batch.sheets.map((sheet) => [sheet.id, sheet.noteId]));
-        setBatch(await api.saveBatchOptions(batch.id, batch.options, { ...noteBySheet, [sheetId]: null }));
+        const persisted = { ...noteBySheet, [sheetId]: null };
+        setBatch(await api.saveBatchOptions(batch.id, batch.options, persisted));
+        // 该调用同时持久化了本地 options，saved 快照同步推进
+        setSaved({ options: batch.options, noteBySheet: persisted });
       } else {
         const sheet = batch.sheets.find((item) => item.id === sheetId);
         if (sheet === undefined) return;
@@ -110,12 +199,9 @@ export function PreviewPage({ batchId }: { batchId: string | null }): React.JSX.
           if (created === undefined) throw new Error('备注创建失败');
           const noteBySheet = Object.fromEntries(withNote.sheets.map((item) => [item.id, item.noteId]));
           // 用本地当前 options 保存，避免把未保存的部门/签名人输入回写成服务器旧值
-          setBatch(
-            await api.saveBatchOptions(batch.id, batch.options, {
-              ...noteBySheet,
-              [sheetId]: created.id,
-            }),
-          );
+          const persisted = { ...noteBySheet, [sheetId]: created.id };
+          setBatch(await api.saveBatchOptions(batch.id, batch.options, persisted));
+          setSaved({ options: batch.options, noteBySheet: persisted });
         }
       }
       setRevision((value) => value + 1);
@@ -178,21 +264,30 @@ export function PreviewPage({ batchId }: { batchId: string | null }): React.JSX.
           部门
           <input
             value={batch.options.department}
-            onChange={(e) => setBatch({ ...batch, options: { ...batch.options, department: e.target.value } })}
+            onChange={(e) => {
+              setNotice(null);
+              setBatch({ ...batch, options: { ...batch.options, department: e.target.value } });
+            }}
           />
         </label>
         <label>
           日期
           <input
             value={batch.options.date ?? ''}
-            onChange={(e) => setBatch({ ...batch, options: { ...batch.options, date: e.target.value || null } })}
+            onChange={(e) => {
+              setNotice(null);
+              setBatch({ ...batch, options: { ...batch.options, date: e.target.value || null } });
+            }}
           />
         </label>
         <label>
           签名人
           <input
             value={batch.options.signerName}
-            onChange={(e) => setBatch({ ...batch, options: { ...batch.options, signerName: e.target.value } })}
+            onChange={(e) => {
+              setNotice(null);
+              setBatch({ ...batch, options: { ...batch.options, signerName: e.target.value } });
+            }}
           />
         </label>
         {batch.sheets.map((sheet, index) => (
@@ -204,6 +299,7 @@ export function PreviewPage({ batchId }: { batchId: string | null }): React.JSX.
                 value={sheet.noteId ?? ''}
                 onChange={(e) => {
                   const value = e.target.value || null;
+                  setNotice(null);
                   setBatch({
                     ...batch,
                     sheets: batch.sheets.map((item) =>
@@ -242,6 +338,8 @@ export function PreviewPage({ batchId }: { batchId: string | null }): React.JSX.
         >
           保存预览设置
         </button>
+        {dirty && <p role="status">有未保存的修改（生成 PDF 前会自动保存）</p>}
+        {!dirty && notice !== null && <p role="status">{notice}</p>}
       </fieldset>
       <section>
         <h3>分类顺序</h3>

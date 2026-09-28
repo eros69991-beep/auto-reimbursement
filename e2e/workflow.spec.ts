@@ -10,6 +10,8 @@ test('uploads, resolves exceptions, refunds, previews and exports', async ({ pag
       await route.continue({ url: `${runtime.baseUrl}${original.pathname}${original.search}` });
     });
     await page.goto('/');
+    // 「生成 PDF」前会弹定稿确认框（P-05），自动接受
+    page.on('dialog', (dialog) => void dialog.accept());
     await page.getByLabel('选择凭证图片').setInputFiles([
       'e2e/fixtures/images/normal-01.png',
       'e2e/fixtures/images/ambiguous-01.png',
