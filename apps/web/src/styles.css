@@ -6,7 +6,8 @@
 
 * { box-sizing: border-box; }
 
-html, body { overflow-x: hidden; }
+/* P-14：滚动条常驻，避免切换页面时内容左右跳动；不再用 overflow-x:hidden 掩盖溢出（e2e 在五个宽度下断言无越界） */
+html { scrollbar-gutter: stable; }
 
 body { margin: 0; }
 
@@ -46,9 +47,10 @@ fieldset { margin: 1rem 0; }
 
 .app-header {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 1rem;
+  gap: .5rem 1rem;
   padding: 1rem clamp(1rem, 5vw, 4rem);
   background: #fff;
   border-bottom: 1px solid #d9e0ea;
@@ -56,9 +58,13 @@ fieldset { margin: 1rem 0; }
 
 .app-header h1 { margin: 0; font-size: clamp(1.2rem, 3vw, 1.75rem); }
 
-.app-header nav { display: flex; gap: 1rem; }
+/* P-14：所有宽度下导航都可横向滚动，609–870px（平板竖屏/手机横屏）不再够不到「设置」 */
+.app-header nav { display: flex; gap: 1rem; max-width: 100%; overflow-x: auto; }
 
-.app-header nav button { white-space: nowrap; }
+.app-header nav button { flex: 0 0 auto; white-space: nowrap; }
+
+/* P-14：当前页高亮 */
+.app-header nav button[aria-current="page"] { border-color: #2563eb; background: #e8effd; font-weight: 600; }
 
 .page-content { width: min(100% - 2rem, 56rem); margin: 2rem auto; }
 

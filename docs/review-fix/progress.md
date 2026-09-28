@@ -116,3 +116,10 @@ P-20 统一错误表：
 - styles.css：按钮/输入框最小高度 44px、勾选框 1.3rem、危险按钮拉开间距、`.pool-selection-bar` 吸附样式。
 - 测试：api `test/thumb.test.ts` 2 例；PoolPage.test.tsx 改 2 例 + 新增 2 例（折叠编辑、全选+吸附栏）；e2e/workflow.spec.ts 同步先点「编辑」。
 - 验证：typecheck 绿；contracts 25 + api 222 + web 45 全过；web build 过；e2e 9/9。
+
+## T12 — P-14 导航 609–870px 不可达 + 切页跳动
+
+- styles.css：`.app-header` 允许换行；`nav` 所有宽度下 `overflow-x: auto`（原先仅 ≤608px 可滚动，中间宽度被 `overflow-x: hidden` 直接裁掉）；删除 `html, body { overflow-x: hidden }` 遮羞布，改 `html { scrollbar-gutter: stable }` 消除滚动条出现/消失导致的 7.5px 左右跳动。
+- App.tsx：新增 `activeNav()`，导航按钮带 `aria-current="page"`，CSS 高亮当前页。
+- e2e/nav.spec.ts：375/768/834/1024/1366 五个宽度断言 7 个导航项全部可滚达、页面无横向溢出、「设置」可点击进入且高亮。
+- 验证：typecheck 绿；web 45 全过；web build 过；e2e 14/14。
