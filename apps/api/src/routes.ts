@@ -55,6 +55,7 @@ import {
   saveSignature,
 } from './settings.js';
 import { safePath } from './storage.js';
+import { thumbnailWebp } from './thumbs.js';
 
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
 
@@ -415,6 +416,25 @@ export function createRouter(
       }
       if (entry.deletedAt !== null) {
         throw new HttpError(410, 'IMAGE_DELETED', '图片已删除');
+      }
+
+      // P-13：列表缩略图（320px WebP，按内容哈希磁盘缓存，内容不可变故 immutable）
+      if (request.query.size === 'thumb') {
+        try {
+          const thumb = await thumbnailWebp(
+            config.dataDir,
+            entry.sha256,
+            safePath(config.dataDir, entry.path),
+          );
+          response.set('Cache-Control', 'private, max-age=31536000, immutable');
+          response.type('webp').send(thumb);
+        } catch (error) {
+          if (error instanceof Error && error.message.includes('Input file is missing')) {
+            throw new HttpError(404, 'IMAGE_NOT_FOUND', '图片不存在');
+          }
+          throw error;
+        }
+        return;
       }
 
       let bytes: Buffer;

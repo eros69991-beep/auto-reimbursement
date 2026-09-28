@@ -11,6 +11,8 @@ export function ReceiptCard({ receipt, children }: { receipt: Receipt; children?
       ? '退款大于实付，请修正'
       : formatFen(net);
   const imagePath = `/api/images/${encodeURIComponent(receipt.original.id)}`;
+  // P-13：列表只加载 320px WebP 缩略图，点击查看原图时才取全尺寸
+  const thumbPath = `${imagePath}?size=thumb`;
 
   return (
     <article className="receipt-card">
@@ -23,7 +25,7 @@ export function ReceiptCard({ receipt, children }: { receipt: Receipt; children?
           void api.openAuthed(imagePath);
         }}
       >
-        <AuthedImage path={imagePath} alt={`${receipt.merchant ?? receipt.id} 原始凭证缩略图`} />
+        <AuthedImage path={thumbPath} alt={`${receipt.merchant ?? receipt.id} 原始凭证缩略图`} />
       </a>
       <div className="receipt-card-body">
         <div className="receipt-card-heading">

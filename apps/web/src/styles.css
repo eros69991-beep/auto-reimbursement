@@ -15,6 +15,10 @@ img, iframe, table { max-width: 100%; }
 input, select, textarea { max-width: 100%; }
 
 button, input, select { font: inherit; }
+/* P-13：触屏点击区域不小于 44px */
+button { min-height: 2.75rem; }
+input:not([type="checkbox"]):not([type="radio"]), select { min-height: 2.75rem; }
+input[type="checkbox"], input[type="radio"] { width: 1.3rem; height: 1.3rem; }
 textarea { font: inherit; min-height: 6rem; }
 label { display: grid; gap: .25rem; margin: .5rem 0; }
 fieldset { margin: 1rem 0; }
@@ -27,6 +31,7 @@ fieldset { margin: 1rem 0; }
 
 .link-button {
   display: inline;
+  min-height: 0;
   padding: 0;
   border: none;
   background: none;
@@ -107,11 +112,32 @@ fieldset { margin: 1rem 0; }
 .receipt-editor { display: grid; gap: .6rem; margin-top: 1rem; padding-top: 1rem; border-top: 1px solid #d9e0ea; }
 .receipt-editor label { display: grid; gap: .25rem; }
 .refund-editor { display: grid; gap: .6rem; }
-.danger-button { color: #8a2c0d; }
+/* P-13：危险按钮与普通操作拉开距离，删除本身已有二次确认 */
+.danger-button { margin-top: 1rem; color: #8a2c0d; }
 .reason-list { margin: 1rem 0 .5rem; padding-left: 1.2rem; color: #8a2c0d; }
 .pool-totals { margin: 1rem 0; padding: 1rem; background: #fff; border: 1px solid #d9e0ea; border-radius: .75rem; }
 .pool-totals ul { columns: 2; padding-left: 1.2rem; }
 .receipt-select { display: flex !important; grid-template-columns: auto 1fr; align-items: center; gap: .4rem; margin-top: 1rem; }
+.receipt-actions { display: flex; flex-wrap: wrap; gap: .5rem; margin-top: .75rem; }
+.pool-select-all { display: flex; align-items: center; gap: .4rem; margin: .75rem 0; }
+
+/* P-13：底部吸附的已选汇总栏，手机上不用滚回顶部找「生成报销单」 */
+.pool-selection-bar {
+  position: sticky;
+  bottom: .5rem;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: .5rem .75rem;
+  margin-top: 1rem;
+  padding: .5rem .75rem;
+  background: #fff;
+  border: 1px solid #d9e0ea;
+  border-radius: .75rem;
+  box-shadow: 0 -0.25rem 1.5rem rgba(15, 23, 42, .12);
+}
 
 .sheet-note-row { display: flex; flex-wrap: wrap; align-items: flex-end; gap: .5rem; margin: .5rem 0; }
 .sheet-note-row label { flex: 1 1 16rem; display: flex; flex-direction: column; gap: .25rem; }

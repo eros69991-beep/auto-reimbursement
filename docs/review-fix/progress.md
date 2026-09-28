@@ -107,3 +107,12 @@ P-20 统一错误表：
 - `pnpm test`：contracts 25 + api 206 + web 39 全部通过。
 - `pnpm --filter @auto-reimbursement/web build`：通过。
 - `pnpm test:e2e`：9/9 通过。
+
+## T11 — P-13 手机报销池（缩略图/全选/紧凑列表/触达目标）
+
+- 后端：`GET /api/images/:id?size=thumb` 返回 320px WebP 缩略图（`src/thumbs.ts`，sharp rotate+resize inside，按内容 sha256 落盘缓存于 `dataDir/thumbs/`，`Cache-Control: private, max-age=31536000, immutable`）；缺文件 404 IMAGE_NOT_FOUND、已删除 410 IMAGE_DELETED 语义不变。
+- 前端 ReceiptCard：列表只加载 `?size=thumb` 缩略图，点击「查看原图」仍取全尺寸。
+- PoolPage：编辑器默认收起、点「编辑」展开（`PoolRow`）；新增「全选可报销（N 张）」；「生成报销单」移入底部吸附栏，实时显示「已选 N 张 · 合计 ¥X」（净额求和）。
+- styles.css：按钮/输入框最小高度 44px、勾选框 1.3rem、危险按钮拉开间距、`.pool-selection-bar` 吸附样式。
+- 测试：api `test/thumb.test.ts` 2 例；PoolPage.test.tsx 改 2 例 + 新增 2 例（折叠编辑、全选+吸附栏）；e2e/workflow.spec.ts 同步先点「编辑」。
+- 验证：typecheck 绿；contracts 25 + api 222 + web 45 全过；web build 过；e2e 9/9。

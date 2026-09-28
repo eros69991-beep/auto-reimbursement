@@ -28,6 +28,8 @@ test('uploads, resolves exceptions, refunds, previews and exports', async ({ pag
 
     const normal = page.locator('article').filter({ hasText: '微信生鲜' });
     const originalHref = await normal.getByRole('link', { name: /查看原图/ }).getAttribute('href');
+    // P-13：编辑器默认收起，先展开
+    await normal.getByRole('button', { name: '编辑' }).click();
     await normal.getByLabel('退款金额').fill('80.00');
     await normal.getByRole('button', { name: '保存退款' }).click();
     const refundUpload = page.waitForResponse((response) => response.url().includes('/refund-images') && response.status() === 200);

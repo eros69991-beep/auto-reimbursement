@@ -32,6 +32,14 @@ export function PoolPage({ onBatch }: { onBatch: (id: string) => void }): React.
   }, []);
 
   const eligibleIds = useMemo(() => new Set(rows.filter(eligible).map((receipt) => receipt.id)), [rows]);
+  // P-13：底部吸附栏的已选合计（净额求和）
+  const selectedTotalFen = useMemo(
+    () => rows
+      .filter((receipt) => selected.includes(receipt.id))
+      .reduce((sum, receipt) => sum + (receipt.paidFen === null ? 0 : (netFenOrNull(receipt) ?? 0)), 0),
+    [rows, selected],
+  );
+  const allEligibleSelected = eligibleIds.size > 0 && [...eligibleIds].every((id) => selected.includes(id));
 
   function refreshTotals(): void {
     void api.totals().then(
@@ -54,6 +62,11 @@ export function PoolPage({ onBatch }: { onBatch: (id: string) => void }): React.
 
   function toggle(id: string, checked: boolean): void {
     setSelected((current) => checked ? [...current, id] : current.filter((selectedId) => selectedId !== id));
+  }
+
+  // P-13：全选 / 取消全选可报销凭证
+  function toggleAll(checked: boolean): void {
+    setSelected(checked ? [...eligibleIds] : []);
   }
 
   async function removeFromPool(id: string): Promise<void> {
@@ -128,8 +141,17 @@ export function PoolPage({ onBatch }: { onBatch: (id: string) => void }): React.
         <p>合计：{formatFen(totals.totalFen)}</p>
         <ul>{CATEGORIES.map((category) => <li key={category}>{category}：{formatFen(totals.byCategory[category])}</li>)}</ul>
       </section>}
-      <button type="button" disabled={busy || settings === null} onClick={() => void create()}>生成报销单</button>
       <button type="button" onClick={() => void toggleBin()}>查看已移出 / 回收站</button>
+      {eligibleIds.size > 0 && <label className="pool-select-all">
+        <input
+          type="checkbox"
+          aria-label="全选可报销"
+          checked={allEligibleSelected}
+          disabled={busy}
+          onChange={(event) => toggleAll(event.target.checked)}
+        />
+        全选可报销（{eligibleIds.size} 张）
+      </label>}
       {message && <p role="status">{message}</p>}
       {binOpen && <section className="pool-bin" aria-label="已移出与回收站">
         <h3>已移出 / 回收站</h3>
@@ -141,22 +163,62 @@ export function PoolPage({ onBatch }: { onBatch: (id: string) => void }): React.
       <div className="receipt-list">
         {rows.map((receipt) => {
           const selectable = eligibleIds.has(receipt.id);
-          return <ReceiptCard key={receipt.id} receipt={receipt}>
-            <label className="receipt-select">
-              <input
-                type="checkbox"
-                aria-label={`选择 ${receipt.merchant ?? receipt.id}`}
-                checked={selected.includes(receipt.id)}
-                disabled={!selectable || busy}
-                onChange={(event) => toggle(receipt.id, event.target.checked)}
-              />
-              加入本次报销
-            </label>
-            <ReceiptEditor receipt={receipt} onSaved={replace} />
-            <button type="button" disabled={busy} onClick={() => void removeFromPool(receipt.id)}>移出本次报销池</button>
-          </ReceiptCard>;
+          return <PoolRow
+            key={receipt.id}
+            receipt={receipt}
+            selectable={selectable}
+            checked={selected.includes(receipt.id)}
+            busy={busy}
+            onToggle={toggle}
+            onSaved={replace}
+            onRemove={removeFromPool}
+          />;
         })}
+      </div>
+      <div className="pool-selection-bar" aria-label="已选汇总">
+        <span>已选 {selected.length} 张 · 合计 {formatFen(selectedTotalFen)}</span>
+        <button type="button" disabled={busy || settings === null} onClick={() => void create()}>生成报销单</button>
       </div>
     </main>
   );
+}
+
+// P-13：编辑器默认收起，点「编辑」才展开，保持列表紧凑
+function PoolRow({
+  receipt,
+  selectable,
+  checked,
+  busy,
+  onToggle,
+  onSaved,
+  onRemove,
+}: {
+  receipt: Receipt;
+  selectable: boolean;
+  checked: boolean;
+  busy: boolean;
+  onToggle: (id: string, checked: boolean) => void;
+  onSaved: (receipt: Receipt) => void;
+  onRemove: (id: string) => Promise<void>;
+}): React.JSX.Element {
+  const [editorOpen, setEditorOpen] = useState(false);
+  return <ReceiptCard receipt={receipt}>
+    <label className="receipt-select">
+      <input
+        type="checkbox"
+        aria-label={`选择 ${receipt.merchant ?? receipt.id}`}
+        checked={checked}
+        disabled={!selectable || busy}
+        onChange={(event) => onToggle(receipt.id, event.target.checked)}
+      />
+      加入本次报销
+    </label>
+    <div className="receipt-actions">
+      <button type="button" aria-expanded={editorOpen} onClick={() => setEditorOpen((open) => !open)}>
+        {editorOpen ? '收起编辑' : '编辑'}
+      </button>
+      <button type="button" disabled={busy} onClick={() => void onRemove(receipt.id)}>移出本次报销池</button>
+    </div>
+    {editorOpen && <ReceiptEditor receipt={receipt} onSaved={onSaved} />}
+  </ReceiptCard>;
 }

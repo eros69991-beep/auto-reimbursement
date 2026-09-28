@@ -87,6 +87,8 @@ describe('PoolPage', () => {
     await screen.findByText('可报销笔数：1');
 
     fireEvent.click(screen.getByRole('checkbox', { name: /示例商户/ }));
+    // P-13：编辑器默认收起，先展开
+    fireEvent.click(screen.getAllByRole('button', { name: '编辑' })[0]!);
     fireEvent.click(screen.getAllByRole('button', { name: '删除凭证' })[0]!);
 
     await waitFor(() => expect(mockedApi.deleteReceipt).toHaveBeenCalledWith('eligible'));
@@ -114,11 +116,40 @@ describe('PoolPage', () => {
     render(<PoolPage onBatch={vi.fn()} />);
     await screen.findByText('可报销笔数：1');
 
+    // P-13：编辑器默认收起，先展开
+    fireEvent.click(screen.getAllByRole('button', { name: '编辑' })[0]!);
     fireEvent.change(screen.getAllByLabelText('退款金额')[0]!, { target: { value: '36.33' } });
     fireEvent.click(screen.getAllByRole('button', { name: '保存退款' })[0]!);
 
     await waitFor(() => expect(mockedApi.totals).toHaveBeenCalledTimes(2));
     expect(await screen.findByText('可报销笔数：0')).toBeInTheDocument();
     expect(screen.getByText('合计：0.00')).toBeInTheDocument();
+  });
+
+  it('keeps the editor collapsed until 编辑 is clicked (P-13)', async () => {
+    render(<PoolPage onBatch={vi.fn()} />);
+    await screen.findByText('可报销笔数：1');
+
+    expect(screen.queryByLabelText('最终实付金额')).not.toBeInTheDocument();
+    fireEvent.click(screen.getAllByRole('button', { name: '编辑' })[0]!);
+    expect(screen.getByLabelText('最终实付金额')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '收起编辑' }));
+    expect(screen.queryByLabelText('最终实付金额')).not.toBeInTheDocument();
+  });
+
+  it('selects all eligible receipts and shows the sticky selection summary (P-13)', async () => {
+    render(<PoolPage onBatch={vi.fn()} />);
+    await screen.findByText('可报销笔数：1');
+
+    expect(screen.getByText('已选 0 张 · 合计 0.00')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('checkbox', { name: '全选可报销' }));
+    expect(screen.getByText('已选 1 张 · 合计 36.33')).toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: /示例商户/ })).toBeChecked();
+    // 净额为 0 的凭证不可选，不会被全选带进来
+    expect(screen.getByRole('checkbox', { name: /refunded/ })).not.toBeChecked();
+
+    fireEvent.click(screen.getByRole('checkbox', { name: '全选可报销' }));
+    expect(screen.getByRole('checkbox', { name: /示例商户/ })).not.toBeChecked();
+    expect(screen.getByText('已选 0 张 · 合计 0.00')).toBeInTheDocument();
   });
 });
