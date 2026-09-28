@@ -150,3 +150,12 @@ P-20 统一错误表：
 - 验证：typecheck 绿；contracts 25 + api 230 + web 48 全过；web build 过；e2e 14/14。
 - 观察：本轮全量测试遇到一次 vitest worker `ERR_IPC_CHANNEL_CLOSED`（高负载并行下的 IPC 崩溃，非测试失败），重跑全绿；与 P-29 一并观察。
 - 运维部分（部署时做，不在代码内）：Railway 确认 Volume 挂载并在卷上写入 `.volume-id`、设 `REQUIRE_VOLUME=1`、Litestream/rclone 异地备份、恢复演练手册。
+
+## T16 — P-18 /api/version + railway.json
+
+- config.ts：Config 新增 `commitSha`（读取 Railway 注入的 `RAILWAY_GIT_COMMIT_SHA`，trim，本地为 null）；ai.test.ts / maintenance.test.ts 手工 Config 字面量同步补字段。
+- routes.ts：新增 `GET /api/version` 返回 `{ commit }`，用于每次上线核对前后端版本一致。
+- 新增根目录 `railway.json`（配置即代码）：NIXPACKS 构建（`pnpm install --frozen-lockfile && pnpm typecheck`）、启动 `pnpm --filter @auto-reimbursement/api start`、健康检查 `/health`（30s 超时）、ON_FAILURE 重启 3 次。
+- 测试：`test/version.test.ts` 2 例（有/无注入 SHA）。
+- 验证：typecheck 绿；contracts 25 + api 232 + web 48 全过；web build 过；e2e 14/14。
+- 运维部分（控制台操作，不在代码内）：GitHub Apps 恢复 Railway 仓库访问、Railway 重连仓库开自动部署、前端页脚显示 Netlify COMMIT_REF（后续迭代）。

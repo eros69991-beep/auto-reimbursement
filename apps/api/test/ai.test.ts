@@ -34,6 +34,7 @@ const configured: Config = {
   },
   concurrency: 4,
   accessCodeSha256: null,
+  commitSha: null,
 };
 
 const unconfigured: Config = { ...configured, ai: null };

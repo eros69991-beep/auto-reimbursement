@@ -9,6 +9,8 @@ export type Config = {
   ai: { baseUrl: string; model: string; apiKey: string } | null;
   concurrency: number;
   accessCodeSha256: string | null;
+  /** P-18：Railway 注入的部署 commit，经 /api/version 暴露用于核对前后端版本 */
+  commitSha: string | null;
 };
 
 export const LOCAL_CORS_ORIGINS = [
@@ -87,6 +89,7 @@ export function loadConfig(env: NodeJS.ProcessEnv, cwd: string): Config {
     ai: configuredValues === 0 ? null : { baseUrl, model, apiKey },
     concurrency: integer(env.CONCURRENCY, 4, 3, 5, 'INVALID_CONCURRENCY'),
     accessCodeSha256: accessCodeSha256(env.ACCESS_CODE_SHA256),
+    commitSha: env.RAILWAY_GIT_COMMIT_SHA?.trim() || null,
   };
 }
 

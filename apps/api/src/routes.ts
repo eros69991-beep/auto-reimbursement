@@ -86,6 +86,11 @@ export function createRouter(
 ): Router {
   const router = Router();
 
+  // P-18：部署版本核对——返回 Railway 注入的 commit SHA，本地开发为 null
+  router.get('/version', (_request, response) => {
+    response.json({ commit: config.commitSha });
+  });
+
   router.get('/ai/status', (_request, response) => {
     response.json(getApiStatus(config));
   });
