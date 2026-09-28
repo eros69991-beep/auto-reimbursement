@@ -36,7 +36,7 @@ describe('full reimbursement PDFs', () => {
     await rm(temp, { recursive: true, force: true });
   });
 
-  it('orders original then refund evidence and renders every sheet in order', async () => {
+  it('orders original then refund evidence and renders every sheet in order', { timeout: 20000 }, async () => {
     const originalA = await indexedImage('a-original', '#245c77');
     const refundA = await indexedImage('a-refund', '#b2452f');
     const originalB = await indexedImage('b-original', '#4d7028', '2026-09/originals/b-original.webp');
@@ -108,10 +108,14 @@ describe('full reimbursement PDFs', () => {
     expect(pages.join('\n')).not.toContain('qa-a');
 
     const application = createApp({ store, config });
+    // P-16：草稿预览默认只渲染表单页（2 张表 → 2 页），?attachments=1 才带附件页
     const preview = await request(application).get(`/api/batches/${batch.id}/preview.pdf`);
     expect(preview.status).toBe(200);
     expect(preview.headers['content-type']).toMatch(/^application\/pdf/);
-    expect(await pageText(preview.body)).toHaveLength(5);
+    expect(await pageText(preview.body)).toHaveLength(2);
+    const fullPreview = await request(application).get(`/api/batches/${batch.id}/preview.pdf?attachments=1`);
+    expect(fullPreview.status).toBe(200);
+    expect(await pageText(fullPreview.body)).toHaveLength(5);
     expect((await request(application).get(`/api/batches/${batch.id}/pdf`)).status).toBe(404);
 
     const exportResponse = await request(application).post(`/api/batches/${batch.id}/export`);
@@ -166,7 +170,10 @@ describe('full reimbursement PDFs', () => {
     await expect(renderBatchPdf(store, config, batch)).rejects.toThrow('MISSING_ATTACHMENT');
     await expect(exportBatchPdf(store, config, batch.id)).rejects.toThrow('MISSING_ATTACHMENT');
     expect(store.get('batches', batch.id)!.pdfPath).toBeNull();
-    const preview = await request(createApp({ store, config })).get(`/api/batches/${batch.id}/preview.pdf`);
+    // 默认预览只渲染表单页不读附件（P-16）；带 ?attachments=1 才发现缺失附件
+    const formOnly = await request(createApp({ store, config })).get(`/api/batches/${batch.id}/preview.pdf`);
+    expect(formOnly.status).toBe(200);
+    const preview = await request(createApp({ store, config })).get(`/api/batches/${batch.id}/preview.pdf?attachments=1`);
     expect(preview.status).toBe(409);
     expect(preview.body.code).toBe('MISSING_ATTACHMENT');
     expect(preview.body.message).toContain('signer');

@@ -124,7 +124,8 @@ describe('百慕达食材与食材分类独立', () => {
     });
 
     // 预览 PDF：两行两分类，表单页合计拆位 150.00（万/千/百/十/元/角/分）
-    const preview = await request(application).get(`/api/batches/${batch.id}/preview.pdf`);
+    // ?attachments=1 附带附件页（默认预览只渲染表单页，P-16）
+    const preview = await request(application).get(`/api/batches/${batch.id}/preview.pdf?attachments=1`);
     expect(preview.status).toBe(200);
     const pages = await pageText(preview.body);
     const formPage = pages[0]!.replace(/\s+/g, '');

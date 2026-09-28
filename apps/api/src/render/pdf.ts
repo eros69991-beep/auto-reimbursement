@@ -15,7 +15,10 @@ export async function renderBatchPdf(
   store: Store,
   config: Config,
   batch: Batch,
+  options: { attachments?: boolean } = {},
 ): Promise<Buffer> {
+  // P-16：草稿预览可只渲染表单页（attachments=false），附件原图在对账页单独展示
+  const withAttachments = options.attachments ?? true;
   assertActiveBatch(batch);
   const doc = createFormDocument();
   const chunks: Buffer[] = [];
@@ -29,6 +32,7 @@ export async function renderBatchPdf(
     const signature = await readSignatureBytes(store, config, batch);
     for (const sheet of batch.sheets) {
       drawForm(doc, batch, sheet, signature);
+      if (!withAttachments) continue;
       for (const attachment of orderedAttachments(batch, sheet)) {
         const bytes = await attachmentBytes(store, config, attachment);
         drawAttachment(doc, attachment, bytes);
@@ -183,9 +187,23 @@ async function attachmentBytes(
     throw missingAttachment(attachment.receiptId);
   }
   try {
-    return await pdfImageBytes(bytes);
+    return await attachmentImageBytes(bytes);
   } catch {
     throw missingAttachment(attachment.receiptId);
+  }
+}
+
+// P-16：嵌入 PDF 前按 EXIF 自动旋转并降到长边 1600px、JPEG q80，
+// 每页约 0.3 MB（原样嵌入 12MP 原图时每页约 2 MB），磁盘上的原图保持不变。
+async function attachmentImageBytes(bytes: Buffer): Promise<Buffer> {
+  try {
+    return await sharp(bytes)
+      .rotate()
+      .resize({ width: 1600, height: 1600, fit: 'inside', withoutEnlargement: true })
+      .jpeg({ quality: 80 })
+      .toBuffer();
+  } catch {
+    throw new Error('INVALID_IMAGE');
   }
 }
 

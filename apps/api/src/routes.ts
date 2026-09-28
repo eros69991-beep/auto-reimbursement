@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { extname } from 'node:path';
@@ -264,14 +265,50 @@ export function createRouter(
     }
   });
 
+  // P-16：草稿预览渲染结果按内容哈希缓存（单用户单批次，内存一份即可）
+  const previewCache = new Map<string, { key: string; bytes: Buffer }>();
+
   router.get('/batches/:id/preview.pdf', async (request, response, next) => {
     try {
       const batch = getBatch(store, request.params.id);
       assertActiveBatch(batch);
-      const bytes = batch.pdfPath === null
-        ? await renderBatchPdf(store, config, batch)
-        : await readSavedBatchPdf(store, config, batch);
-      response.type('application/pdf').send(bytes);
+      if (batch.pdfPath !== null) {
+        // 定稿 PDF 内容不可变，可以长缓存
+        const etag = `"saved-${createHash('sha256').update(batch.pdfPath).digest('hex').slice(0, 24)}"`;
+        if (request.get('if-none-match') === etag) {
+          response.status(304).end();
+          return;
+        }
+        const bytes = await readSavedBatchPdf(store, config, batch);
+        response
+          .set('Cache-Control', 'private, max-age=31536000, immutable')
+          .set('ETag', etag)
+          .type('application/pdf')
+          .send(bytes);
+        return;
+      }
+      // P-16：草稿预览默认只渲染表单页（?attachments=1 才带附件页）；
+      // 按内容哈希缓存渲染结果并返回 ETag，内容未变时 304。
+      const withAttachments = request.query.attachments === '1';
+      const cacheKey = createHash('sha256')
+        .update(JSON.stringify({ batch, withAttachments }))
+        .digest('hex')
+        .slice(0, 32);
+      const etag = `"preview-${cacheKey}"`;
+      if (request.get('if-none-match') === etag) {
+        response.status(304).end();
+        return;
+      }
+      const cached = previewCache.get(batch.id);
+      const bytes = cached !== undefined && cached.key === cacheKey
+        ? cached.bytes
+        : await renderBatchPdf(store, config, batch, { attachments: withAttachments });
+      previewCache.set(batch.id, { key: cacheKey, bytes });
+      response
+        .set('Cache-Control', 'private, no-cache')
+        .set('ETag', etag)
+        .type('application/pdf')
+        .send(bytes);
     } catch (error) {
       next(batchHttpError(error));
     }

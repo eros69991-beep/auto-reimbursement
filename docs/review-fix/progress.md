@@ -92,6 +92,15 @@ P-20 统一错误表：
 - `scripts/audit-pending.mjs`（新增）：排查存量「pending 且无原因」的遗留凭证。
 - 测试：新增 `test/confirm-atomic.test.ts` 4 例（原子确认、无 body 确认、非法 patch 不动状态、违反退款不变量不动状态）；`PendingPage.test.tsx` 3 例改写为原子流程。
 
+## T10 — P-16 PDF 体积与预览缓存（完成）
+
+- `render/pdf.ts`：附件嵌入 PDF 前用 sharp 按 EXIF 自动旋转、缩到长边 1600px、JPEG q80（每页约 0.3 MB，原 12MP 原图约 2 MB）；磁盘原图保持不变。`renderBatchPdf` 新增 `options.attachments`，`false` 时只渲染表单页。
+- `routes.ts` preview.pdf：
+  - 草稿批次默认只渲染表单页（`?attachments=1` 才带附件页，附件原图在对账页右侧单独展示）。
+  - 按内容哈希（batch + attachments 标志）内存缓存渲染结果，返回 ETag + `Cache-Control: private, no-cache`，内容未变时 304。
+  - 定稿批次返回 ETag + `private, max-age=31536000, immutable`。
+- 测试：新增 `test/preview-cache.test.ts` 3 例（ETag/304/编辑后 ETag 变化、2400×1800 噪点图降采样后 PDF 小于原图一半）；`pdf.test.ts`/`category-independence.test.ts` 同步更新默认预览页数断言；两个慢渲染用例 timeout 提到 20s（高负载下并行跑曾偶发 5s 超时）。
+
 ## 验证（T03–T05）
 
 - `pnpm typecheck`：3 包全绿。
