@@ -709,6 +709,10 @@ function batchHttpError(error: unknown): Error {
   if (error.message === 'PDF_NOT_FOUND') {
     return new HttpError(404, 'PDF_NOT_FOUND', '导出文件不存在');
   }
+  if (error.message === 'FORM_TEXT_OVERFLOW' || error.message === 'FORM_AMOUNT_OVERFLOW') {
+    console.error('[render] 报销单版式溢出', error);
+    return new HttpError(400, error.message, '报销单内容超出版式容量，请减少单批凭证数量或缩短填写内容');
+  }
   if (error.message.startsWith('MISSING_ATTACHMENT')) {
     const receiptId = error.message.slice('MISSING_ATTACHMENT:'.length);
     return new HttpError(

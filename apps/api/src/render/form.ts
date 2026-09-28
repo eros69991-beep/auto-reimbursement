@@ -278,11 +278,9 @@ function drawGroups(
     group.amountsFen.forEach((amount, index) => {
       const lineY = y + index * metrics.lineHeight;
       const summary = merchantById.get(group.receiptIds[index] ?? '') ?? group.category;
-      assertFits(doc, summary, metrics.summaryWidth, 'FORM_TEXT_OVERFLOW');
-      doc.fillColor(BLACK).text(summary, bounds.summaryX + 6, lineY + 4, {
-        width: metrics.summaryWidth,
-        lineBreak: false,
-      });
+      // 长商户名（如发票销售方全称）缩字号→截断加省略号，绝不让整批 500；
+      // 完整商户名仍保留在附件页标题。
+      drawSummaryText(doc, summary, bounds.summaryX + 6, lineY + 4, metrics.summaryWidth);
       const digits = String(amount).padStart(3, '0').padStart(9, ' ');
       if (digits.length > 9) throw new Error('FORM_AMOUNT_OVERFLOW');
       drawAmountDigits(doc, digits, bounds.amountX, lineY, mm(geometry.table.columns.amount), metrics.lineHeight);
@@ -467,6 +465,26 @@ function verticalText(doc: PDFKit.PDFDocument, text: string, x: number, top: num
 
 function assertFits(doc: PDFKit.PDFDocument, text: string, width: number, code: 'FORM_TEXT_OVERFLOW'): void {
   if (text !== '' && doc.widthOfString(text) > width) throw new Error(code);
+}
+
+// 摘要栏专用：10→7pt 逐级缩字号单行放下；仍超宽则截断加“…”，不抛错（P-04）。
+function drawSummaryText(doc: PDFKit.PDFDocument, text: string, x: number, y: number, width: number): void {
+  doc.fillColor(BLACK);
+  if (text === '') return;
+  for (const size of [10, 9, 8, 7]) {
+    doc.fontSize(size);
+    if (doc.widthOfString(text) <= width) {
+      doc.text(text, x, y, { width, lineBreak: false });
+      return;
+    }
+  }
+  doc.fontSize(7);
+  const chars = [...text];
+  let end = chars.length;
+  while (end > 1 && doc.widthOfString(`${chars.slice(0, end).join('')}…`) > width) {
+    end -= 1;
+  }
+  doc.text(`${chars.slice(0, end).join('')}…`, x, y, { width, lineBreak: false });
 }
 
 // 长文本自适应：10→7pt 逐级缩字号单行放下；仍超宽则用 7pt 在 maxHeight 内换行；再超才抛错。
