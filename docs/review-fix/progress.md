@@ -123,3 +123,12 @@ P-20 统一错误表：
 - App.tsx：新增 `activeNav()`，导航按钮带 `aria-current="page"`，CSS 高亮当前页。
 - e2e/nav.spec.ts：375/768/834/1024/1366 五个宽度断言 7 个导航项全部可滚达、页面无横向溢出、「设置」可点击进入且高亮。
 - 验证：typecheck 绿；web 45 全过；web build 过；e2e 14/14。
+
+## T13 — P-11 可改商户/日期
+
+- 后端 receipts.ts：新增 `ReceiptPatch`（paidFen/category/merchant/date）与 `assertValidPatch`/`applyPatch`；merchant 去空格、非空、≤50 字（INVALID_MERCHANT 400），date 必须 YYYY-MM-DD 且为真实日历日期（INVALID_DATE 400，拒绝 2026-02-30）；`updateReceipt` 与 `confirmReceipt` 共用校验并应用 merchant/date。
+- routes.ts：`receiptPatchFromRequest`/`confirmPatchFromRequest` 接受 merchant/date 并做类型检查。
+- learning.ts：`featureFor` 优先使用用户修正后的 `receipt.merchant`，其次才是 AI 识别结果。
+- 前端 api.ts：`ReceiptPatch` 类型同步；ReceiptEditor 新增「商户」（maxLength 50）与「日期」（type="date"）输入，随确认原子提交，空商户/空日期前端先拦截。
+- 测试：api `test/receipt-patch.test.ts` 3 例（PATCH 修剪与降级、非法商户/日期全拒且原值不变、confirm 后学习规则按修正商户建档）；PendingPage.test.tsx 两处断言同步带 merchant/date。
+- 验证：typecheck 绿；contracts 25 + api 225 + web 45 全过；web build 过；e2e 14/14（834px 导航用例曾在高负载并行下偶发 45s 超时，单独与全量重跑均过，列入观察）。

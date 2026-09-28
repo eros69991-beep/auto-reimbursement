@@ -7,6 +7,8 @@ type EditorProps = { receipt: Receipt; onSaved: (receipt: Receipt) => void };
 export function ReceiptEditor({ receipt, onSaved }: EditorProps): React.JSX.Element {
   const [amount, setAmount] = useState(receipt.paidFen === null ? '' : formatFen(receipt.paidFen));
   const [category, setCategory] = useState<Category | ''>(receipt.category ?? '');
+  const [merchant, setMerchant] = useState(receipt.merchant ?? '');
+  const [date, setDate] = useState(receipt.date ?? '');
   const [refund, setRefund] = useState(formatFen(receipt.refundFen));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -31,11 +33,25 @@ export function ReceiptEditor({ receipt, onSaved }: EditorProps): React.JSX.Elem
       setError(`实付金额不能小于已登记的退款 ${formatFen(receipt.refundFen)}，请先调整退款`);
       return;
     }
+    // P-11：商户（打印在报销单摘要栏）与日期（参与查重）随确认一起修正
+    const trimmedMerchant = merchant.trim();
+    if (trimmedMerchant === '') {
+      setError('请输入商户名称');
+      return;
+    }
+    if (trimmedMerchant.length > 50) {
+      setError('商户名称不能超过 50 字');
+      return;
+    }
+    if (date === '') {
+      setError('请选择日期');
+      return;
+    }
     setBusy(true);
     setError(null);
     // P-10：修改 + 确认一次原子请求；失败时凭证保持原状态，仍可见可重试
     try {
-      onSaved(await api.confirmReceipt(receipt.id, { paidFen, category }));
+      onSaved(await api.confirmReceipt(receipt.id, { paidFen, category, merchant: trimmedMerchant, date }));
     } catch (reason) {
       setError(`确认可报销失败：${message(reason)}`);
     } finally {
@@ -95,6 +111,8 @@ export function ReceiptEditor({ receipt, onSaved }: EditorProps): React.JSX.Elem
 
   return (
     <section className="receipt-editor" aria-label="编辑凭证">
+      <label>商户<input aria-label="商户" maxLength={50} value={merchant} disabled={busy} onChange={(event) => setMerchant(event.target.value)} /></label>
+      <label>日期<input aria-label="日期" type="date" value={date} disabled={busy} onChange={(event) => setDate(event.target.value)} /></label>
       <label>最终实付金额<input aria-label="最终实付金额" inputMode="decimal" value={amount} disabled={busy} onChange={(event) => setAmount(event.target.value)} /></label>
       <label>分类<select aria-label="分类" value={category} disabled={busy} onChange={(event) => setCategory(event.target.value as Category | '')}>
         <option value="">请选择分类</option>

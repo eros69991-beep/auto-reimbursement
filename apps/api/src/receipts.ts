@@ -131,10 +131,63 @@ export async function uploadReceipts(
   return { accepted, rejected };
 }
 
+// P-11：用户可修正商户（打印在报销单摘要栏）和日期（参与查重与对账）
+export interface ReceiptPatch {
+  paidFen?: number;
+  category?: Category;
+  merchant?: string;
+  date?: string;
+}
+
+const MAX_MERCHANT_LENGTH = 50;
+
+function assertValidPatch(patch: ReceiptPatch): void {
+  if (patch.paidFen !== undefined && !validFen(patch.paidFen)) {
+    throw new Error('INVALID_PAID_FEN');
+  }
+  if (patch.category !== undefined && !CATEGORIES.includes(patch.category)) {
+    throw new Error('INVALID_CATEGORY');
+  }
+  if (patch.merchant !== undefined) {
+    const trimmed = patch.merchant.trim();
+    if (trimmed === '' || trimmed.length > MAX_MERCHANT_LENGTH) {
+      throw new Error('INVALID_MERCHANT');
+    }
+  }
+  if (patch.date !== undefined && !isCalendarDate(patch.date)) {
+    throw new Error('INVALID_DATE');
+  }
+}
+
+// YYYY-MM-DD 且必须是真实存在的日历日期（拒绝 2026-02-30）
+function isCalendarDate(value: string): boolean {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (match === null) return false;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return (
+    date.getUTCFullYear() === year &&
+    date.getUTCMonth() === month - 1 &&
+    date.getUTCDate() === day
+  );
+}
+
+function applyPatch(receipt: Receipt, patch: ReceiptPatch): Receipt {
+  return {
+    ...receipt,
+    paidFen: patch.paidFen ?? receipt.paidFen,
+    category: patch.category ?? receipt.category,
+    merchant: patch.merchant === undefined ? receipt.merchant : patch.merchant.trim(),
+    date: patch.date ?? receipt.date,
+  };
+}
+
 export function updateReceipt(
   store: Store,
   id: string,
-  patch: { paidFen?: number; category?: Category },
+  patch: ReceiptPatch,
 ): Receipt {
   return store.transact(() => {
     const receipt = store.get('receipts', id);
@@ -142,19 +195,12 @@ export function updateReceipt(
       throw new Error('NOT_FOUND');
     }
     assertMutable(receipt);
-    if (patch.paidFen !== undefined && !validFen(patch.paidFen)) {
-      throw new Error('INVALID_PAID_FEN');
-    }
+    assertValidPatch(patch);
     if (patch.paidFen !== undefined && patch.paidFen < receipt.refundFen) {
       throw new Error('REFUND_EXCEEDS_PAID');
     }
-    if (patch.category !== undefined && !CATEGORIES.includes(patch.category)) {
-      throw new Error('INVALID_CATEGORY');
-    }
     const updated: Receipt = {
-      ...receipt,
-      paidFen: patch.paidFen ?? receipt.paidFen,
-      category: patch.category ?? receipt.category,
+      ...applyPatch(receipt, patch),
       status: 'pending',
     };
     store.put('receipts', updated);
@@ -167,7 +213,7 @@ export function updateReceipt(
 export function confirmReceipt(
   store: Store,
   id: string,
-  patch: { paidFen?: number; category?: Category } = {},
+  patch: ReceiptPatch = {},
 ): Receipt {
   return store.transact(() => {
     const receipt = store.get('receipts', id);
@@ -175,14 +221,10 @@ export function confirmReceipt(
       throw new Error('NOT_FOUND');
     }
     assertMutable(receipt);
-    if (patch.paidFen !== undefined && !validFen(patch.paidFen)) {
-      throw new Error('INVALID_PAID_FEN');
-    }
-    if (patch.category !== undefined && !CATEGORIES.includes(patch.category)) {
-      throw new Error('INVALID_CATEGORY');
-    }
-    const paidFen = patch.paidFen ?? receipt.paidFen;
-    const category = patch.category ?? receipt.category;
+    assertValidPatch(patch);
+    const merged = applyPatch(receipt, patch);
+    const paidFen = merged.paidFen;
+    const category = merged.category;
     if (paidFen === null || category === null) {
       throw new Error('INCOMPLETE_RECEIPT');
     }
@@ -196,7 +238,7 @@ export function confirmReceipt(
       throw new Error('UNRESOLVED_DUPLICATE');
     }
     const confirmed: Receipt = {
-      ...receipt,
+      ...merged,
       paidFen,
       category,
       status: 'ready',

@@ -94,7 +94,8 @@ export function deleteRule(store: Store, id: string): void {
 }
 
 function featureFor(receipt: Receipt): Feature | null {
-  for (const source of [receipt.analysis?.merchant, receipt.merchant]) {
+  // P-11：优先使用用户修正后的商户，其次才是 AI 识别结果
+  for (const source of [receipt.merchant, receipt.analysis?.merchant]) {
     const merchant = normalizeFeature(source ?? '');
     if (merchant !== '') {
       return { kind: 'merchant', key: merchant };

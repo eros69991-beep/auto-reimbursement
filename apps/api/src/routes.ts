@@ -44,6 +44,7 @@ import {
   setPoolMembership,
   updateReceipt,
   uploadReceipts,
+  type ReceiptPatch,
 } from './receipts.js';
 import { addRefundImage, setRefund } from './refunds.js';
 import {
@@ -648,28 +649,36 @@ function ruleFromRequest(id: string, body: unknown): Rule {
   };
 }
 
-function receiptPatchFromRequest(body: unknown): {
-  paidFen?: number;
-  category?: Rule['category'];
-} {
+// P-11：PATCH/confirm 除 paidFen/category 外还接受 merchant（≤50 字）和 date（YYYY-MM-DD）
+function receiptPatchFromRequest(body: unknown): ReceiptPatch {
   if (body === null || typeof body !== 'object' || Array.isArray(body)) {
     throw new Error('INVALID_RECEIPT_PATCH');
   }
   const value = body as Record<string, unknown>;
-  if (!Object.hasOwn(value, 'paidFen') && !Object.hasOwn(value, 'category')) {
+  if (
+    !Object.hasOwn(value, 'paidFen') &&
+    !Object.hasOwn(value, 'category') &&
+    !Object.hasOwn(value, 'merchant') &&
+    !Object.hasOwn(value, 'date')
+  ) {
     throw new Error('INVALID_RECEIPT_PATCH');
+  }
+  if (value.merchant !== undefined && typeof value.merchant !== 'string') {
+    throw new Error('INVALID_MERCHANT');
+  }
+  if (value.date !== undefined && typeof value.date !== 'string') {
+    throw new Error('INVALID_DATE');
   }
   return {
     paidFen: value.paidFen as number | undefined,
     category: value.category as Rule['category'] | undefined,
+    merchant: value.merchant as string | undefined,
+    date: value.date as string | undefined,
   };
 }
 
-// P-10：confirm 可携带可选的修改（paidFen/category），空 body 表示只确认不修改
-function confirmPatchFromRequest(body: unknown): {
-  paidFen?: number;
-  category?: Rule['category'];
-} {
+// P-10：confirm 可携带可选的修改（paidFen/category/merchant/date），空 body 表示只确认不修改
+function confirmPatchFromRequest(body: unknown): ReceiptPatch {
   if (body === undefined || body === null) return {};
   if (typeof body !== 'object' || Array.isArray(body)) {
     throw new Error('INVALID_RECEIPT_PATCH');

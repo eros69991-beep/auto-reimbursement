@@ -146,7 +146,15 @@ function totals(): Promise<Totals> {
   return requestJson<Totals>('/api/pool/totals');
 }
 
-function updateReceipt(id: string, patch: { paidFen?: number; category?: Category }): Promise<Receipt> {
+// P-11：商户与日期也可修正（商户打印在报销单摘要栏，日期参与查重与对账）
+export interface ReceiptPatch {
+  paidFen?: number;
+  category?: Category;
+  merchant?: string;
+  date?: string;
+}
+
+function updateReceipt(id: string, patch: ReceiptPatch): Promise<Receipt> {
   return requestJson<Receipt>(`/api/receipts/${encodeURIComponent(id)}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
@@ -155,7 +163,7 @@ function updateReceipt(id: string, patch: { paidFen?: number; category?: Categor
 }
 
 // P-10：修改与确认合并为一次原子请求，失败时凭证停留在原状态，不会“失踪”
-function confirmReceipt(id: string, patch?: { paidFen?: number; category?: Category }): Promise<Receipt> {
+function confirmReceipt(id: string, patch?: ReceiptPatch): Promise<Receipt> {
   return requestJson<Receipt>(`/api/receipts/${encodeURIComponent(id)}/confirm`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

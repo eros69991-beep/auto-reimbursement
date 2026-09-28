@@ -76,9 +76,12 @@ describe('PendingPage', () => {
     fireEvent.click(screen.getAllByRole('button', { name: '确认可报销' })[0]!);
 
     // P-10：修改与确认合并为一次原子请求，不再先 PATCH 再 confirm
+    // P-11：商户与日期随确认一起提交
     await waitFor(() => expect(mockedApi.confirmReceipt).toHaveBeenCalledWith('a', {
       paidFen: 3633,
       category: '耗材',
+      merchant: '示例商户',
+      date: '2026-09-02',
     }));
     expect(mockedApi.updateReceipt).not.toHaveBeenCalled();
     await waitFor(() => expect(screen.queryByText('金额无法确定')).not.toBeInTheDocument());
@@ -127,7 +130,7 @@ describe('PendingPage', () => {
 
     fireEvent.click(screen.getAllByRole('button', { name: '确认可报销' })[0]!);
     await waitFor(() => expect(mockedApi.confirmReceipt).toHaveBeenCalledTimes(2));
-    expect(mockedApi.confirmReceipt).toHaveBeenLastCalledWith('a', { paidFen: 3633, category: '耗材' });
+    expect(mockedApi.confirmReceipt).toHaveBeenLastCalledWith('a', { paidFen: 3633, category: '耗材', merchant: '示例商户', date: '2026-09-02' });
     expect(mockedApi.updateReceipt).not.toHaveBeenCalled();
   });
 
