@@ -19,6 +19,14 @@ function section(n: number): string {
   return out;
 }
 
+// 大写金额栏（佰拾万仟佰拾元角分 九格）逐格映射：阿拉伯数字 → 零壹贰叁…，
+// 首位之前的空位保持留空（P-06）。
+export function toUppercaseCells(arabicCells: string): string {
+  return [...arabicCells]
+    .map((char) => (char >= '0' && char <= '9' ? digits[Number(char)] : char))
+    .join('');
+}
+
 export function chineseUppercase(fen: number): string {
   // Delegating validation first keeps this formatter's accepted range identical
   // to formatFen and ensures no unsafe arithmetic occurs before validation.

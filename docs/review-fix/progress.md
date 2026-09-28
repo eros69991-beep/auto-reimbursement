@@ -52,6 +52,12 @@
 - `form.ts`：`drawGroups` 重写——每 group 一行、文字垂直居中、摘要走 `summarizeGroup` + `drawSummaryText`、金额画 `group.totalFen`；删除逐张行高溢出检查和每组分隔线重画（表体 5 行线已在 drawFrame 统一画好）。
 - 测试：`layout.test.ts` 第 1 例改期望 1 张表（2 组 × 20 = 40 ≤ bodyHeight 40）、第 2 例改期望固定行高 20；`form.test.ts` overflow 构造改为 6 个分类溢出 5 行表体，新增「共4张，明细见附件」摘要断言。
 
+## T06 — P-06 大写金额栏填阿拉伯数字（完成）
+
+- `uppercase.ts`：新增 `toUppercaseCells()`，把九格阿拉伯数字逐格映射为「零壹贰叁肆伍陆柒捌玖」，首位之前的空位保持留空。
+- `form.ts`：`drawUppercase` 的大写栏改走 `toUppercaseCells`，按财务惯例逐格填中文大写数字（如 130.74 元 → 佰拾元角分 格填「壹叁零柒肆」）。
+- 测试：`uppercase.test.ts` 新增 3 例映射用例；`form.test.ts` 用 pdf.js 抽取文本断言大写栏含「壹叁零柒肆」。
+
 ## 验证（T03–T05）
 
 - `pnpm typecheck`：3 包全绿。

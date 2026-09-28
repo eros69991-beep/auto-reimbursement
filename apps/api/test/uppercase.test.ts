@@ -1,6 +1,16 @@
 import { describe, expect, it } from 'vitest';
 
-import { chineseUppercase } from '../src/uppercase.js';
+import { chineseUppercase, toUppercaseCells } from '../src/uppercase.js';
+
+describe('toUppercaseCells', () => {
+  it.each([
+    ['    13074', '    壹叁零柒肆'],
+    ['       100', '       壹零零'],
+    ['000000001', '零零零零零零零零壹'],
+  ])('maps %s to per-cell Chinese numerals %s', (arabic, expected) => {
+    expect(toUppercaseCells(arabic)).toBe(expected);
+  });
+});
 
 describe('chineseUppercase', () => {
   it.each([

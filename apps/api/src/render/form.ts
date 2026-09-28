@@ -8,6 +8,7 @@ import {
   groupHeight,
   type LayoutMetrics,
 } from './layout.js';
+import { toUppercaseCells } from '../uppercase.js';
 
 interface Geometry {
   page: { width: number; height: number; margin: number };
@@ -334,8 +335,9 @@ function drawUppercase(doc: PDFKit.PDFDocument, digits: string, left: number, ri
   doc.text('(大写)', left + mm(strip.labelX), top + mm(7.6), { lineBreak: false });
   doc.fontSize(9);
   UPPERCASE_UNITS.forEach((unit, index) => centered(doc, unit, unitsStart + index * cellWidth, top + mm(1), cellWidth));
+  // 大写金额栏按财务惯例逐格填中文大写数字（零壹贰叁…），首位之前留空（P-06）。
   doc.fillColor(BLACK).fontSize(10);
-  [...digits].forEach((digit, index) => {
+  [...toUppercaseCells(digits)].forEach((digit, index) => {
     if (digit !== ' ') centered(doc, digit, unitsStart + index * cellWidth, top + mm(6.8), cellWidth);
   });
 

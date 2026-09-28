@@ -52,6 +52,8 @@ describe('Chinese reimbursement form', () => {
       }
       expect(compact).toContain('佰拾万仟佰拾元角分');
       expect(compact).toContain('13074');
+      // 大写金额栏逐格填中文大写数字（P-06）：13074 分 = 130.74 元 → 佰拾元角分 格填 壹叁零柒肆
+      expect(compact).toContain('壹叁零柒肆');
       // 汇总版式：4 张同分类凭证只占一行，摘要写「共 4 张，明细见附件」（P-02/P-07）
       expect(compact).toContain('共4张，明细见附件');
     } finally {
