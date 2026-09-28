@@ -1,5 +1,7 @@
 import './styles.css';
 import { useEffect, useState } from 'react';
+import { UNAUTHORIZED_EVENT } from './api';
+import { AccessGate } from './components/AccessGate';
 import { PendingPage } from './pages/PendingPage';
 import { PoolPage } from './pages/PoolPage';
 import { UploadPage } from './pages/UploadPage';
@@ -10,11 +12,18 @@ import { SettingsPage } from './pages/SettingsPage';
 export default function App() {
   const [route, setRoute] = useState(window.location.hash);
   const [selectedBatch, setSelectedBatch] = useState<string | null>(null);
+  const [accessRequired, setAccessRequired] = useState(false);
 
   useEffect(() => {
     const handleHashChange = () => setRoute(window.location.hash);
     window.addEventListener('hashchange', handleHashChange);
     return () => window.removeEventListener('hashchange', handleHashChange);
+  }, []);
+
+  useEffect(() => {
+    const handleUnauthorized = () => setAccessRequired(true);
+    window.addEventListener(UNAUTHORIZED_EVENT, handleUnauthorized);
+    return () => window.removeEventListener(UNAUTHORIZED_EVENT, handleUnauthorized);
   }, []);
 
   const previewId = /^#batches\/([^/]+)\/preview$/.exec(route)?.[1] ?? selectedBatch;
@@ -29,6 +38,10 @@ export default function App() {
           : route === '#settings'
             ? <SettingsPage />
             : <UploadPage />;
+
+  if (accessRequired) {
+    return <AccessGate onPassed={() => window.location.reload()} />;
+  }
 
   return (
     <>

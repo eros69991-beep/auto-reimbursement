@@ -33,6 +33,7 @@ const configured: Config = {
     apiKey: 'top-secret-api-key',
   },
   concurrency: 4,
+  accessCodeSha256: null,
 };
 
 const unconfigured: Config = { ...configured, ai: null };

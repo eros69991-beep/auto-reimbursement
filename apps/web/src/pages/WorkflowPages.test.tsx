@@ -15,6 +15,8 @@ vi.mock('../api', () => ({
     saveNote,
     saveRule,
   },
+  fetchBlobUrl: vi.fn().mockResolvedValue('blob:mock'),
+  openAuthed: vi.fn(),
 }));
 
 import { SettingsPage } from './SettingsPage';

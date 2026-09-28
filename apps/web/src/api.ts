@@ -32,19 +32,78 @@ export function apiUrl(
   return `${normalizeApiBaseUrl(baseUrl)}/${path.replace(/^\/+/, '')}`;
 }
 
+const ACCESS_CODE_KEY = 'auto-reimbursement.access-code';
+export const UNAUTHORIZED_EVENT = 'api:unauthorized';
+
+export function getAccessCode(): string {
+  try {
+    return window.localStorage.getItem(ACCESS_CODE_KEY) ?? '';
+  } catch {
+    return '';
+  }
+}
+
+export function setAccessCode(code: string): void {
+  try {
+    if (code === '') {
+      window.localStorage.removeItem(ACCESS_CODE_KEY);
+    } else {
+      window.localStorage.setItem(ACCESS_CODE_KEY, code);
+    }
+  } catch {
+    // localStorage 不可用时忽略，访问码仅保存在内存中的输入框
+  }
+}
+
+export function authHeaders(): Record<string, string> {
+  const code = getAccessCode();
+  return code === '' ? {} : { Authorization: `Bearer ${code}` };
+}
+
+function notifyUnauthorized(): void {
+  window.dispatchEvent(new Event(UNAUTHORIZED_EVENT));
+}
+
 export async function requestJson<T>(
   path: string,
   init?: RequestInit,
   baseUrl = configuredApiBaseUrl,
 ): Promise<T> {
-  const response = await fetch(apiUrl(path, baseUrl), init);
+  const auth = authHeaders();
+  const merged =
+    init === undefined && Object.keys(auth).length === 0
+      ? undefined
+      : { ...init, headers: { ...auth, ...(init?.headers ?? {}) } };
+  const response = await fetch(apiUrl(path, baseUrl), merged);
   if (!response.ok) {
+    if (response.status === 401) {
+      notifyUnauthorized();
+    }
     const error = await response.json().catch(() => null) as Partial<ApiErrorBody> | null;
     const failure = new Error(typeof error?.message === 'string' ? error.message : '请求失败');
     Object.assign(failure, { code: typeof error?.code === 'string' ? error.code : null });
     throw failure;
   }
   return response.status === 204 ? undefined as T : response.json() as Promise<T>;
+}
+
+/** 带鉴权下载二进制内容，返回 object URL（调用方负责 revoke）。 */
+export async function fetchBlobUrl(path: string): Promise<string> {
+  const response = await fetch(apiUrl(path), { headers: authHeaders() });
+  if (!response.ok) {
+    if (response.status === 401) {
+      notifyUnauthorized();
+    }
+    throw new Error('加载失败');
+  }
+  return URL.createObjectURL(await response.blob());
+}
+
+/** 带鉴权获取资源并在新标签页打开（用于 PDF、原图等链接）。 */
+export async function openAuthed(path: string): Promise<void> {
+  const url = await fetchBlobUrl(path);
+  window.open(url, '_blank', 'noopener');
+  window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
 
 async function upload(files: File[]): Promise<UploadResult> {
@@ -124,8 +183,11 @@ async function addRefundImage(id: string, file: File): Promise<Receipt> {
 }
 
 async function deleteReceipt(id: string): Promise<void> {
-  const response = await fetch(apiUrl(`/api/receipts/${encodeURIComponent(id)}`), { method: 'DELETE' });
+  const response = await fetch(apiUrl(`/api/receipts/${encodeURIComponent(id)}`), { method: 'DELETE', headers: authHeaders() });
   if (!response.ok) {
+    if (response.status === 401) {
+      notifyUnauthorized();
+    }
     const error = await response.json().catch(() => null) as Partial<ApiErrorBody> | null;
     throw new Error(typeof error?.message === 'string' ? error.message : '请求失败');
   }
@@ -189,6 +251,8 @@ export const api = {
   progress,
   imageUrl,
   receiptOriginalUrl,
+  fetchBlobUrl,
+  openAuthed,
   receipts,
   totals,
   updateReceipt,

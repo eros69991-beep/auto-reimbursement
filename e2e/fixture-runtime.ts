@@ -9,7 +9,7 @@ import { join } from 'node:path';
 import { parseFen, type Analysis, type Category, type Reason } from '@auto-reimbursement/contracts';
 import { createApp } from '../apps/api/src/app.ts';
 import { AiError, type ReceiptAnalyzer } from '../apps/api/src/ai/types.ts';
-import type { Config } from '../apps/api/src/config.ts';
+import { LOCAL_CORS_ORIGINS, type Config } from '../apps/api/src/config.ts';
 import { openStore, type Store } from '../apps/api/src/db.ts';
 import { applyAnalysis } from '../apps/api/src/decision.ts';
 import { createQueue, type RecognitionQueue } from '../apps/api/src/queue.ts';
@@ -83,8 +83,10 @@ export async function createFixtureRuntime(portOrOptions: number | FixtureRuntim
     dbPath: join(dataDir, 'app.sqlite'),
     host: '127.0.0.1',
     port: options.port ?? 0,
+    corsOrigins: [...LOCAL_CORS_ORIGINS],
     ai: options.ai ?? null,
     concurrency: 4,
+    accessCodeSha256: null,
   };
   const analyzer = new FakeAnalyzer(fixtureMap);
   let store: Store | null = null;

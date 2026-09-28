@@ -3,10 +3,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { receipt } from '../test/fixtures';
 
 vi.mock('../api', () => ({
+  fetchBlobUrl: vi.fn().mockResolvedValue('blob:mock'),
   api: {
     receipts: vi.fn(),
     imageUrl: (id: string) => `/api/images/${id}`,
     receiptOriginalUrl: (id: string) => `/api/receipts/${id}/original-image`,
+    openAuthed: vi.fn(),
     updateReceipt: vi.fn(),
     confirmReceipt: vi.fn(),
     confirmDistinct: vi.fn(),

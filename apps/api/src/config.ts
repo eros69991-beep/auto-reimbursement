@@ -8,6 +8,7 @@ export type Config = {
   corsOrigins: string[];
   ai: { baseUrl: string; model: string; apiKey: string } | null;
   concurrency: number;
+  accessCodeSha256: string | null;
 };
 
 export const LOCAL_CORS_ORIGINS = [
@@ -85,5 +86,17 @@ export function loadConfig(env: NodeJS.ProcessEnv, cwd: string): Config {
     corsOrigins: corsOrigins(env.CORS_ORIGINS),
     ai: configuredValues === 0 ? null : { baseUrl, model, apiKey },
     concurrency: integer(env.CONCURRENCY, 4, 3, 5, 'INVALID_CONCURRENCY'),
+    accessCodeSha256: accessCodeSha256(env.ACCESS_CODE_SHA256),
   };
+}
+
+function accessCodeSha256(value: string | undefined): string | null {
+  const trimmed = value?.trim().toLowerCase() ?? '';
+  if (trimmed === '') {
+    return null;
+  }
+  if (!/^[0-9a-f]{64}$/.test(trimmed)) {
+    throw new Error('INVALID_ACCESS_CODE_SHA256');
+  }
+  return trimmed;
 }

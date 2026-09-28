@@ -16,10 +16,12 @@ vi.mock('../api', () => ({
     settings: vi.fn(),
     createBatch: vi.fn(),
     imageUrl: (id: string) => `/api/images/${id}`,
+    openAuthed: vi.fn(),
     setRefund: vi.fn(),
     addRefundImage: vi.fn(),
     deleteReceipt: vi.fn(),
   },
+  fetchBlobUrl: vi.fn().mockResolvedValue('blob:mock'),
 }));
 
 import { api } from '../api';

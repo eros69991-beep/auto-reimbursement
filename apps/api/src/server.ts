@@ -24,6 +24,11 @@ const server = createApp({ store, config, queue }).listen(
   config.host,
   () => {
     console.log(`API listening on ${config.host}:${config.port}`);
+    if (config.accessCodeSha256 === null) {
+      console.warn(
+        '[security] ACCESS_CODE_SHA256 未配置，/api 当前无鉴权（仅适合本机开发）。公网部署必须配置该变量。',
+      );
+    }
   },
 );
 

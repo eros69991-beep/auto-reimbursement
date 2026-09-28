@@ -133,7 +133,7 @@ export function UploadPage({ client = api }: { client?: UploadClient }): React.J
               {rejected.map((item) => (
                 <li key={`${item.index}-${item.code}`}>
                   {item.duplicateId ? '重复文件' : '未接收文件'}：{batchFiles[item.index]?.name ?? `第 ${item.index + 1} 张`}
-                  {item.duplicateId && <>（<a href={client.receiptOriginalUrl(item.duplicateId)}>查看重复凭证</a>）</>}
+                  {item.duplicateId && <>（<a href={client.receiptOriginalUrl(item.duplicateId)} onClick={(event) => { event.preventDefault(); void api.openAuthed(`/api/receipts/${encodeURIComponent(item.duplicateId!)}/original-image`); }}>查看重复凭证</a>）</>}
                 </li>
               ))}
             </ul>

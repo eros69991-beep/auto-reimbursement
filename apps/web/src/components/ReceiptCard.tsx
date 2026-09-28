@@ -1,14 +1,24 @@
 import { formatFen, netFen, STATUS_LABELS, type Receipt } from '@auto-reimbursement/contracts';
 import { api } from '../api';
+import { AuthedImage } from './AuthedImage';
 
 export function ReceiptCard({ receipt, children }: { receipt: Receipt; children?: React.ReactNode }): React.JSX.Element {
   const originalAmount = receipt.paidFen === null ? '待确认' : formatFen(receipt.paidFen);
   const netAmount = receipt.paidFen === null ? '待确认' : formatFen(netFen(receipt));
+  const imagePath = `/api/images/${encodeURIComponent(receipt.original.id)}`;
 
   return (
     <article className="receipt-card">
-      <a className="receipt-thumbnail" href={api.imageUrl(receipt.original.id)} aria-label={`查看原图 ${receipt.id}`}>
-        <img src={api.imageUrl(receipt.original.id)} alt={`${receipt.merchant ?? receipt.id} 原始凭证缩略图`} />
+      <a
+        className="receipt-thumbnail"
+        href={api.imageUrl(receipt.original.id)}
+        aria-label={`查看原图 ${receipt.id}`}
+        onClick={(event) => {
+          event.preventDefault();
+          void api.openAuthed(imagePath);
+        }}
+      >
+        <AuthedImage path={imagePath} alt={`${receipt.merchant ?? receipt.id} 原始凭证缩略图`} />
       </a>
       <div className="receipt-card-body">
         <div className="receipt-card-heading">

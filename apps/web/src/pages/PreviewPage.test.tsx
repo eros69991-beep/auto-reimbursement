@@ -21,6 +21,8 @@ vi.mock('../api', () => ({
     cancelBatch: vi.fn(),
   },
   apiUrl: (path: string) => `http://api.test${path}`,
+  fetchBlobUrl: vi.fn().mockResolvedValue('blob:mock'),
+  openAuthed: vi.fn(),
 }));
 
 vi.mock('../components/PdfPreview', () => ({

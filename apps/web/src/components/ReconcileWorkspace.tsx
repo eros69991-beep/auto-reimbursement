@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { formatFen, type Batch } from '@auto-reimbursement/contracts';
 
 import { api } from '../api';
+import { useAuthedUrl } from './AuthedImage';
 import { PdfPreview } from './PdfPreview';
 
 interface ReconcileRow {
@@ -72,6 +73,11 @@ export function ReconcileWorkspace({ batch, previewUrl }: { batch: Batch; previe
   const current = attachments.find((item) => item.receiptId === selectedReceiptId) ?? attachments[0] ?? null;
   const currentIndex = current === null ? -1 : attachments.indexOf(current);
   const imageFailed = current !== null && failedReceiptId === current.receiptId;
+  const { url: imageUrl, failed: fetchFailed } = useAuthedUrl(
+    current === null || imageFailed
+      ? null
+      : `${api.receiptOriginalUrl(current.receiptId)}?r=${retryCount}`,
+  );
 
   // 切换附件时，左侧报销单跟随滚动到该凭证所属的报销页（多页报销单上下分屏时保持单据可见）。
   useEffect(() => {
@@ -152,7 +158,7 @@ export function ReconcileWorkspace({ batch, previewUrl }: { batch: Batch; previe
               </button>
             </div>
             <div className="attachment-image-scroll">
-              {imageFailed ? (
+              {imageFailed || fetchFailed ? (
                 <p role="alert">
                   凭证图片加载失败。{' '}
                   <button
@@ -165,10 +171,12 @@ export function ReconcileWorkspace({ batch, previewUrl }: { batch: Batch; previe
                     重试
                   </button>
                 </p>
+              ) : imageUrl === null ? (
+                <p aria-hidden="true">图片加载中…</p>
               ) : (
                 <img
                   key={`${current.receiptId}:${retryCount}`}
-                  src={api.receiptOriginalUrl(current.receiptId)}
+                  src={imageUrl}
                   alt={`凭证 ${currentIndex + 1}：${current.category} ${current.merchant ?? ''}`}
                   style={{ width: `${zoom * 100}%` }}
                   onError={() => setFailedReceiptId(current.receiptId)}

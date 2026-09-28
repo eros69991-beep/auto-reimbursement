@@ -1,6 +1,9 @@
 import express from 'express';
+import rateLimit from 'express-rate-limit';
+import helmet from 'helmet';
 import { MulterError } from 'multer';
 
+import { requireAccess } from './auth.js';
 import { LOCAL_CORS_ORIGINS, type Config } from './config.js';
 import type { Store } from './db.js';
 import type { RecognitionQueue } from './queue.js';
@@ -14,6 +17,13 @@ type AppDependencies = {
 
 export function createApp(deps?: AppDependencies): express.Express {
   const application = express();
+  application.disable('x-powered-by');
+  application.use(
+    helmet({
+      // 图片/PDF 需要被不同源的前端以 fetch 方式读取
+      crossOriginResourcePolicy: { policy: 'cross-origin' },
+    }),
+  );
   const allowedOrigins = deps?.config.corsOrigins ?? [...LOCAL_CORS_ORIGINS];
   application.use((request, response, next) => {
     const origin = request.get('origin');
@@ -55,6 +65,9 @@ export function createApp(deps?: AppDependencies): express.Express {
   });
 
   if (deps !== undefined) {
+    application.use('/api', apiRateLimit);
+    application.use(['/api/receipts/upload', '/api/backup', '/api/cleanup'], strictRateLimit);
+    application.use('/api', requireAccess(deps.config));
     application.use('/api', createRouter(deps.store, deps.config, deps.queue));
   }
 
@@ -180,6 +193,22 @@ export function createApp(deps?: AppDependencies): express.Express {
 }
 
 export const app = createApp();
+
+const apiRateLimit = rateLimit({
+  windowMs: 5 * 60 * 1000,
+  limit: 600,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { code: 'RATE_LIMITED', message: '请求过于频繁，请稍后再试' },
+});
+
+const strictRateLimit = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  limit: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { code: 'RATE_LIMITED', message: '操作过于频繁，请稍后再试' },
+});
 
 function isMutation(method: string): boolean {
   return method === 'POST' || method === 'PUT' || method === 'PATCH' || method === 'DELETE';

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { CATEGORIES, type Batch, type FormOptions } from '@auto-reimbursement/contracts';
-import { api, apiUrl } from '../api';
+import { api, apiUrl, openAuthed } from '../api';
 import { NoteEditor } from '../components/NoteEditor';
 import { ReconcileWorkspace } from '../components/ReconcileWorkspace';
 
@@ -146,7 +146,6 @@ export function PreviewPage({ batchId }: { batchId: string | null }): React.JSX.
 
   const readonly = batch.pdfPath !== null;
   const previewUrl = apiUrl(`/api/batches/${encodeURIComponent(batch.id)}/preview.pdf`);
-  const pdfUrl = apiUrl(`/api/batches/${encodeURIComponent(batch.id)}/pdf`);
   const editingSheet = batch.sheets.find((sheet) => sheet.id === editingSheetId) ?? null;
   const editingNote =
     editingSheet?.noteId == null
@@ -159,7 +158,17 @@ export function PreviewPage({ batchId }: { batchId: string | null }): React.JSX.
       {error && <p role="alert">{error}</p>}
       <ReconcileWorkspace batch={batch} previewUrl={`${previewUrl}?revision=${revision}`} />
       <p>
-        <a href={batch.pdfPath === null ? previewUrl : pdfUrl} target="_blank" rel="noreferrer">
+        <a
+          href={batch.pdfPath === null ? previewUrl : apiUrl(`/api/batches/${encodeURIComponent(batch.id)}/pdf`)}
+          onClick={(event) => {
+            event.preventDefault();
+            void openAuthed(
+              batch.pdfPath === null
+                ? `/api/batches/${encodeURIComponent(batch.id)}/preview.pdf`
+                : `/api/batches/${encodeURIComponent(batch.id)}/pdf`,
+            );
+          }}
+        >
           打开或下载 PDF
         </a>
       </p>

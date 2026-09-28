@@ -25,6 +25,20 @@ fieldset { margin: 1rem 0; }
 
 :focus-visible { outline: 3px solid #0b63ce; outline-offset: 3px; }
 
+.link-button {
+  display: inline;
+  padding: 0;
+  border: none;
+  background: none;
+  color: #0b63ce;
+  text-decoration: underline;
+  cursor: pointer;
+  font: inherit;
+}
+
+.access-gate { max-width: 24rem; }
+.access-gate form { display: grid; gap: .75rem; }
+
 .app-header {
   display: flex;
   align-items: center;
@@ -82,7 +96,8 @@ fieldset { margin: 1rem 0; }
   border-radius: .75rem;
 }
 
-.receipt-thumbnail img { display: block; width: 100%; aspect-ratio: 4 / 3; object-fit: cover; border-radius: .5rem; }
+.receipt-thumbnail { display: block; padding: 0; border: none; background: none; cursor: pointer; }
+.receipt-thumbnail img, .receipt-thumbnail > span { display: block; width: 100%; aspect-ratio: 4 / 3; object-fit: cover; border-radius: .5rem; background: #eef1f6; }
 .receipt-card-heading { display: flex; align-items: center; justify-content: space-between; gap: .75rem; }
 .receipt-card-heading h3 { margin: 0; }
 .status-badge { padding: .2rem .5rem; background: #eef6ff; border-radius: 99rem; color: #174a7e; }

@@ -8,6 +8,7 @@ vi.mock('../api', () => ({
     receiptOriginalUrl: (id: string) => `http://api.test/original/${id}`,
   },
   apiUrl: (path: string) => `http://api.test${path}`,
+  fetchBlobUrl: vi.fn().mockResolvedValue('blob:mock'),
 }));
 
 vi.mock('./PdfPreview', () => ({
@@ -69,21 +70,22 @@ function sampleBatch(overrides: Partial<Batch> = {}): Batch {
 describe('reconcile workspace', () => {
   afterEach(() => cleanup());
 
-  it('lists reconcile rows and shows the first attachment with its title', () => {
+  it('lists reconcile rows and shows the first attachment with its title', async () => {
     render(<ReconcileWorkspace batch={sampleBatch()} previewUrl="http://api.test/preview.pdf" />);
     expect(screen.getByRole('button', { name: /能耗费：合计 277\.20（1 张凭证）/ })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /耗材：合计 248\.43（2 张凭证）/ })).toBeInTheDocument();
     expect(screen.getByText('第 1 / 3 张 · 能耗费 · 电力公司营业厅 · 实付 277.20')).toBeInTheDocument();
-    expect(screen.getByRole('img', { name: /凭证 1/ })).toHaveAttribute('src', 'http://api.test/original/r1');
+    // 图片经带鉴权的 fetch 加载为 object URL
+    expect(await screen.findByRole('img', { name: /凭证 1/ })).toHaveAttribute('src', 'blob:mock');
     // 初始高亮第一行
     expect(screen.getByRole('button', { name: /能耗费/ })).toHaveAttribute('aria-current', 'true');
   });
 
-  it('clicking a row jumps to its first receipt and highlights the row', () => {
+  it('clicking a row jumps to its first receipt and highlights the row', async () => {
     render(<ReconcileWorkspace batch={sampleBatch()} previewUrl="http://api.test/preview.pdf" />);
     fireEvent.click(screen.getByRole('button', { name: /耗材：合计/ }));
     expect(screen.getByText('第 2 / 3 张 · 耗材 · 办公用品店 · 实付 148.43')).toBeInTheDocument();
-    expect(screen.getByRole('img', { name: /凭证 2/ })).toHaveAttribute('src', 'http://api.test/original/r2');
+    expect(await screen.findByRole('img', { name: /凭证 2/ })).toHaveAttribute('src', 'blob:mock');
     expect(screen.getByRole('button', { name: /耗材：合计/ })).toHaveAttribute('aria-current', 'true');
     expect(screen.getByRole('button', { name: /能耗费/ })).toHaveAttribute('aria-current', 'false');
   });
@@ -102,9 +104,10 @@ describe('reconcile workspace', () => {
     expect(screen.getByText(/第 2 \/ 3 张/)).toBeInTheDocument();
   });
 
-  it('zooms the image and restores fit-to-width', () => {
+  it('zooms the image and restores fit-to-width', async () => {
     render(<ReconcileWorkspace batch={sampleBatch()} previewUrl="http://api.test/preview.pdf" />);
     const img = () => screen.getByRole('img', { name: /凭证 1/ });
+    await screen.findByRole('img', { name: /凭证 1/ });
     expect(img()).toHaveStyle({ width: '100%' });
     fireEvent.click(screen.getByRole('button', { name: '放大' }));
     expect(img()).toHaveStyle({ width: '125%' });
@@ -146,12 +149,12 @@ describe('reconcile workspace', () => {
     delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView;
   });
 
-  it('offers retry when the image fails to load and keeps the form side intact', () => {
+  it('offers retry when the image fails to load and keeps the form side intact', async () => {
     render(<ReconcileWorkspace batch={sampleBatch()} previewUrl="http://api.test/preview.pdf" />);
-    fireEvent.error(screen.getByRole('img', { name: /凭证 1/ }));
+    fireEvent.error(await screen.findByRole('img', { name: /凭证 1/ }));
     expect(screen.getByRole('alert')).toHaveTextContent('凭证图片加载失败');
     fireEvent.click(screen.getByRole('button', { name: '重试' }));
-    expect(screen.getByRole('img', { name: /凭证 1/ })).toHaveAttribute('src', 'http://api.test/original/r1');
+    expect(await screen.findByRole('img', { name: /凭证 1/ })).toHaveAttribute('src', 'blob:mock');
     // 左侧报销行仍在
     expect(screen.getByRole('button', { name: /能耗费：合计/ })).toBeInTheDocument();
   });
