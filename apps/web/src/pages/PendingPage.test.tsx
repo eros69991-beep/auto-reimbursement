@@ -56,7 +56,7 @@ describe('PendingPage', () => {
     mockedApi.deleteReceipt.mockResolvedValue(undefined);
   });
 
-  it('saves a precise correction before separately confirming the exception', async () => {
+  it('confirms the correction in a single atomic request (P-10)', async () => {
     render(<PendingPage />);
 
     expect(await screen.findByText('金额无法确定')).toBeInTheDocument();
@@ -75,11 +75,12 @@ describe('PendingPage', () => {
     fireEvent.change(categories[0]!, { target: { value: '耗材' } });
     fireEvent.click(screen.getAllByRole('button', { name: '确认可报销' })[0]!);
 
-    await waitFor(() => expect(mockedApi.updateReceipt).toHaveBeenCalledWith('a', {
+    // P-10：修改与确认合并为一次原子请求，不再先 PATCH 再 confirm
+    await waitFor(() => expect(mockedApi.confirmReceipt).toHaveBeenCalledWith('a', {
       paidFen: 3633,
       category: '耗材',
     }));
-    await waitFor(() => expect(mockedApi.confirmReceipt).toHaveBeenCalledWith('a'));
+    expect(mockedApi.updateReceipt).not.toHaveBeenCalled();
     await waitFor(() => expect(screen.queryByText('金额无法确定')).not.toBeInTheDocument());
     expect(screen.queryByText('ready')).not.toBeInTheDocument();
   });
@@ -98,27 +99,19 @@ describe('PendingPage', () => {
     await waitFor(() => expect(mockedApi.retryReceipt).toHaveBeenCalledWith('failed'));
   });
 
-  it('keeps editor input visible when a save request fails', async () => {
-    mockedApi.updateReceipt.mockRejectedValueOnce(new Error('网络错误'));
+  it('keeps editor input visible when the confirm request fails', async () => {
+    mockedApi.confirmReceipt.mockRejectedValueOnce(new Error('网络错误'));
     render(<PendingPage />);
     await screen.findByText('金额无法确定');
     fireEvent.change(screen.getAllByLabelText('最终实付金额')[0]!, { target: { value: '36.33' } });
     fireEvent.change(screen.getAllByLabelText('分类')[0]!, { target: { value: '耗材' } });
     fireEvent.click(screen.getAllByRole('button', { name: '确认可报销' })[0]!);
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('网络错误');
+    expect(await screen.findByRole('alert')).toHaveTextContent('确认可报销失败：网络错误');
     expect(screen.getAllByLabelText('最终实付金额')[0]).toHaveValue('36.33');
   });
 
-  it('retains the saved server receipt when confirmation fails and retries confirmation separately', async () => {
-    mockedApi.updateReceipt.mockResolvedValueOnce(receipt({
-      id: 'a',
-      status: 'pending',
-      paidFen: 3633,
-      category: '耗材',
-      merchant: '服务端已保存商户',
-      pendingReasons: ['amount_uncertain', 'category_uncertain'],
-    }));
+  it('keeps the receipt visible when confirmation fails and retries the same atomic request (P-10)', async () => {
     mockedApi.confirmReceipt.mockRejectedValueOnce(new Error('确认服务暂不可用'));
     render(<PendingPage />);
     await screen.findByText('金额无法确定');
@@ -127,14 +120,15 @@ describe('PendingPage', () => {
     fireEvent.change(screen.getAllByLabelText('分类')[0]!, { target: { value: '耗材' } });
     fireEvent.click(screen.getAllByRole('button', { name: '确认可报销' })[0]!);
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('修改已保存，但确认可报销失败：确认服务暂不可用');
-    expect(screen.getByRole('status')).toHaveTextContent('修改已保存，待确认可报销');
-    expect(screen.getByText('服务端已保存商户')).toBeInTheDocument();
+    // 失败时凭证留在待处理列表中（不“失踪”），输入保留，可直接重试
+    expect(await screen.findByRole('alert')).toHaveTextContent('确认可报销失败：确认服务暂不可用');
+    expect(screen.getByText('金额无法确定')).toBeInTheDocument();
     expect(screen.getAllByLabelText('最终实付金额')[0]).toHaveValue('36.33');
 
     fireEvent.click(screen.getAllByRole('button', { name: '确认可报销' })[0]!);
     await waitFor(() => expect(mockedApi.confirmReceipt).toHaveBeenCalledTimes(2));
-    expect(mockedApi.updateReceipt).toHaveBeenCalledTimes(1);
+    expect(mockedApi.confirmReceipt).toHaveBeenLastCalledWith('a', { paidFen: 3633, category: '耗材' });
+    expect(mockedApi.updateReceipt).not.toHaveBeenCalled();
   });
 
   it('removes a deleted exception from the review list', async () => {

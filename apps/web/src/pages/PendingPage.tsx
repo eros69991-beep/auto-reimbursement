@@ -19,14 +19,15 @@ export function PendingPage(): React.JSX.Element {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    // P-10：显示所有 pending；reasons 为空的（旧版两步确认留下的）标记为「修改待确认」
     void api.receipts('pending').then(
-      (received) => setRows(received.filter((receipt) => receipt.status === 'pending' && receipt.pendingReasons.length > 0)),
+      (received) => setRows(received.filter((receipt) => receipt.status === 'pending')),
       (reason: unknown) => setError(reason instanceof Error ? reason.message : '获取待处理凭证失败'),
     );
   }, []);
 
   function replaceOrRemove(updated: Receipt): void {
-    setRows((current) => updated.deletedAt === null && updated.status === 'pending' && updated.pendingReasons.length > 0
+    setRows((current) => updated.deletedAt === null && updated.status === 'pending'
       ? current.map((receipt) => receipt.id === updated.id ? updated : receipt)
       : current.filter((receipt) => receipt.id !== updated.id));
   }
@@ -55,7 +56,9 @@ export function PendingPage(): React.JSX.Element {
       {error && <p role="alert">{error}</p>}
       {rows.length === 0 ? <p>暂无待处理凭证</p> : <div className="receipt-list">
         {rows.map((receipt) => <ReceiptCard key={receipt.id} receipt={receipt}>
-          <ul className="reason-list" aria-label="待处理原因">{receipt.pendingReasons.map((reason) => <li key={reason}>{labels[reason]}</li>)}</ul>
+          <ul className="reason-list" aria-label="待处理原因">{receipt.pendingReasons.length === 0
+            ? <li>修改待确认</li>
+            : receipt.pendingReasons.map((reason) => <li key={reason}>{labels[reason]}</li>)}</ul>
           {receipt.pendingReasons.includes('suspected_duplicate') && <>
             {receipt.duplicateIds.map((id) => <a key={id} href={api.receiptOriginalUrl(id)} onClick={(event) => { event.preventDefault(); void api.openAuthed(`/api/receipts/${encodeURIComponent(id)}/original-image`); }}>查看历史凭证</a>)}
             <button type="button" onClick={() => void confirmDistinct(receipt.id)}>确认不是重复，继续加入</button>

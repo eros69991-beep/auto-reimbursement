@@ -154,8 +154,13 @@ function updateReceipt(id: string, patch: { paidFen?: number; category?: Categor
   });
 }
 
-function confirmReceipt(id: string): Promise<Receipt> {
-  return requestJson<Receipt>(`/api/receipts/${encodeURIComponent(id)}/confirm`, { method: 'POST' });
+// P-10：修改与确认合并为一次原子请求，失败时凭证停留在原状态，不会“失踪”
+function confirmReceipt(id: string, patch?: { paidFen?: number; category?: Category }): Promise<Receipt> {
+  return requestJson<Receipt>(`/api/receipts/${encodeURIComponent(id)}/confirm`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(patch ?? {}),
+  });
 }
 
 function confirmDistinct(id: string): Promise<Receipt> {

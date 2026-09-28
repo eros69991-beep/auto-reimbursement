@@ -83,6 +83,15 @@ P-20 统一错误表：
 - `e2e/workflow.spec.ts`：自动接受定稿确认框。
 - `PreviewPage.test.tsx` 新增 4 例：dirty 提示与已保存反馈、未保存直接生成先保存再导出且弹确认、取消确认不导出、move 保留未保存输入。
 
+## T08 — P-10 确认失败凭证“失踪”（完成）
+
+- 后端 `receipts.ts`：`confirmReceipt` 接受可选 patch（paidFen/category），修改与确认在同一个事务完成；校验顺序：格式 → 完整性 → 退款不变量 → 疑似重复。
+- `routes.ts`：`POST /receipts/:id/confirm` 解析可选 body（空 body = 只确认），新增 `confirmPatchFromRequest`。
+- 前端 `api.ts`：`confirmReceipt(id, patch?)` 单次原子请求；`ReceiptEditor` 删掉「先 PATCH 再 confirm」两步流程与 savedReceipt 状态，失败时凭证保持原状态、输入保留、可直接重试。
+- `PendingPage`：显示所有 pending（不再过滤空 reasons），空 reasons 标记为「修改待确认」。
+- `scripts/audit-pending.mjs`（新增）：排查存量「pending 且无原因」的遗留凭证。
+- 测试：新增 `test/confirm-atomic.test.ts` 4 例（原子确认、无 body 确认、非法 patch 不动状态、违反退款不变量不动状态）；`PendingPage.test.tsx` 3 例改写为原子流程。
+
 ## 验证（T03–T05）
 
 - `pnpm typecheck`：3 包全绿。

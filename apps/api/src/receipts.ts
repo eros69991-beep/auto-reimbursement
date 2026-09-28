@@ -162,21 +162,34 @@ export function updateReceipt(
   });
 }
 
-export function confirmReceipt(store: Store, id: string): Receipt {
+// P-10：修改与确认在同一个事务里完成，不再分两次请求；
+// 这样确认失败时凭证不会停留在「pending 且无原因」的失踪状态。
+export function confirmReceipt(
+  store: Store,
+  id: string,
+  patch: { paidFen?: number; category?: Category } = {},
+): Receipt {
   return store.transact(() => {
     const receipt = store.get('receipts', id);
     if (receipt === null) {
       throw new Error('NOT_FOUND');
     }
     assertMutable(receipt);
-    const category = receipt.category;
-    if (receipt.paidFen === null || category === null) {
+    if (patch.paidFen !== undefined && !validFen(patch.paidFen)) {
+      throw new Error('INVALID_PAID_FEN');
+    }
+    if (patch.category !== undefined && !CATEGORIES.includes(patch.category)) {
+      throw new Error('INVALID_CATEGORY');
+    }
+    const paidFen = patch.paidFen ?? receipt.paidFen;
+    const category = patch.category ?? receipt.category;
+    if (paidFen === null || category === null) {
       throw new Error('INCOMPLETE_RECEIPT');
     }
-    if (!validFen(receipt.paidFen) || !CATEGORIES.includes(category)) {
+    if (!validFen(paidFen) || !CATEGORIES.includes(category)) {
       throw new Error('INCOMPLETE_RECEIPT');
     }
-    if (receipt.refundFen > receipt.paidFen) {
+    if (receipt.refundFen > paidFen) {
       throw new Error('REFUND_EXCEEDS_PAID');
     }
     if (receipt.duplicateIds.length > 0 && !receipt.duplicateOverride) {
@@ -184,6 +197,8 @@ export function confirmReceipt(store: Store, id: string): Receipt {
     }
     const confirmed: Receipt = {
       ...receipt,
+      paidFen,
+      category,
       status: 'ready',
       pendingReasons: [],
       nextAttemptAt: null,

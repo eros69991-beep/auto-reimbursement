@@ -464,7 +464,7 @@ export function createRouter(
 
   router.post('/receipts/:id/confirm', (request, response, next) => {
     try {
-      response.json(confirmReceipt(store, request.params.id));
+      response.json(confirmReceipt(store, request.params.id, confirmPatchFromRequest(request.body)));
     } catch (error) {
       next(correctionHttpError(error));
     }
@@ -606,6 +606,19 @@ function receiptPatchFromRequest(body: unknown): {
     paidFen: value.paidFen as number | undefined,
     category: value.category as Rule['category'] | undefined,
   };
+}
+
+// P-10：confirm 可携带可选的修改（paidFen/category），空 body 表示只确认不修改
+function confirmPatchFromRequest(body: unknown): {
+  paidFen?: number;
+  category?: Rule['category'];
+} {
+  if (body === undefined || body === null) return {};
+  if (typeof body !== 'object' || Array.isArray(body)) {
+    throw new Error('INVALID_RECEIPT_PATCH');
+  }
+  if (Object.keys(body as Record<string, unknown>).length === 0) return {};
+  return receiptPatchFromRequest(body);
 }
 
 function refundFenFromRequest(body: unknown): number {
