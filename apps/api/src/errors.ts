@@ -1,0 +1,96 @@
+// 集中错误表（P-20）：业务错误码 → HTTP 状态 + 面向用户的中文文案。
+// 所有路由统一经 toHttpError() 映射；新增错误码只需在 ERROR_TABLE 加一行。
+
+export class HttpError extends Error {
+  constructor(
+    readonly status: number,
+    readonly code: string,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
+export interface ErrorSpec {
+  status: number;
+  message: string;
+  /** 对外返回的 code；缺省与抛出的错误码相同 */
+  code?: string;
+}
+
+const ERROR_TABLE: Record<string, ErrorSpec> = {
+  // 404
+  BATCH_NOT_FOUND: { status: 404, message: '报销批次不存在' },
+  NOT_FOUND: { status: 404, code: 'RECEIPT_NOT_FOUND', message: '凭证不存在' },
+  NOTE_NOT_FOUND: { status: 404, message: '备注不存在' },
+  PDF_NOT_FOUND: { status: 404, message: '导出文件不存在' },
+  BACKUP_NOT_FOUND: { status: 404, message: '备份不存在' },
+  // 409
+  BATCH_CANCELLED: { status: 409, message: '报销单已撤销，请从本次报销池重新生成' },
+  ORIGINAL_CLEANED: { status: 409, message: '原始图片已永久清理，无法恢复' },
+  BATCH_RECEIPT_CONFLICT: { status: 409, message: '凭证关联已改变，未执行撤销' },
+  NOT_ELIGIBLE: { status: 409, message: '凭证当前状态不可生成' },
+  BATCH_FINALIZED: { status: 409, message: '已导出的报销单不可修改' },
+  IMMUTABLE_RECEIPT: { status: 409, message: '凭证当前状态不可确认' },
+  INCOMPLETE_RECEIPT: { status: 409, message: '凭证当前状态不可确认' },
+  UNRESOLVED_DUPLICATE: { status: 409, message: '凭证当前状态不可确认' },
+  REFUND_EXCEEDS_PAID: { status: 409, message: '退款金额不能大于实付金额，请先调整退款' },
+  MONTH_HAS_UNFINISHED_WORK: { status: 409, message: '本月仍有未完成工作' },
+  CLEANUP_NOT_ALLOWED: { status: 409, message: '仅可清理已归档且已导出的凭证' },
+  // 400 专项文案
+  FORM_TEXT_OVERFLOW: { status: 400, message: '报销单内容超出版式容量，请减少单批凭证数量或缩短填写内容' },
+  FORM_AMOUNT_OVERFLOW: { status: 400, message: '报销单内容超出版式容量，请减少单批凭证数量或缩短填写内容' },
+  INVALID_CLEANUP_CONFIRMATION: { status: 400, message: '确认文字不正确' },
+  // 400 通用参数错误（不带 INVALID_ 前缀的少数历史错误码）
+  LAYOUT_OVERFLOW: { status: 400, message: '请求参数无效' },
+  CATEGORY_TOO_LARGE: { status: 400, message: '请求参数无效' },
+  NOTE_OVERFLOW: { status: 400, message: '请求参数无效' },
+  // 413
+  IMAGE_TOO_LARGE: { status: 413, message: '上传图片数量或大小超出限制' },
+};
+
+/**
+ * 把路由内抛出的业务错误统一映射为 HttpError。
+ * overrides 用于同一错误码在不同路由上下文需要不同文案的场景。
+ * 未命中表且非 INVALID_* 的错误原样返回（最终成为 500 并记录日志）。
+ */
+export function toHttpError(error: unknown, overrides: Record<string, ErrorSpec> = {}): Error {
+  if (error instanceof HttpError) return error;
+  if (!(error instanceof Error)) {
+    return new HttpError(500, 'INTERNAL_ERROR', '服务器内部错误');
+  }
+  const spec = overrides[error.message] ?? ERROR_TABLE[error.message] ?? prefixSpec(error.message);
+  if (spec !== undefined) {
+    return new HttpError(spec.status, spec.code ?? baseCode(error.message), spec.message);
+  }
+  // 约定：INVALID_* 一律是客户端参数错误
+  if (error.message.startsWith('INVALID_')) {
+    return new HttpError(400, error.message, '请求参数无效');
+  }
+  return error;
+}
+
+function baseCode(message: string): string {
+  const colon = message.indexOf(':');
+  return colon === -1 ? message : message.slice(0, colon);
+}
+
+function prefixSpec(message: string): ErrorSpec | undefined {
+  if (message.startsWith('MISSING_ATTACHMENT')) {
+    const receiptId = message.slice('MISSING_ATTACHMENT:'.length);
+    return {
+      status: 409,
+      code: 'MISSING_ATTACHMENT',
+      message: receiptId === '' ? '缺少报销凭证图片' : `缺少报销凭证图片：${receiptId}`,
+    };
+  }
+  if (message.startsWith('CLEANUP_FAILED:')) {
+    const [, count, receiptId] = message.split(':');
+    return {
+      status: 409,
+      code: 'CLEANUP_FAILED',
+      message: `已清理 ${Number(count) || 0} 张，清理凭证失败：${receiptId ?? '未知'}`,
+    };
+  }
+  return undefined;
+}

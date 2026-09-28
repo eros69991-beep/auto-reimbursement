@@ -220,7 +220,9 @@ describe('ordered receipt image upload', () => {
     }
     const response = await upload.attach('files', png, 'receipt.png');
 
-    expect(response.status).toBe(413);
+    // P-20：多带文本字段是客户端用法错误，返回 400 INVALID_UPLOAD 而非误导性的 413
+    expect(response.status).toBe(400);
+    expect(response.body.code).toBe('INVALID_UPLOAD');
     expect(response.body).not.toHaveProperty('stack');
     expect(store.list('receipts')).toEqual([]);
     expect(await filesUnder(temp)).toEqual([]);

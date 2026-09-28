@@ -64,6 +64,19 @@ function notifyUnauthorized(): void {
   window.dispatchEvent(new Event(UNAUTHORIZED_EVENT));
 }
 
+// 网络层失败（断网、服务器不可达）时 fetch 抛 TypeError('Failed to fetch')，
+// 统一翻译成用户能看懂的中文（P-20）。
+async function fetchWithFriendlyError(input: string, init?: RequestInit): Promise<Response> {
+  try {
+    return await fetch(input, init);
+  } catch (error) {
+    if (error instanceof TypeError) {
+      throw new Error('无法连接服务器，请检查网络后重试');
+    }
+    throw error;
+  }
+}
+
 export async function requestJson<T>(
   path: string,
   init?: RequestInit,
@@ -74,7 +87,7 @@ export async function requestJson<T>(
     init === undefined && Object.keys(auth).length === 0
       ? undefined
       : { ...init, headers: { ...auth, ...(init?.headers ?? {}) } };
-  const response = await fetch(apiUrl(path, baseUrl), merged);
+  const response = await fetchWithFriendlyError(apiUrl(path, baseUrl), merged);
   if (!response.ok) {
     if (response.status === 401) {
       notifyUnauthorized();
@@ -89,7 +102,7 @@ export async function requestJson<T>(
 
 /** 带鉴权下载二进制内容，返回 object URL（调用方负责 revoke）。 */
 export async function fetchBlobUrl(path: string): Promise<string> {
-  const response = await fetch(apiUrl(path), { headers: authHeaders() });
+  const response = await fetchWithFriendlyError(apiUrl(path), { headers: authHeaders() });
   if (!response.ok) {
     if (response.status === 401) {
       notifyUnauthorized();
@@ -183,7 +196,7 @@ async function addRefundImage(id: string, file: File): Promise<Receipt> {
 }
 
 async function deleteReceipt(id: string): Promise<void> {
-  const response = await fetch(apiUrl(`/api/receipts/${encodeURIComponent(id)}`), { method: 'DELETE', headers: authHeaders() });
+  const response = await fetchWithFriendlyError(apiUrl(`/api/receipts/${encodeURIComponent(id)}`), { method: 'DELETE', headers: authHeaders() });
   if (!response.ok) {
     if (response.status === 401) {
       notifyUnauthorized();

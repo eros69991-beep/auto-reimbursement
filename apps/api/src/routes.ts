@@ -29,6 +29,8 @@ import {
 } from './batches.js';
 import type { Config } from './config.js';
 import type { Store } from './db.js';
+import { HttpError, toHttpError } from './errors.js';
+import { logger } from './logger.js';
 import { confirmDistinct } from './duplicates.js';
 import { deleteRule, listRules, saveRule } from './learning.js';
 import { getProgress, type RecognitionQueue } from './queue.js';
@@ -68,15 +70,7 @@ const signatureUpload = multer({
   limits: { fields: 0, fileSize: MAX_IMAGE_BYTES },
 });
 
-export class HttpError extends Error {
-  constructor(
-    readonly status: number,
-    readonly code: string,
-    message: string,
-  ) {
-    super(message);
-  }
-}
+export { HttpError } from './errors.js';
 
 export function createRouter(
   store: Store,
@@ -687,92 +681,22 @@ function batchOptionsRequest(body: unknown): {
   };
 }
 
+// 错误码 → HTTP 的集中映射见 errors.ts（P-20）；这里只保留路由上下文特有的文案覆盖。
 function batchHttpError(error: unknown): Error {
-  if (!(error instanceof Error)) {
-    return new HttpError(500, 'INTERNAL_ERROR', '服务器内部错误');
-  }
-  if (error.message === 'BATCH_NOT_FOUND') {
-    return new HttpError(404, 'BATCH_NOT_FOUND', '报销批次不存在');
-  }
-  if (error.message === 'BATCH_CANCELLED') return new HttpError(409, error.message, '报销单已撤销，请从本次报销池重新生成');
-  if (error.message === 'ORIGINAL_CLEANED') return new HttpError(409, error.message, '原始图片已永久清理，不能恢复报销；请先从备份恢复');
-  if (error.message === 'BATCH_RECEIPT_CONFLICT') return new HttpError(409, error.message, '凭证关联已改变，未执行撤销');
-  if (error.message === 'NOT_ELIGIBLE') {
-    return new HttpError(409, 'NOT_ELIGIBLE', '凭证当前状态不可生成');
-  }
-  if (error.message === 'BATCH_FINALIZED') {
-    return new HttpError(409, 'BATCH_FINALIZED', '已导出的报销单不可修改');
-  }
-  if (error.message === 'NOTE_NOT_FOUND') {
-    return new HttpError(404, 'NOTE_NOT_FOUND', '批次内备注不存在');
-  }
-  if (error.message === 'PDF_NOT_FOUND') {
-    return new HttpError(404, 'PDF_NOT_FOUND', '导出文件不存在');
-  }
-  if (error.message === 'FORM_TEXT_OVERFLOW' || error.message === 'FORM_AMOUNT_OVERFLOW') {
-    console.error('[render] 报销单版式溢出', error);
-    return new HttpError(400, error.message, '报销单内容超出版式容量，请减少单批凭证数量或缩短填写内容');
-  }
-  if (error.message.startsWith('MISSING_ATTACHMENT')) {
-    const receiptId = error.message.slice('MISSING_ATTACHMENT:'.length);
-    return new HttpError(
-      409,
-      'MISSING_ATTACHMENT',
-      receiptId === '' ? '缺少报销凭证图片' : `缺少报销凭证图片：${receiptId}`,
-    );
-  }
   if (
-    error.message === 'INVALID_SELECTION' ||
-    error.message === 'INVALID_OPTIONS' ||
-    error.message === 'INVALID_SIGNATURE' ||
-    error.message === 'INVALID_BATCH_REQUEST' ||
-    error.message === 'INVALID_AMOUNT' ||
-    error.message === 'INVALID_MOVE' ||
-    error.message === 'INVALID_LAYOUT' ||
-    error.message === 'INVALID_NOTE_BY_SHEET' ||
-    error.message === 'INVALID_BATCH_OPTIONS' ||
-    error.message === 'INVALID_NOTE' ||
-    error.message === 'LAYOUT_OVERFLOW' ||
-    error.message === 'CATEGORY_TOO_LARGE' ||
-    error.message === 'NOTE_OVERFLOW'
+    error instanceof Error &&
+    (error.message === 'FORM_TEXT_OVERFLOW' || error.message === 'FORM_AMOUNT_OVERFLOW')
   ) {
-    return new HttpError(400, error.message, '请求参数无效');
+    logger.error({ err: error }, '报销单版式溢出');
   }
-  return error;
+  return toHttpError(error, {
+    NOTE_NOT_FOUND: { status: 404, message: '批次内备注不存在' },
+    ORIGINAL_CLEANED: { status: 409, message: '原始图片已永久清理，不能恢复报销；请先从备份恢复' },
+  });
 }
 
 function correctionHttpError(error: unknown): Error {
-  if (!(error instanceof Error)) {
-    return new HttpError(500, 'INTERNAL_ERROR', '服务器内部错误');
-  }
-  if (error.message === 'NOT_FOUND') {
-    return new HttpError(404, 'RECEIPT_NOT_FOUND', '凭证不存在');
-  }
-  if (error.message === 'ORIGINAL_CLEANED') return new HttpError(409, error.message, '原始图片已永久清理，无法恢复');
-  if (error.message === 'REFUND_EXCEEDS_PAID') return new HttpError(409, error.message, '退款金额不能大于实付金额，请先调整退款');
-  if (
-    error.message === 'IMMUTABLE_RECEIPT' ||
-    error.message === 'INCOMPLETE_RECEIPT' ||
-    error.message === 'UNRESOLVED_DUPLICATE'
-  ) {
-    return new HttpError(409, error.message, '凭证当前状态不可确认');
-  }
-  if (
-    error.message === 'INVALID_CATEGORY' ||
-    error.message === 'INVALID_PAID_FEN' ||
-    error.message === 'INVALID_REFUND' ||
-    error.message === 'INVALID_IMAGE' ||
-    error.message === 'INVALID_RECEIPT_PATCH' ||
-    error.message.startsWith('INVALID_RULE') ||
-    error.message === 'INVALID_CONFIRMATIONS' ||
-    error.message === 'INVALID_STRONG_RULE'
-  ) {
-    return new HttpError(400, error.message, '请求参数无效');
-  }
-  if (error.message === 'IMAGE_TOO_LARGE') {
-    return new HttpError(413, error.message, '上传图片数量或大小超出限制');
-  }
-  return error;
+  return toHttpError(error);
 }
 
 function settingsFromRequest(body: unknown): Settings {
@@ -805,40 +729,9 @@ function noteForUpdate(id: string, body: unknown): Note {
 }
 
 function settingsHttpError(error: unknown): Error {
-  if (error instanceof HttpError) {
-    return error;
-  }
-  if (!(error instanceof Error)) {
-    return new HttpError(500, 'INTERNAL_ERROR', '服务器内部错误');
-  }
-  if (error.message === 'NOTE_NOT_FOUND') {
-    return new HttpError(404, 'NOTE_NOT_FOUND', '备注不存在');
-  }
-  if (
-    error.message === 'INVALID_SETTINGS' ||
-    error.message === 'INVALID_DATE' ||
-    error.message === 'INVALID_SIGNATURE' ||
-    error.message === 'INVALID_NOTE' ||
-    error.message === 'INVALID_NOTE_ID' ||
-    error.message === 'INVALID_IMAGE'
-  ) {
-    return new HttpError(400, error.message, '请求参数无效');
-  }
-  if (error.message === 'IMAGE_TOO_LARGE') {
-    return new HttpError(413, error.message, '上传图片数量或大小超出限制');
-  }
-  return error;
+  return toHttpError(error);
 }
 
 function maintenanceHttpError(error: unknown): Error {
-  if (!(error instanceof Error)) return new HttpError(500, 'INTERNAL_ERROR', '服务器内部错误');
-  if (error.message === 'MONTH_HAS_UNFINISHED_WORK') return new HttpError(409, error.message, '本月仍有未完成工作');
-  if (error.message === 'CLEANUP_NOT_ALLOWED') return new HttpError(409, error.message, '仅可清理已归档且已导出的凭证');
-  if (error.message === 'INVALID_CLEANUP_CONFIRMATION') return new HttpError(400, error.message, '确认文字不正确');
-  if (error.message === 'BACKUP_NOT_FOUND') return new HttpError(404, error.message, '备份不存在');
-  if (error.message.startsWith('CLEANUP_FAILED:')) {
-    const [, count, receiptId] = error.message.split(':');
-    return new HttpError(409, 'CLEANUP_FAILED', `已清理 ${Number(count) || 0} 张，清理凭证失败：${receiptId ?? '未知'}`);
-  }
-  return error;
+  return toHttpError(error);
 }

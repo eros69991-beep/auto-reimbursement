@@ -6,6 +6,7 @@ import { createApp } from './app.js';
 import { loadConfig } from './config.js';
 import { openStore } from './db.js';
 import { applyAnalysis } from './decision.js';
+import { logger } from './logger.js';
 import { createQueue } from './queue.js';
 
 const config = loadConfig(process.env, resolve(process.cwd(), '../..'));
@@ -23,9 +24,9 @@ const server = createApp({ store, config, queue }).listen(
   config.port,
   config.host,
   () => {
-    console.log(`API listening on ${config.host}:${config.port}`);
+    logger.info({ host: config.host, port: config.port }, 'API listening');
     if (config.accessCodeSha256 === null) {
-      console.warn(
+      logger.warn(
         '[security] ACCESS_CODE_SHA256 未配置，/api 当前无鉴权（仅适合本机开发）。公网部署必须配置该变量。',
       );
     }

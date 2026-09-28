@@ -58,6 +58,20 @@
 - `form.ts`：`drawUppercase` 的大写栏改走 `toUppercaseCells`，按财务惯例逐格填中文大写数字（如 130.74 元 → 佰拾元角分 格填「壹叁零柒肆」）。
 - 测试：`uppercase.test.ts` 新增 3 例映射用例；`form.test.ts` 用 pdf.js 抽取文本断言大写栏含「壹叁零柒肆」。
 
+## T02 — P-17 结构化日志 + P-20 统一错误表（完成）
+
+P-17 日志：
+- 新增 `logger.ts`：pino JSON 行输出，`Authorization`/`set-cookie` 脱敏，`LOG_LEVEL` 可调，测试环境默认静默。
+- `app.ts`：挂载 `pino-http` 记录每个请求；500 兜底处理输出结构化错误日志（请求 ID、方法、路径、stack）。
+- `server.ts`：启动/安全警告改用 logger；`routes.ts` 版式溢出改用 `logger.error`。
+
+P-20 统一错误表：
+- 新增 `errors.ts`：`HttpError` 移入此处；`ERROR_TABLE`（code → HTTP 状态 + 中文文案）+ `toHttpError()` 统一映射；`INVALID_*` 约定一律 400；`MISSING_ATTACHMENT:`/`CLEANUP_FAILED:` 前缀动态文案；路由上下文特需文案用 overrides（批次内备注、批次上下文 ORIGINAL_CLEANED）。
+- `routes.ts`：batchHttpError/correctionHttpError/settingsHttpError/maintenanceHttpError 四个分散映射全部改为委托 `toHttpError`（原 5 处映射收敛为 1 张表 + overrides）。
+- `app.ts`：未知 `/api/*` 返回 JSON 404 `ROUTE_NOT_FOUND`（原 HTML 404）；JSON 语法错误保留路径特化 code，其余统一 400 `INVALID_JSON`（原 500）；上传多带文本字段返回 400 `INVALID_UPLOAD`（原误导性 413，对应测试同步更新）。
+- 前端 `api.ts`：`fetch` 网络层失败（TypeError 'Failed to fetch'）统一翻译为「无法连接服务器，请检查网络后重试」。
+- 新增 `test/errors.test.ts` 5 例：JSON 404、两处 INVALID_JSON、路径特化 code 保留、INVALID_UPLOAD。
+
 ## 验证（T03–T05）
 
 - `pnpm typecheck`：3 包全绿。
