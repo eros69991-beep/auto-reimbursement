@@ -61,11 +61,11 @@ export function groupItems(items: Snapshot[]): FormGroup[] {
 }
 
 export function groupHeight(group: FormGroup, metrics: LayoutMetrics): number {
-  const raw =
-    Math.max(metrics.lineHeight, group.amountsFen.length * metrics.lineHeight) +
-    metrics.groupPadding;
-  if (metrics.rowHeight === undefined) return raw;
-  return Math.ceil(raw / metrics.rowHeight - 1e-9) * metrics.rowHeight;
+  // 汇总版式：每个分类在表体固定占一行（与纸面 5 行对齐），
+  // 摘要写「共 N 张：商户A、商户B 等」，金额填分类合计。
+  // 这样单类任意张数都能生成（P-02），行线也不会压字（P-07）。
+  if (metrics.rowHeight !== undefined) return metrics.rowHeight;
+  return metrics.lineHeight + metrics.groupPadding;
 }
 
 export function packGroups(groups: FormGroup[], metrics: LayoutMetrics): FormSheet[] {

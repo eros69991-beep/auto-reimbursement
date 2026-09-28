@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { type Batch, type FormSheet } from '@auto-reimbursement/contracts';
+import { type Batch, type FormGroup, type FormSheet } from '@auto-reimbursement/contracts';
 import PDFDocument from 'pdfkit';
 
 import {
@@ -267,27 +267,36 @@ function drawGroups(
   let y = bounds.headerBottom;
   const merchantById = new Map(batch.items.map((item) => [item.receiptId, item.merchant ?? null]));
   for (const group of sheet.groups) {
+    // 汇总版式：每个分类固定占一行，摘要写「共 N 张：商户A、商户B 等」，
+    // 金额填分类合计（P-02/P-07）。表体 5 行线已在 drawFrame 统一画好，这里不再重画。
     const height = groupHeight(group, metrics);
     if (y + height > bounds.bodyBottom + 0.01) throw new Error('FORM_TEXT_OVERFLOW');
-    if (group.amountsFen.length * metrics.lineHeight > height - metrics.groupPadding + 0.01) throw new Error('FORM_TEXT_OVERFLOW');
+    const textY = y + (height - 10) / 2;
     assertFits(doc, group.category, bounds.summaryX - bounds.projectX - 12, 'FORM_TEXT_OVERFLOW');
-    doc.fillColor(BLACK).fontSize(10).text(group.category, bounds.projectX + 6, y + 4, {
+    doc.fillColor(BLACK).fontSize(10).text(group.category, bounds.projectX + 6, textY, {
       width: bounds.summaryX - bounds.projectX - 12,
       lineBreak: false,
     });
-    group.amountsFen.forEach((amount, index) => {
-      const lineY = y + index * metrics.lineHeight;
-      const summary = merchantById.get(group.receiptIds[index] ?? '') ?? group.category;
-      // 长商户名（如发票销售方全称）缩字号→截断加省略号，绝不让整批 500；
-      // 完整商户名仍保留在附件页标题。
-      drawSummaryText(doc, summary, bounds.summaryX + 6, lineY + 4, metrics.summaryWidth);
-      const digits = String(amount).padStart(3, '0').padStart(9, ' ');
-      if (digits.length > 9) throw new Error('FORM_AMOUNT_OVERFLOW');
-      drawAmountDigits(doc, digits, bounds.amountX, lineY, mm(geometry.table.columns.amount), metrics.lineHeight);
-    });
-    doc.lineWidth(0.5).strokeColor(BLACK).moveTo(bounds.projectX, y + height).lineTo(bounds.verticalLabelX, y + height).stroke();
+    // 长摘要缩字号→截断加省略号，绝不让整批 500；逐张明细仍保留在附件页。
+    drawSummaryText(doc, summarizeGroup(group, merchantById), bounds.summaryX + 6, textY, metrics.summaryWidth);
+    const digits = String(group.totalFen).padStart(3, '0').padStart(9, ' ');
+    if (digits.length > 9) throw new Error('FORM_AMOUNT_OVERFLOW');
+    drawAmountDigits(doc, digits, bounds.amountX, textY - 3, mm(geometry.table.columns.amount), metrics.lineHeight);
     y += height;
   }
+}
+
+function summarizeGroup(group: FormGroup, merchantById: Map<string, string | null>): string {
+  const merchants = [
+    ...new Set(
+      group.receiptIds
+        .map((id) => merchantById.get(id))
+        .filter((merchant): merchant is string => typeof merchant === 'string' && merchant.length > 0),
+    ),
+  ];
+  if (group.receiptIds.length === 1) return merchants[0] ?? group.category;
+  if (merchants.length === 0) return `共 ${group.receiptIds.length} 张，明细见附件`;
+  return `共 ${group.receiptIds.length} 张：${merchants.slice(0, 2).join('、')}${merchants.length > 2 ? ' 等' : ''}`;
 }
 
 function drawTotal(doc: PDFKit.PDFDocument, digits: string, left: number, amountX: number, top: number, width: number, height: number): void {

@@ -44,16 +44,18 @@ describe('measured reimbursement layout', () => {
 
     expect(groups[0]!.amountsFen).toEqual([3633, 1730]);
     const sheets = packGroups(groups, metrics);
-    expect(sheets).toHaveLength(2);
+    // 汇总版式：每个分类固定占一行（lineHeight + groupPadding = 20），
+    // 2 组 × 20 = 40 正好放进 bodyHeight 40 → 1 张表。
+    expect(sheets).toHaveLength(1);
     expect(sheets[0]!.groups[0]!.totalFen).toBe(5363);
   });
 
-  it('gives every receipt its own line when measuring group height', () => {
+  it('gives every category a single summary row regardless of receipt count', () => {
     expect(groupHeight(groupItems([
       snapshot('one', '耗材', 1, 100),
       snapshot('two', '耗材', 2, 200),
       snapshot('three', '耗材', 3, 300),
-    ])[0]!, metrics)).toBe(40);
+    ])[0]!, metrics)).toBe(20);
   });
 
   it('rejects a category that cannot fit a sheet before creating a partial layout', () => {

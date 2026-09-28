@@ -28,3 +28,33 @@
 - `pnpm typecheck`：3 包全绿（含 fixture-runtime 补 `corsOrigins`/`accessCodeSha256`，顺带修了 P-30 的 e2e TS2741）。
 - `pnpm test`：contracts 25 + api 200（含新增 auth 8）+ web 39 全部通过。
 - `pnpm --filter @auto-reimbursement/web build`：通过，legacy worker 正常分包懒加载。
+
+## T03 — P-03 退款 > 实付白屏（完成，commit 4c9a530）
+
+- contracts：新增 `netFenOrNull`（脏数据返回 null 而不是算出负数）。
+- `receipts.ts`：updateReceipt/confirmReceipt 在 退款 > 实付 时抛 `REFUND_EXCEEDS_PAID`；`routes.ts` 映射 409「退款金额不能大于实付金额，请先调整退款」。
+- `refunds.ts`：isEligible 防御式判断 + console.warn；ReceiptCard/PoolPage 改用 `netFenOrNull`；ReceiptEditor 提交前校验。
+- `ErrorBoundary.tsx`（新增）：包在 App content 外，极端情况不再白屏。
+- `scripts/audit-refunds.mjs`（新增）：存量脏数据排查脚本。
+- `test/refund-invariant.test.ts`（新增 4 例）。
+
+## T04 — P-04 长商户名整批 500（完成，commit e399ab0）
+
+- `form.ts`：新增 `drawSummaryText`（10→7pt 逐级缩字号，仍超宽则截断加「…」，绝不抛错）；摘要栏改用它。
+- `routes.ts`：batchHttpError 映射 `FORM_TEXT_OVERFLOW`/`FORM_AMOUNT_OVERFLOW` → 400 + console.error（不再 500）。
+- `test/form-long-merchant.test.ts`（新增 2 例）：27 字缩字号全显示、50 字截断加省略号。
+
+## T05 — P-02 单类超 10 张无法生成 + P-07 行线压字（完成）
+
+汇总版式：每个分类在表体固定占一行（与纸面 5 行对齐），摘要写「共 N 张：商户A、商户B 等」（单张直接写商户名，无商户名写「共 N 张，明细见附件」），金额填分类合计。10 张上限自然消失，行线不再压字；逐张明细仍保留在附件页。
+
+- `layout.ts`：`groupHeight` 改为固定一行（有 rowHeight 用 rowHeight，否则 lineHeight + groupPadding）。
+- `form.ts`：`drawGroups` 重写——每 group 一行、文字垂直居中、摘要走 `summarizeGroup` + `drawSummaryText`、金额画 `group.totalFen`；删除逐张行高溢出检查和每组分隔线重画（表体 5 行线已在 drawFrame 统一画好）。
+- 测试：`layout.test.ts` 第 1 例改期望 1 张表（2 组 × 20 = 40 ≤ bodyHeight 40）、第 2 例改期望固定行高 20；`form.test.ts` overflow 构造改为 6 个分类溢出 5 行表体，新增「共4张，明细见附件」摘要断言。
+
+## 验证（T03–T05）
+
+- `pnpm typecheck`：3 包全绿。
+- `pnpm test`：contracts 25 + api 206 + web 39 全部通过。
+- `pnpm --filter @auto-reimbursement/web build`：通过。
+- `pnpm test:e2e`：9/9 通过。

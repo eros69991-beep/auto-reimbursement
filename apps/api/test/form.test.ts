@@ -52,6 +52,8 @@ describe('Chinese reimbursement form', () => {
       }
       expect(compact).toContain('佰拾万仟佰拾元角分');
       expect(compact).toContain('13074');
+      // 汇总版式：4 张同分类凭证只占一行，摘要写「共 4 张，明细见附件」（P-02/P-07）
+      expect(compact).toContain('共4张，明细见附件');
     } finally {
       store.close();
     }
@@ -79,12 +81,10 @@ describe('Chinese reimbursement form', () => {
       drawForm(imageDoc, imageSigner, sheet, png);
       imageDoc.end();
 
+      // 汇总版式下表体固定 5 行，6 个分类必然溢出 → FORM_TEXT_OVERFLOW
       const overflowingSheet = {
         ...sheet,
-        groups: [{
-          ...sheet.groups[0]!,
-          amountsFen: Array.from({ length: 100 }, () => 999999999),
-        }],
+        groups: Array.from({ length: 6 }, () => ({ ...sheet.groups[0]! })),
       };
       const overflowDoc = createFormDocument();
       expect(() => drawForm(overflowDoc, batch, overflowingSheet, null)).toThrow('FORM_TEXT_OVERFLOW');
