@@ -203,3 +203,9 @@ P-20 统一错误表：
 - 其他：playwright.config 加 `retries: 1`（高负载并行下导航用例偶发超时，单跑 5/5 稳定，属资源竞争）。
 - 暂缓（已记录）：P-25 识别进度服务端恢复（M）、P-26 统一 toast/按钮样式体系、P-28 导航改 `<a>` 链接、P-30 代码质量（lint/单行组件拆分，M）、P-33 基于原单重开草稿（M）、P-34 多用户版本号/审计表（M）。
 - 验证：typecheck 绿；contracts 25 + api 239 + web 51 全过；web build 过；e2e 16/16；`pnpm audit` 无已知漏洞。
+
+## T21 全量回归 + 稳定性收尾 + 推送
+
+- **api vitest 池切换**：forks 池在本机 Windows 环境连续两次出现「239 个用例全过后 worker 崩溃 exit 1」的误报；改用 threads 池（`apps/api/vitest.config.ts`），连续运行稳定且更快（11.6s → 5.3s）。
+- 最终回归：typecheck 绿；contracts 25 + api 239 + web 51 全过；web build 过；e2e 16/16。
+- 推送 origin `feature/mvp-implementation`；推送后 GitHub Actions CI 首次自动运行。
