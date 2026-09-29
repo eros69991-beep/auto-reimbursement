@@ -61,11 +61,24 @@ export async function uploadReceipts(
         });
         continue;
       }
+      // P-32：原图与回收站中的凭证一致时给出单独错误码，前端提示可恢复
+      if (initialMatch.deletedExactId !== null) {
+        await unlink(safePath(config.dataDir, original.path));
+        rejected.push({
+          index,
+          code: 'DELETED_DUPLICATE',
+          duplicateId: initialMatch.deletedExactId,
+        });
+        continue;
+      }
 
       const result = store.transact(() => {
         const match = findDuplicates(store, original);
         if (match.exactId !== null) {
-          return { receipt: null, duplicateId: match.exactId };
+          return { receipt: null, duplicateId: match.exactId, deletedDuplicateId: null };
+        }
+        if (match.deletedExactId !== null) {
+          return { receipt: null, duplicateId: null, deletedDuplicateId: match.deletedExactId };
         }
         const row: Receipt = {
           id: receiptId,
@@ -103,14 +116,14 @@ export async function uploadReceipts(
         };
         store.put('receipts', row);
         store.put('files', fileIndex);
-        return { receipt: row, duplicateId: null };
+        return { receipt: row, duplicateId: null, deletedDuplicateId: null };
       });
       if (result.receipt === null) {
         await unlink(safePath(config.dataDir, original.path));
         rejected.push({
           index,
-          code: 'EXACT_DUPLICATE',
-          duplicateId: result.duplicateId,
+          code: result.deletedDuplicateId !== null ? 'DELETED_DUPLICATE' : 'EXACT_DUPLICATE',
+          duplicateId: (result.deletedDuplicateId ?? result.duplicateId) as string,
         });
       } else {
         accepted.push(result.receipt);

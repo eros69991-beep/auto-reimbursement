@@ -1,12 +1,22 @@
 {
-  "page": { "width": 270, "height": 165, "margin": 5 },
+  "page": {
+    "width": 270,
+    "height": 165,
+    "margin": 5
+  },
   "title": {
     "fontSize": 30,
     "y": 4.4,
     "charStartX": 90.77,
     "charStep": 19.84,
-    "underlineY": [17.13, 18.95],
-    "underlineX": [66.16, 194.34]
+    "underlineY": [
+      19.13,
+      20.95
+    ],
+    "underlineX": [
+      66.16,
+      194.34
+    ]
   },
   "metadata": {
     "y": 26.33,
@@ -14,7 +24,10 @@
     "dateCenterX": 135.35,
     "dateWidth": 70,
     "attachmentsX": 196.05,
-    "attachmentsLine": [230.71, 253.06],
+    "attachmentsLine": [
+      230.71,
+      253.06
+    ],
     "pageLabelX": 255.28,
     "underlineOffset": 16.6
   },
@@ -22,7 +35,13 @@
     "x": 5,
     "y": 34,
     "width": 260,
-    "columns": { "project": 51.54, "summary": 90.8, "amount": 48.35, "verticalLabel": 7.75, "notes": 61.56 },
+    "columns": {
+      "project": 51.54,
+      "summary": 90.8,
+      "amount": 48.35,
+      "verticalLabel": 7.75,
+      "notes": 61.56
+    },
     "headerHeight": 16.88,
     "headerSplit": 7.75,
     "bodyHeight": 55.22,
@@ -31,6 +50,17 @@
     "uppercaseHeight": 14.14,
     "notesSplitY": 75.05
   },
-  "uppercaseStrip": { "labelX": 3.34, "unitsStart": 21.25, "unitsEnd": 146.29, "loanEnd": 199.77 },
-  "footer": { "y": 135.37, "approverX": 10.22, "reviewerX": 83.93, "cashierX": 146.18, "signerX": 204.47 }
+  "uppercaseStrip": {
+    "labelX": 3.34,
+    "unitsStart": 21.25,
+    "unitsEnd": 146.29,
+    "loanEnd": 199.77
+  },
+  "footer": {
+    "y": 135.37,
+    "approverX": 10.22,
+    "reviewerX": 83.93,
+    "cashierX": 146.18,
+    "signerX": 204.47
+  }
 }

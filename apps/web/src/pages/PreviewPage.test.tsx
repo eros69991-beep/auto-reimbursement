@@ -285,4 +285,26 @@ describe('preview page unsaved-changes handling (P-05)', () => {
     await waitFor(() => expect(screen.getByLabelText('部门')).toHaveValue('未保存的新部门'));
     expect(screen.getByRole('status')).toHaveTextContent('有未保存的修改');
   });
+
+  // P-27：快速切换批次时，迟到的旧批次响应不能覆盖新批次
+  it('ignores a stale batch response after switching batches', async () => {
+    let resolveFirst: (batch: Batch) => void = () => undefined;
+    batchApi.mockImplementation((id: string) =>
+      id === 'batch-1'
+        ? new Promise<Batch>((resolve) => { resolveFirst = resolve; })
+        : Promise.resolve(sampleBatch({
+            id: 'batch-2',
+            options: { ...sampleBatch().options, department: '新批次部门' },
+          })),
+    );
+
+    const { rerender } = render(<PreviewPage batchId="batch-1" />);
+    rerender(<PreviewPage batchId="batch-2" />);
+
+    expect(await screen.findByLabelText('部门')).toHaveValue('新批次部门');
+
+    resolveFirst(sampleBatch({ id: 'batch-1', options: { ...sampleBatch().options, department: '旧批次部门' } }));
+    await waitFor(() => expect(screen.getByLabelText('部门')).toHaveValue('新批次部门'));
+    expect(screen.queryByDisplayValue('旧批次部门')).not.toBeInTheDocument();
+  });
 });

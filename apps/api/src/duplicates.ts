@@ -36,8 +36,11 @@ export async function fingerprint(
 export function findDuplicates(
   store: Store,
   image: ImageRef,
-): { exactId: string | null; suspectedIds: string[] } {
+): { exactId: string | null; deletedExactId: string | null; suspectedIds: string[] } {
   const exactCandidates: string[] = [];
+  // P-32：已删除（回收站）的精确重复单独返回，让前端提示「可从回收站恢复」；
+  // 疑似重复则完全跳过已删除凭证，避免误报
+  const deletedExactCandidates: string[] = [];
   const suspectedIds: string[] = [];
   for (const receipt of orderedReceipts(store)) {
     if (receipt.original.id === image.id) {
@@ -48,10 +51,15 @@ export function findDuplicates(
       validSha256(receipt.original.sha256) &&
       receipt.original.sha256.toLowerCase() === image.sha256.toLowerCase()
     ) {
-      exactCandidates.push(receipt.id);
+      if (receipt.deletedAt === null) {
+        exactCandidates.push(receipt.id);
+      } else {
+        deletedExactCandidates.push(receipt.id);
+      }
       continue;
     }
     if (
+      receipt.deletedAt === null &&
       validDhash(image.perceptualHash) &&
       validDhash(receipt.original.perceptualHash) &&
       distance(image.perceptualHash, receipt.original.perceptualHash) <= 5
@@ -59,7 +67,11 @@ export function findDuplicates(
       suspectedIds.push(receipt.id);
     }
   }
-  return { exactId: exactCandidates[0] ?? null, suspectedIds };
+  return {
+    exactId: exactCandidates[0] ?? null,
+    deletedExactId: deletedExactCandidates[0] ?? null,
+    suspectedIds,
+  };
 }
 
 export function refineDuplicates(store: Store, receipt: Receipt): string[] {
@@ -80,6 +92,7 @@ export function refineDuplicates(store: Store, receipt: Receipt): string[] {
     .filter((candidate) => {
       if (
         candidate.id === receipt.id ||
+        candidate.deletedAt !== null ||
         candidate.paidFen !== receipt.paidFen ||
         candidate.date === null ||
         candidate.date !== receipt.date ||

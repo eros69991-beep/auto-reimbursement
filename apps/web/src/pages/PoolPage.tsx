@@ -108,6 +108,11 @@ export function PoolPage({ onBatch }: { onBatch: (id: string) => void }): React.
       }
       setBinRows((current) => current.filter((receipt) => receipt.id !== row.id));
       setMessage(`已恢复 ${row.merchant ?? row.id}`);
+      // P-31：恢复后立即刷新报销池列表，不能只更新回收站和汇总
+      void api.receipts('pool').then(
+        (received) => setRows(received),
+        (loadReason: unknown) => setError(loadReason instanceof Error ? loadReason.message : '刷新报销池失败'),
+      );
       refreshTotals();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : '恢复凭证失败');
@@ -160,6 +165,10 @@ export function PoolPage({ onBatch }: { onBatch: (id: string) => void }): React.
           <button type="button" onClick={() => void restore(row)}>恢复凭证</button>
         </ReceiptCard>)}
       </section>}
+      {/* P-26：空状态引导，告诉新手第一步该做什么 */}
+      {rows.length === 0 && error === null && (
+        <p role="status">本期报销池还是空的。先去<a href="#upload">上传凭证</a>，识别通过后凭证会出现在这里。</p>
+      )}
       <div className="receipt-list">
         {rows.map((receipt) => {
           const selectable = eligibleIds.has(receipt.id);

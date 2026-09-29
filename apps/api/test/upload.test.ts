@@ -494,13 +494,17 @@ describe('ordered receipt image upload', () => {
       duplicateOverride: false,
     });
     expect(store.list('files')).toHaveLength(2);
-    expect(
-      (
-        await request(createApp({ store, config })).get(
-          `/api/images/${suspected!.original.id}`,
-        )
-      ).body,
-    ).toEqual(recompressed);
+    // P-35：存盘的是去元数据重编码版本，字节不必与上传一致，但图像内容必须等价
+    const served = (
+      await request(createApp({ store, config })).get(
+        `/api/images/${suspected!.original.id}`,
+      )
+    ).body as Buffer;
+    const [servedPixels, originalPixels] = await Promise.all([
+      sharp(served).raw().toBuffer(),
+      sharp(recompressed).raw().toBuffer(),
+    ]);
+    expect(servedPixels).toEqual(originalPixels);
   });
 
   it('rechecks exact duplicates inside the persistence transaction and removes the race orphan', async () => {

@@ -68,6 +68,32 @@ export function UploadPage({ client = api }: { client?: UploadClient }): React.J
   const [uploadBytes, setUploadBytes] = useState({ loaded: 0, total: 0 });
   const [activeIds, setActiveIds] = useState<string[]>([]);
   const [retryVersion, setRetryVersion] = useState(0);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  // P-32：与回收站中凭证重复时，一键把原凭证从回收站恢复
+  async function restoreDeleted(receiptId: string): Promise<void> {
+    setError(null);
+    try {
+      const restored = await api.restoreReceipt(receiptId);
+      setNotice(`已从回收站恢复 ${restored.merchant ?? '原凭证'}，请到「本期报销池」查看。`);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : '恢复失败');
+    }
+  }
+
+  // P-25：AI 未配置时提前告知（上传后会全部转人工录入），并给出设置入口
+  const [aiMissing, setAiMissing] = useState(false);
+  useEffect(() => {
+    let active = true;
+    void api.apiStatus().then((status) => {
+      if (active) setAiMissing(!status.configured);
+    }, () => {
+      // 状态查询失败不阻塞上传流程
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   useEffect(() => {
     if (activeIds.length === 0 || pollError) return;
@@ -217,6 +243,11 @@ export function UploadPage({ client = api }: { client?: UploadClient }): React.J
     <main className="page-content">
       <section aria-labelledby="upload-heading" className="upload-panel">
         <h2 id="upload-heading">上传凭证</h2>
+        {aiMissing && (
+          <p role="status" className="banner-warning">
+            AI 识别未配置：上传的凭证将全部转为人工录入。可在<a href="#settings">设置</a>中配置识别服务。
+          </p>
+        )}
         <p>一次可上传最多 50 张 JPEG、PNG 或 WebP 图片，单张不超过 20 MB；大图会自动压缩后分批上传。</p>
         <label
           aria-label="拖放凭证图片"
@@ -245,6 +276,7 @@ export function UploadPage({ client = api }: { client?: UploadClient }): React.J
           />
         </label>
         {error && <p role="alert">{error}</p>}
+        {notice && <p role="status">{notice}</p>}
         {pollError && (
           <div className="poll-error" role="status">
             <p>获取识别进度失败，请重试。</p>
@@ -273,9 +305,12 @@ export function UploadPage({ client = api }: { client?: UploadClient }): React.J
             <ul aria-label="被拒绝文件">
               {rejected.map((item) => (
                 <li key={`${item.index}-${item.code}`}>
-                  {item.duplicateId ? '重复文件' : '未接收文件'}：{batchFiles[item.index]?.name ?? `第 ${item.index + 1} 张`}
+                  {item.code === 'DELETED_DUPLICATE' ? '重复文件（在回收站）' : item.duplicateId ? '重复文件' : '未接收文件'}：{batchFiles[item.index]?.name ?? `第 ${item.index + 1} 张`}
                   {!item.duplicateId && `（${rejectionReason(item.code)}）`}
-                  {item.duplicateId && <>（<a href={client.receiptOriginalUrl(item.duplicateId)} onClick={(event) => { event.preventDefault(); void api.openAuthed(`/api/receipts/${encodeURIComponent(item.duplicateId!)}/original-image`); }}>查看重复凭证</a>）</>}
+                  {item.duplicateId && item.code !== 'DELETED_DUPLICATE' && <>（<a href={client.receiptOriginalUrl(item.duplicateId)} onClick={(event) => { event.preventDefault(); void api.openAuthed(`/api/receipts/${encodeURIComponent(item.duplicateId!)}/original-image`); }}>查看重复凭证</a>）</>}
+                  {item.code === 'DELETED_DUPLICATE' && item.duplicateId && (
+                    <>（<button type="button" onClick={() => void restoreDeleted(item.duplicateId!)}>从回收站恢复</button>）</>
+                  )}
                 </li>
               ))}
             </ul>

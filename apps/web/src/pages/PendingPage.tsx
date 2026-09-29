@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { Reason, Receipt } from '@auto-reimbursement/contracts';
 import { api } from '../api';
+import { friendlyError } from '../errors';
 import { ReceiptCard } from '../components/ReceiptCard';
 import { ReceiptEditor } from '../components/ReceiptEditor';
 
@@ -37,7 +38,7 @@ export function PendingPage(): React.JSX.Element {
     try {
       replaceOrRemove(await api.confirmDistinct(id));
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : '请求失败');
+      setError(friendlyError(reason, '请求失败'));
     }
   }
 
@@ -46,7 +47,33 @@ export function PendingPage(): React.JSX.Element {
     try {
       replaceOrRemove(await api.retryReceipt(id));
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : '请求失败');
+      setError(friendlyError(reason, '请求失败'));
+    }
+  }
+
+  // P-25：AI 故障时不用一张张点，全部「API 最终失败」的一键重试
+  const [retryAllBusy, setRetryAllBusy] = useState(false);
+  const apiFailedCount = rows.filter((receipt) => receipt.pendingReasons.includes('api_failed')).length;
+
+  async function retryAll(): Promise<void> {
+    setError(null);
+    setRetryAllBusy(true);
+    try {
+      const targets = rows.filter((receipt) => receipt.pendingReasons.includes('api_failed'));
+      const results = await Promise.allSettled(targets.map((receipt) => api.retryReceipt(receipt.id)));
+      let failed = 0;
+      for (const result of results) {
+        if (result.status === 'fulfilled') {
+          replaceOrRemove(result.value);
+        } else {
+          failed += 1;
+        }
+      }
+      if (failed > 0) {
+        setError(`${failed} 张重试失败，可稍后再次全部重试`);
+      }
+    } finally {
+      setRetryAllBusy(false);
     }
   }
 
@@ -54,6 +81,11 @@ export function PendingPage(): React.JSX.Element {
     <main className="page-content">
       <h2>异常处理</h2>
       {error && <p role="alert">{error}</p>}
+      {apiFailedCount > 1 && (
+        <button type="button" disabled={retryAllBusy} onClick={() => void retryAll()}>
+          {retryAllBusy ? '正在全部重试…' : `全部重试识别（${apiFailedCount} 张）`}
+        </button>
+      )}
       {rows.length === 0 ? <p>暂无待处理凭证</p> : <div className="receipt-list">
         {rows.map((receipt) => <ReceiptCard key={receipt.id} receipt={receipt}>
           <ul className="reason-list" aria-label="待处理原因">{receipt.pendingReasons.length === 0

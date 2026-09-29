@@ -17,6 +17,8 @@ pnpm dev:api
 pnpm dev:web
 ```
 
+也可以只用一个终端：`pnpm dev` 会同时启动前后端（`scripts/dev.mjs`）。
+
 API 默认监听 `127.0.0.1:3000`，前端默认直接访问
 `http://127.0.0.1:3000`。如需本地 DeepSeek 识别，将 `.env.example` 复制为
 `.env`，再填写三个 `AI_*` 变量；`.env` 已被 Git 忽略。
@@ -66,6 +68,9 @@ API 默认监听 `127.0.0.1:3000`，前端默认直接访问
 | `AI_MODEL` | `deepseek-v4-flash-vision-exp` | 否 |
 | `AI_API_KEY` | 你自己的 DeepSeek API Key | **是，只在 Railway 中填写** |
 | `CONCURRENCY` | `4`，可选 | 否 |
+| `ACCESS_CODE_SHA256` | 访问码的 SHA-256（`printf '你的访问码' | sha256sum`），设置后全站需要访问码 | **是** |
+| `TZ` | `Asia/Shanghai`（日志时间戳用北京时间；业务归月已不依赖它） | 否 |
+| `REQUIRE_VOLUME` | `1`：要求 `/app/data/.volume-id` 存在才启动，防止卷未挂载时数据写进容器临时盘 | 否 |
 
 不要手工添加 `PORT`；Railway 会在运行时自动注入它。根据 2026-09-14 的
 DeepSeek 官方文档，图片输入需要 vision 模型
@@ -87,6 +92,11 @@ SQLite 数据库、上传的原始凭证、退款凭证、签名和导出的 PDF
 
 应在上传真实凭证之前挂载 Volume。Volume 只在运行时可用，构建阶段不可用，
 因此 Build Command 不应尝试访问 `/app/data`。
+
+设置 `REQUIRE_VOLUME=1` 后，还需在卷根目录写入一次标记文件
+`/app/data/.volume-id`（例如通过一次性 Job 执行 `touch /app/data/.volume-id`），
+否则服务会拒绝启动——这是故意的：卷没挂上时宁可启动失败，也不让数据静默写进
+容器临时盘。
 
 ### Railway 公网域名与健康检查
 
@@ -162,16 +172,25 @@ VITE_API_BASE_URL=https://你的-Railway-域名.up.railway.app
 但不包含原始图片、退款证据、导出 PDF 或提供商密钥。完整恢复仍需单独备份整个
 Volume。复制或恢复数据前应先停止 API，让识别队列与 SQLite 正常关闭。
 
-CORS 只限制其他网页从浏览器读取或提交请求，它不是用户身份验证。当前 MVP 没有
-登录系统，因此不要把 Railway API 域名公开分享，也不要在完成身份验证设计前用于
-多人或高敏感生产数据。
+CORS 只限制其他网页从浏览器读取或提交请求，它不是用户身份验证。当前的身份
+边界是访问码：在 Railway 设置 `ACCESS_CODE_SHA256` 后，所有 API 与图片都需要先
+通过访问码校验（全局限流 + 安全响应头已内置）。访问码解决"陌生访客"，但仍按
+单人使用设计：没有操作留痕，多人同时编辑同一批次时后写覆盖先写。因此不要公开
+分享访问码，多人或高敏感场景请先完成账号体系设计。启用访问码后建议更换一次
+Railway 公网域名。
 
 ## 本地验证
 
 ```sh
 pnpm test
 pnpm typecheck
+pnpm --filter @auto-reimbursement/web build
 ```
+
+端到端测试：`pnpm test:e2e`。本地默认使用系统安装的 Chrome
+（`playwright.config.ts` 的 `channel: 'chrome'`），请先安装 Chrome；CI 环境
+（`CI=true`）自动改用 Playwright 自带 chromium，对应命令是
+`pnpm exec playwright install --with-deps chromium`。
 
 模拟 Netlify 生产构建时，提供一个非秘密 API origin：
 

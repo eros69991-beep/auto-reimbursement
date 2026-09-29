@@ -187,3 +187,19 @@ P-20 统一错误表：
 - 根因：`App.test.tsx` 渲染真实 App 但没 mock `./api`，PreviewPage 挂载后真请求 127.0.0.1:3000；请求在 jsdom 环境销毁后失败，产生 “window is not defined” 的 Unhandled Errors，约半数运行退出码 1。另外 vitest 未开 globals，Testing Library 自动 cleanup 不生效，各测试靠 `getAllBy…().at(-1)` 绕过残留 DOM。
 - 修复：`src/test/setup.ts` 显式 `afterEach(cleanup)`；`App.test.tsx` 全量 mock `./api`（含 `UNAUTHORIZED_EVENT: 'api:unauthorized'`）与 `./components/PdfPreview`，`api.batch` 返回最小批次夹具，预览用例改 `findByRole` 等待异步加载，两个用例显式设置初始 hash；`WorkflowPages.test.tsx` 全部 `.at(-1)` 改为 `getBy*`/`findByRole`。
 - 验证：web 单测连跑 4 次全部退出码 0、48/48、0 Unhandled Errors；typecheck 绿；contracts 25 + api 236 + web 48 全过；web build 过；e2e 16/16。
+
+## T20 — Minor 批次（P-25/26/27/28/31/32/35/36/37/38）
+
+- **P-32 回收站重复**：`findDuplicates` 拆分 `deletedExactId`（已归档仍走 `exactId` 拦截跨月重复），疑似重复与 `refineDuplicates` 均跳过已删除凭证；上传命中回收站返回 `DELETED_DUPLICATE`；前端显示「重复文件（在回收站）」+「从回收站恢复」按钮。测试：storage-privacy.test.ts 2 例 + UploadPageDeletedDuplicate.test.tsx 2 例；duplicates/upload 旧断言同步。
+- **P-35 EXIF 剥离**：`storeImage` 入库前 `rotate()` 转正并重编码（jpeg/webp q92），sha256/感知哈希仍按上传原字节算保证查重稳定；存盘、PDF、缩略图一律无 EXIF/GPS。测试 1 例（含转正后宽高与重上传查重）。
+- **P-27 预览竞态**：加载 effect 切换批次先 `setBatch(null)` 并以 active 标志丢弃过期响应；回归测试 1 例（旧批次迟到响应不覆盖新批次）。PdfPreview 的 cleanup destroy 在 T10 已就位，未重复改。
+- **P-31**：回收站「恢复凭证」后立即重拉报销池列表（Undo.test 加断言）；历史页归档状态只按未撤销批次计算（原来当月有撤销单时永远显示「归档本月」）。
+- **P-28**：`#preview` 无选中批次时新增 `LatestDraftPreview` 自动跳到最近一个未撤销未归档的草稿；预览页撤销后清空 App 记忆的选中批次（不再 409 打开已撤销批次）。
+- **P-25**：新增 `errors.ts` `friendlyError`（Failed to fetch 等翻译成「网络连接失败，请检查网络后重试」），接入 PendingPage 与 PreviewPage；待处理页增加「全部重试识别（N 张）」批量重试；上传页 AI 未配置时显示横幅并链接到设置。
+- **P-26**：`index.html` 改 `lang="zh-CN"` + 中文标题，页头改「自动报销助手」（e2e/App.test 断言同步）；预览页与设置页日期输入改 `type="date"`；设置保存成功显示「设置已保存」；NoteEditor 支持 Esc 关闭 + 打开自动聚焦；报销池空状态加「去上传」引导；规则表 `merchant/keyword` 显示为「商户/关键词」。
+- **P-36**：`form-geometry.json` 标题下划线整体下移 2mm（[19.13, 20.95]，间距不变），不再压字。字体改宋体/楷体类（需嵌入字体文件与授权确认）暂缓。
+- **P-37 README**：补 `pnpm dev` 单命令、e2e 前置条件（本地 Chrome / CI chromium）、`ACCESS_CODE_SHA256`/`TZ`/`REQUIRE_VOLUME` 变量与 `.volume-id` 操作、访问码上线后的安全边界段落重写。
+- **P-38**：vitest 三包升至 ^4.1.11（GHSA-82fw-gwwq-j7x9 只在 4.1.11+ 修复），顺带升级 multer ^2.4.0（DoS）；`pnpm audit` 已清零；CI 增加 `pnpm audit --audit-level=moderate` 门禁。
+- 其他：playwright.config 加 `retries: 1`（高负载并行下导航用例偶发超时，单跑 5/5 稳定，属资源竞争）。
+- 暂缓（已记录）：P-25 识别进度服务端恢复（M）、P-26 统一 toast/按钮样式体系、P-28 导航改 `<a>` 链接、P-30 代码质量（lint/单行组件拆分，M）、P-33 基于原单重开草稿（M）、P-34 多用户版本号/审计表（M）。
+- 验证：typecheck 绿；contracts 25 + api 239 + web 51 全过；web build 过；e2e 16/16；`pnpm audit` 无已知漏洞。

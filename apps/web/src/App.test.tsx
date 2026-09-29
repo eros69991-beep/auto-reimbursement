@@ -58,7 +58,7 @@ describe('App', () => {
     render(<App />);
 
     expect(
-      screen.getByRole('heading', { name: 'Automatic Reimbursement Assistant' })
+      screen.getByRole('heading', { name: '自动报销助手' })
     ).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '首页' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '上传凭证' })).toBeInTheDocument();

@@ -1,6 +1,6 @@
 import './styles.css';
 import { useEffect, useState } from 'react';
-import { UNAUTHORIZED_EVENT } from './api';
+import { api, UNAUTHORIZED_EVENT } from './api';
 import { AccessGate } from './components/AccessGate';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { PendingPage } from './pages/PendingPage';
@@ -11,6 +11,47 @@ import { HistoryPage } from './pages/HistoryPage';
 import { SettingsPage } from './pages/SettingsPage';
 
 type NavKey = 'home' | 'upload' | 'pool' | 'pending' | 'preview' | 'history' | 'settings';
+
+// P-28：直接进入 #preview（刷新后内存中没有选中批次）时，
+// 自动跳到最近一个未撤销、未归档的草稿批次；没有草稿才显示引导
+function LatestDraftPreview({ onResolve }: { onResolve: (id: string) => void }): React.JSX.Element {
+  const [state, setState] = useState<'loading' | 'empty'>('loading');
+  useEffect(() => {
+    let active = true;
+    void api.history().then((months) => {
+      const draft = months
+        .flatMap((month) => month.batches)
+        .filter((batch) => batch.cancelledAt === null && batch.archivedAt === null)
+        .sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0];
+      if (draft !== undefined) {
+        onResolve(draft.id);
+        return;
+      }
+      if (active) setState('empty');
+    }, () => {
+      if (active) setState('empty');
+    });
+    return () => {
+      active = false;
+    };
+    // onResolve 由 App 内联提供，每次渲染都是新引用；只在挂载时解析一次即可
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  if (state === 'loading') {
+    return (
+      <main className="page-content">
+        <h2>生成预览</h2>
+        <p>正在查找进行中的报销单…</p>
+      </main>
+    );
+  }
+  return (
+    <main className="page-content">
+      <h2>生成预览</h2>
+      <p>请先在报销池生成报销单，或从历史报销单中选择一个批次。</p>
+    </main>
+  );
+}
 
 // P-14：导航当前页高亮
 function activeNav(route: string): NavKey {
@@ -52,7 +93,10 @@ export default function App() {
     : route === '#pending'
       ? <PendingPage />
       : (route === '#preview' || /^#batches\/[^/]+\/preview$/.test(route))
-        ? <PreviewPage batchId={previewId} />
+        ? previewId === null
+          // P-28：没有选中批次时自动落到最近一个未撤销、未归档的草稿
+          ? <LatestDraftPreview onResolve={(id) => { setSelectedBatch(id); window.location.hash = `#batches/${id}/preview`; }} />
+          : <PreviewPage batchId={previewId} onCancelled={() => setSelectedBatch(null)} />
         : route === '#history'
           ? <HistoryPage onPreview={(id) => { setSelectedBatch(id); window.location.hash = `#batches/${id}/preview`; }} />
           : route === '#settings'
@@ -69,7 +113,7 @@ export default function App() {
   return (
     <>
       <header className="app-header">
-        <h1>Automatic Reimbursement Assistant</h1>
+        <h1>自动报销助手</h1>
         <nav aria-label="主导航">
           <button type="button" aria-current={current('home')} onClick={() => { window.location.hash = '#home'; }}>首页</button>
           <button type="button" aria-current={current('upload')} onClick={() => { window.location.hash = '#upload'; }}>上传凭证</button>

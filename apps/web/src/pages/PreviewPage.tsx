@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { CATEGORIES, type Batch, type FormOptions } from '@auto-reimbursement/contracts';
 import { api, apiUrl, openAuthed } from '../api';
+import { friendlyError } from '../errors';
 import { NoteEditor } from '../components/NoteEditor';
 import { ReconcileWorkspace } from '../components/ReconcileWorkspace';
 
@@ -17,7 +18,7 @@ function snapshotOf(batch: Batch): SavedSnapshot {
   return { options: batch.options, noteBySheet: noteBySheetOf(batch) };
 }
 
-export function PreviewPage({ batchId }: { batchId: string | null }): React.JSX.Element {
+export function PreviewPage({ batchId, onCancelled }: { batchId: string | null; onCancelled?: () => void }): React.JSX.Element {
   const [batch, setBatch] = useState<Batch | null>(null);
   const [revision, setRevision] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -34,12 +35,23 @@ export function PreviewPage({ batchId }: { batchId: string | null }): React.JSX.
       setSaved(null);
       return;
     }
+    // P-27：切换批次时先清空旧数据并丢弃过期响应，
+    // 避免显示上一批内容时对错误的批次执行操作
+    let active = true;
+    setBatch(null);
+    setSaved(null);
     void api.batch(batchId).then((loaded) => {
+      if (!active) return;
       setBatch(loaded);
       setSaved(snapshotOf(loaded));
-    }, (reason: unknown) =>
-      setError(reason instanceof Error ? reason.message : '加载预览失败'),
-    );
+    }, (reason: unknown) => {
+      if (active) {
+        setError(reason instanceof Error ? reason.message : '加载预览失败');
+      }
+    });
+    return () => {
+      active = false;
+    };
   }, [batchId]);
 
   const dirty =
@@ -75,10 +87,12 @@ export function PreviewPage({ batchId }: { batchId: string | null }): React.JSX.
     };
   }, []);
 
-  const errorText = (reason: unknown, fallback: string) =>
-    reason instanceof Error
-      ? `${typeof (reason as Error & { code?: unknown }).code === 'string' ? `${(reason as Error & { code: string }).code}：` : ''}${reason.message}`
-      : fallback;
+  const errorText = (reason: unknown, fallback: string) => {
+    if (!(reason instanceof Error)) return fallback;
+    const coded = reason as Error & { code?: unknown };
+    const prefix = typeof coded.code === 'string' ? `${coded.code}：` : '';
+    return `${prefix}${friendlyError(reason, fallback)}`;
+  };
 
   async function save(options: FormOptions, notes: Record<string, string | null>): Promise<void> {
     if (!batch) return;
@@ -163,6 +177,8 @@ export function PreviewPage({ batchId }: { batchId: string | null }): React.JSX.
     setBusy(true);
     try {
       await api.cancelBatch(batch.id);
+      // P-28：撤销后清空 App 侧记忆的选中批次，避免「生成预览」再次打开已撤销批次
+      onCancelled?.();
       window.location.hash = '#pool';
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : '撤销失败');
@@ -279,6 +295,7 @@ export function PreviewPage({ batchId }: { batchId: string | null }): React.JSX.
         <label>
           日期
           <input
+            type="date"
             value={batch.options.date ?? ''}
             onChange={(e) => {
               setNotice(null);

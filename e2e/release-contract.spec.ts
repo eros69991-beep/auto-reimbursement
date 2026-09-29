@@ -373,7 +373,7 @@ test('keeps configured provider credentials out of browser requests and loaded a
         const response = await page.request.get(url);
         return response.ok() ? await response.text() : '';
       }));
-    expect(localAssets.join('\n')).toContain('Automatic Reimbursement Assistant');
+    expect(localAssets.join('\n')).toContain('自动报销助手');
 
     const exposedSurface = JSON.stringify({ browserRequests, statusBody, localAssets });
     for (const secret of secrets) expect(exposedSurface).not.toContain(secret);

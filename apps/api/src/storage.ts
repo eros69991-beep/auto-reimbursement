@@ -146,13 +146,27 @@ export async function storeImage(
   const id = randomUUID();
   const path = `${month}/${kind}/${id}.${format.extension}`;
   const absolutePath = safePath(config.dataDir, path);
+  // 指纹仍按用户上传的原始字节计算，保证同一文件重复上传时查重结果稳定（P-32 依赖）
   const hashes = await fingerprint(input.bytes);
+  // P-35：rotate() 把 EXIF 方向转正后重新编码；sharp 重编码默认不携带任何
+  // EXIF/GPS/设备元数据，存盘、PDF 与缩略图一律使用去除元数据后的版本
+  const stripped = await sharp(input.bytes, {
+    limitInputPixels: MAX_IMAGE_PIXELS,
+  })
+    .rotate()
+    .toFormat(
+      metadata.format as keyof typeof imageFormats,
+      // png 的 quality 仅在 palette 模式下有效，传了会报错；jpeg/webp 用 92 保清晰度
+      metadata.format === 'png' ? {} : { quality: 92 },
+    )
+    .toBuffer();
+  const strippedMetadata = await sharp(stripped).metadata();
   await ensureMonthDirs(config.dataDir, month);
 
   let handle;
   try {
     handle = await open(absolutePath, 'wx');
-    await handle.writeFile(input.bytes);
+    await handle.writeFile(stripped);
     await handle.close();
     handle = undefined;
   } catch (error) {
@@ -177,9 +191,9 @@ export async function storeImage(
     mime: format.mime,
     sha256: hashes.sha256,
     perceptualHash: hashes.perceptualHash,
-    bytes: input.bytes.length,
-    width: metadata.width,
-    height: metadata.height,
+    bytes: stripped.length,
+    width: strippedMetadata.width ?? metadata.width,
+    height: strippedMetadata.height ?? metadata.height,
     deletedAt: null,
   };
 }

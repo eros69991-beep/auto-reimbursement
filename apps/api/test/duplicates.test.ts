@@ -61,16 +61,17 @@ describe('historical duplicate detection', () => {
         }),
       ).exactId,
     ).toBe('archived');
-    expect(
-      findDuplicates(
-        store,
-        imageRef({
-          id: 'renamed-deleted-image',
-          sha256: deleted.original.sha256,
-          perceptualHash: deleted.original.perceptualHash,
-        }),
-      ).exactId,
-    ).toBe('deleted');
+    // P-32：已归档的精确重复仍拦截（exactId）；已删除的单独进 deletedExactId
+    const renamedDeleted = findDuplicates(
+      store,
+      imageRef({
+        id: 'renamed-deleted-image',
+        sha256: deleted.original.sha256,
+        perceptualHash: deleted.original.perceptualHash,
+      }),
+    );
+    expect(renamedDeleted.exactId).toBeNull();
+    expect(renamedDeleted.deletedExactId).toBe('deleted');
   });
 
   it('uses SHA-256 bytes and a real 64-bit dHash for recompressed images', async () => {
@@ -107,13 +108,13 @@ describe('historical duplicate detection', () => {
         store,
         imageRef({ id: 'recompressed-image', ...recompressedFingerprint }),
       ),
-    ).toEqual({ exactId: null, suspectedIds: ['source'] });
+    ).toEqual({ exactId: null, deletedExactId: null, suspectedIds: ['source'] });
     expect(
       findDuplicates(
         store,
         imageRef({ id: 'checkerboard-image', ...checkerboardFingerprint }),
       ),
-    ).toEqual({ exactId: null, suspectedIds: [] });
+    ).toEqual({ exactId: null, deletedExactId: null, suspectedIds: [] });
   });
 
   it('does not match empty fingerprints or the image itself', () => {
@@ -129,6 +130,7 @@ describe('historical duplicate detection', () => {
 
     expect(findDuplicates(store, receipt.original)).toEqual({
       exactId: null,
+      deletedExactId: null,
       suspectedIds: [],
     });
     expect(
@@ -136,7 +138,7 @@ describe('historical duplicate detection', () => {
         store,
         imageRef({ id: 'empty-image', sha256: '', perceptualHash: '' }),
       ),
-    ).toEqual({ exactId: null, suspectedIds: [] });
+    ).toEqual({ exactId: null, deletedExactId: null, suspectedIds: [] });
   });
 
   it('returns duplicate IDs in upload order with an ID tie-breaker', () => {

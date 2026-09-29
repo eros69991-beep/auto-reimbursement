@@ -23,7 +23,14 @@ export function NoteEditor({
 }: NoteEditorProps): React.JSX.Element {
   const [content, setContent] = useState(initialContent);
   return (
-    <div className="modal-backdrop" role="presentation">
+    // P-26：弹窗键盘可达——Esc 关闭、打开自动聚焦输入框
+    <div
+      className="modal-backdrop"
+      role="presentation"
+      onKeyDown={(event) => {
+        if (event.key === 'Escape' && !busy) onCancel();
+      }}
+    >
       <div className="modal-card" role="dialog" aria-modal="true" aria-label={title}>
         <h3>{title}</h3>
         <textarea
@@ -32,6 +39,7 @@ export function NoteEditor({
           maxLength={NOTE_MAX_LENGTH}
           value={content}
           disabled={busy}
+          autoFocus
           onChange={(event) => setContent(event.target.value)}
         />
         <p className="note-hint">
