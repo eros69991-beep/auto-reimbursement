@@ -29,7 +29,13 @@ export default function App() {
   const [accessRequired, setAccessRequired] = useState(false);
 
   useEffect(() => {
-    const handleHashChange = () => setRoute(window.location.hash);
+    const handleHashChange = () => {
+      // 必须等本次 hashchange 的全部监听器（含预览页 P-05 离开守卫）执行完再更新路由。
+      // 同步 setRoute 或 queueMicrotask 都不行：浏览器派发事件时，每个监听器返回后
+      // 都会做 microtask checkpoint（JS 栈已空），React 19 会在派发途中同步重渲染，
+      // 把排在后面的守卫监听器直接卸载（e2e 复现）。宏任务才会在整次派发结束后运行。
+      setTimeout(() => setRoute(window.location.hash), 0);
+    };
     window.addEventListener('hashchange', handleHashChange);
     return () => window.removeEventListener('hashchange', handleHashChange);
   }, []);

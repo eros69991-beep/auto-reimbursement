@@ -168,3 +168,16 @@ P-20 统一错误表：
 - 测试：`test/time.test.ts` 4 例——跨月边界（UTC 9/30 16:30 → 2026-10）、临界前一秒（15:59:59 → 2026-09）、UTC 零点不跨天、集成（该时刻上传的凭证 month === '2026-10'）。
 - 验证：typecheck 绿；contracts 25 + api 236 + web 48 全过；web build 过；e2e 14/14。
 - 运维提示（部署时做）：Railway 设 `TZ=Asia/Shanghai` 可让日志时间戳同步为北京时间；代码层面已不再依赖该变量。
+
+## T18 — P-19 CI 流水线 + P-05 界面级回归（附带修复路由/守卫两个真实缺陷）
+
+- 新增 `.github/workflows/ci.yml`：pnpm 11 + Node 24，依次 `pnpm install --frozen-lockfile → typecheck → test → web build → playwright install --with-deps chromium → test:e2e`；push（main 与 feature/mvp-implementation）和 PR 触发。
+- `playwright.config.ts`：本地继续用系统 Chrome，CI（`process.env.CI`）改用 Playwright 自带 chromium。
+- 新增 `e2e/unsaved.spec.ts`（P-05 界面级回归，报告指出旧 e2e“先保存再生成”测不到）：
+  1. 未保存部门时点「生成 PDF」→ 必须先把本地修改 PATCH 保存到服务器再导出（断言调用次序与保存内容）；
+  2. 未保存时点导航离开 → 弹确认框，取消则留在原预览页。
+- 回归用例牵出两个真实缺陷并已修复：
+  - **App.tsx 路由同步重渲染**：hashchange 派发途中 App 的 `setRoute` 被 React 19 同步 flush（浏览器在每个监听器返回后做 microtask checkpoint，queueMicrotask 同样不够），会把注册顺序靠后的预览页守卫监听器在轮到他之前卸载——离开拦截形同虚设。改为 `setTimeout(0)` 宏任务再读最新 hash 更新路由。
+  - **PreviewPage 守卫挂载时机**：原守卫挂在依赖 dirty 的被动 effect 上，「编辑→立刻跳转」会在 effect 运行前漏守；改为 dirty 渲染期写入 `useRef`、监听器挂载一次（`[]`）经 ref 读最新值。
+- 验证：typecheck 绿；contracts 25 + api 236 + web 48 全过；web build 过；e2e 16/16（新增 2 例）。
+- 其余 P-02/03/04/06/10 回归覆盖在前序 Task 已落在 API/契约层（batches/refunds/learning 等测试文件），此处不重复造 UI 级用例。

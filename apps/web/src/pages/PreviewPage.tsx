@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { CATEGORIES, type Batch, type FormOptions } from '@auto-reimbursement/contracts';
 import { api, apiUrl, openAuthed } from '../api';
 import { NoteEditor } from '../components/NoteEditor';
@@ -47,14 +47,20 @@ export function PreviewPage({ batchId }: { batchId: string | null }): React.JSX.
     saved !== null &&
     (JSON.stringify(batch.options) !== JSON.stringify(saved.options) ||
       JSON.stringify(noteBySheetOf(batch)) !== JSON.stringify(saved.noteBySheet));
+  // 渲染期同步刷新 ref：若挂在依赖 dirty 的被动 effect 上，快速连续「编辑→跳转」
+  // 会在 effect 运行前漏掉守卫（e2e 曾复现）。监听器改为挂载一次、经 ref 读最新值。
+  const dirtyRef = useRef(dirty);
+  dirtyRef.current = dirty;
 
   // P-05：有未保存修改时，关闭/刷新页面与站内跳转都要提示
   useEffect(() => {
-    if (!dirty) return;
     const onBeforeUnload = (event: BeforeUnloadEvent) => {
-      event.preventDefault();
+      if (dirtyRef.current) {
+        event.preventDefault();
+      }
     };
     const onHashChange = (event: HashChangeEvent) => {
+      if (!dirtyRef.current) return;
       const target = new URL(event.newURL).hash;
       const leaving = !target.startsWith('#preview') && !/^#batches\/[^/]+\/preview$/.test(target);
       if (leaving && !window.confirm('有未保存的修改，确定离开吗？')) {
@@ -67,7 +73,7 @@ export function PreviewPage({ batchId }: { batchId: string | null }): React.JSX.
       window.removeEventListener('beforeunload', onBeforeUnload);
       window.removeEventListener('hashchange', onHashChange);
     };
-  }, [dirty]);
+  }, []);
 
   const errorText = (reason: unknown, fallback: string) =>
     reason instanceof Error
