@@ -181,3 +181,9 @@ P-20 统一错误表：
   - **PreviewPage 守卫挂载时机**：原守卫挂在依赖 dirty 的被动 effect 上，「编辑→立刻跳转」会在 effect 运行前漏守；改为 dirty 渲染期写入 `useRef`、监听器挂载一次（`[]`）经 ref 读最新值。
 - 验证：typecheck 绿；contracts 25 + api 236 + web 48 全过；web build 过；e2e 16/16（新增 2 例）。
 - 其余 P-02/03/04/06/10 回归覆盖在前序 Task 已落在 API/契约层（batches/refunds/learning 等测试文件），此处不重复造 UI 级用例。
+
+## T19 — P-29 web 单测稳定性
+
+- 根因：`App.test.tsx` 渲染真实 App 但没 mock `./api`，PreviewPage 挂载后真请求 127.0.0.1:3000；请求在 jsdom 环境销毁后失败，产生 “window is not defined” 的 Unhandled Errors，约半数运行退出码 1。另外 vitest 未开 globals，Testing Library 自动 cleanup 不生效，各测试靠 `getAllBy…().at(-1)` 绕过残留 DOM。
+- 修复：`src/test/setup.ts` 显式 `afterEach(cleanup)`；`App.test.tsx` 全量 mock `./api`（含 `UNAUTHORIZED_EVENT: 'api:unauthorized'`）与 `./components/PdfPreview`，`api.batch` 返回最小批次夹具，预览用例改 `findByRole` 等待异步加载，两个用例显式设置初始 hash；`WorkflowPages.test.tsx` 全部 `.at(-1)` 改为 `getBy*`/`findByRole`。
+- 验证：web 单测连跑 4 次全部退出码 0、48/48、0 Unhandled Errors；typecheck 绿；contracts 25 + api 236 + web 48 全过；web build 过；e2e 16/16。
