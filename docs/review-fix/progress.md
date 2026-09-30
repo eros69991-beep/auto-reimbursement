@@ -209,3 +209,18 @@ P-20 统一错误表：
 - **api vitest 池切换**：forks 池在本机 Windows 环境连续两次出现「239 个用例全过后 worker 崩溃 exit 1」的误报；改用 threads 池（`apps/api/vitest.config.ts`），连续运行稳定且更快（11.6s → 5.3s）。
 - 最终回归：typecheck 绿；contracts 25 + api 239 + web 51 全过；web build 过；e2e 16/16。
 - 推送 origin `feature/mvp-implementation`；推送后 GitHub Actions CI 首次自动运行。
+
+## 第二轮复审修复（Claude，2026-09-29，基于 5de6443）
+
+复审发现本轮改动引入的回归与未生效的修复，逐项修复如下（均先写回归测试确认能复现，再修到通过）：
+
+1. **真实照片导出失败**：P-35 去 EXIF 重编码后，文件索引仍记录上传原始字节的哈希，导出时完整性校验失败（`MISSING_ATTACHMENT`）。`ImageRef` 新增可选 `fileSha256`（落盘字节哈希），`storage.fileIndexSha256()` 供原始凭证/退款凭证写索引；`sha256` 仍是上传指纹，查重不变。新增 `test/export-real-photo.test.ts`（带 EXIF 的 JPEG + 退款凭证 → 预览含附件、导出 3 页）。存量修复脚本 `scripts/repair-file-hashes.mjs`（默认只读，`--apply` 才写）。
+2. **对账页凭证图 404**：`ReconcileWorkspace` 把完整 URL 传给 `useAuthedUrl` 被再拼一次 base；改传相对路径，`apiUrl` 遇到完整地址原样返回。测试断言传入的是相对路径。
+3. **限流全局共用一个桶**：新增 `TRUST_PROXY`（Railway 上默认 1 跳）；401 单独限速（每 IP 15 分钟 30 次，只计访问码错误）；通用/上传/维护限流移到鉴权之后、按 IP 分桶，上传放宽到 200 次/10 分钟；限流器改为每个 app 实例独立。上传页显示服务器返回的真实失败原因。新增 `test/rate-limit.test.ts`。
+4. **先选模板再编辑备注，关联丢失**：`saveSheetNote` 三条路径最后统一 `saveBatchOptions` 保存本页关联与本地选项；移动分类后已保存快照跟随新页面集合（不再误报未保存）；成功操作后清除旧错误提示。
+5. **`cancelledAt === null` 判断失效**：正常批次没有该字段，改为 `!cancelledAt`；「生成预览」只自动打开未定稿草稿；历史页归档后显示「取消归档」。
+6. **手机对账看不到报销单**：窄屏分类行改为单行横滑；左侧按报销单页（`data-sheet-index`，由 PDF 文本识别）跳转，不再按页码推算。
+7. **次要**：客户端压缩改为在上传并发池内按批进行、按像素总量（约 400 万像素）缩放；「重试失败文件」结果追加而不覆盖；确认凭证时商户/日期改为选填；打开 PDF 先同步开窗口再下载（防手机拦截弹窗），草稿链接改为含凭证页的完整预览；含附件的完整预览不再常驻服务器内存。
+8. **部署文档**：操作单改正 `/health` 路径、版本核对方式、`REQUIRE_VOLUME` 顺序、脚本说明与 Mac 算哈希命令；README 补 `TRUST_PROXY`；`railway.json` 改用 Railpack（按 `.nvmrc` 安装 24.21.0）、重启策略 `ALWAYS`、健康检查超时 300 秒。
+
+验证：`pnpm typecheck` 通过；`pnpm test` contracts 25 + api 243 + web 60 全过；e2e 16/16（关闭重试）；真浏览器走查：手机照片上传→预览→导出成功、对账页桌面/手机都能看到凭证图、手机上半区能看到报销单、`#preview` 自动打开草稿、归档后显示「取消归档」。

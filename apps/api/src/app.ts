@@ -23,6 +23,9 @@ type AppDependencies = {
 export function createApp(deps?: AppDependencies): express.Express {
   const application = express();
   application.disable('x-powered-by');
+  // 经反向代理（Railway 边缘）转发时必须按跳数信任 X-Forwarded-For，
+  // 否则 request.ip 全是代理地址，所有人（含没有访问码的陌生人）共用一个限流桶。
+  application.set('trust proxy', deps?.config.trustProxy ?? 0);
   application.use(
     helmet({
       // 图片/PDF 需要被不同源的前端以 fetch 方式读取
@@ -96,9 +99,14 @@ export function createApp(deps?: AppDependencies): express.Express {
   });
 
   if (deps !== undefined) {
-    application.use('/api', apiRateLimit);
-    application.use(['/api/receipts/upload', '/api/backup', '/api/cleanup'], strictRateLimit);
+    const limits = createRateLimits();
+    // 鉴权之前只统计访问码错误（401）：防爆破，且陌生人的请求不会耗尽正常用户的额度
+    application.use('/api', limits.authFailures);
     application.use('/api', requireAccess(deps.config));
+    // 以下限流只统计已通过鉴权的请求，按客户端 IP 分桶
+    application.use('/api', limits.api);
+    application.use('/api/receipts/upload', limits.upload);
+    application.use(['/api/backup', '/api/cleanup'], limits.maintenance);
     application.use('/api', createRouter(deps.store, deps.config, deps.queue));
     // 未知 /api/* 路径返回 JSON 404，而不是 express 默认的 HTML（P-20）
     application.use('/api', (_request, response) => {
@@ -248,21 +256,40 @@ export function createApp(deps?: AppDependencies): express.Express {
 
 export const app = createApp();
 
-const apiRateLimit = rateLimit({
-  windowMs: 5 * 60 * 1000,
-  limit: 600,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { code: 'RATE_LIMITED', message: '请求过于频繁，请稍后再试' },
-});
-
-const strictRateLimit = rateLimit({
-  windowMs: 10 * 60 * 1000,
-  limit: 30,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { code: 'RATE_LIMITED', message: '操作过于频繁，请稍后再试' },
-});
+// 每个 app 实例各自一套计数（测试互不串扰）。额度按「一个人月底集中处理」估算：
+// 上传每批 3 张，200 次/10 分钟约 600 张；缩略图、识别进度轮询都算在通用额度里。
+function createRateLimits() {
+  const common = { standardHeaders: true, legacyHeaders: false } as const;
+  return {
+    authFailures: rateLimit({
+      ...common,
+      windowMs: 15 * 60 * 1000,
+      limit: 30,
+      // 只把 401（访问码缺失或错误）计入，其余请求不占额度
+      skipSuccessfulRequests: true,
+      requestWasSuccessful: (_request, response) => response.statusCode !== 401,
+      message: { code: 'RATE_LIMITED', message: '访问码错误次数过多，请 15 分钟后再试' },
+    }),
+    api: rateLimit({
+      ...common,
+      windowMs: 5 * 60 * 1000,
+      limit: 1200,
+      message: { code: 'RATE_LIMITED', message: '请求过于频繁，请稍后再试' },
+    }),
+    upload: rateLimit({
+      ...common,
+      windowMs: 10 * 60 * 1000,
+      limit: 200,
+      message: { code: 'RATE_LIMITED', message: '上传过于频繁，请稍后再试' },
+    }),
+    maintenance: rateLimit({
+      ...common,
+      windowMs: 10 * 60 * 1000,
+      limit: 30,
+      message: { code: 'RATE_LIMITED', message: '操作过于频繁，请稍后再试' },
+    }),
+  };
+}
 
 function isMutation(method: string): boolean {
   return method === 'POST' || method === 'PUT' || method === 'PATCH' || method === 'DELETE';

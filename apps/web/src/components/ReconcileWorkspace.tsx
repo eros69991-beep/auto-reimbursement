@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { formatFen, type Batch } from '@auto-reimbursement/contracts';
 
-import { api } from '../api';
 import { useAuthedUrl } from './AuthedImage';
 import { PdfPreview } from './PdfPreview';
 
@@ -73,10 +72,11 @@ export function ReconcileWorkspace({ batch, previewUrl }: { batch: Batch; previe
   const current = attachments.find((item) => item.receiptId === selectedReceiptId) ?? attachments[0] ?? null;
   const currentIndex = current === null ? -1 : attachments.indexOf(current);
   const imageFailed = current !== null && failedReceiptId === current.receiptId;
+  // 传相对路径：fetchBlobUrl 内部会拼 API 地址（传完整 URL 曾被拼两次导致 404）
   const { url: imageUrl, failed: fetchFailed } = useAuthedUrl(
     current === null || imageFailed
       ? null
-      : `${api.receiptOriginalUrl(current.receiptId)}?r=${retryCount}`,
+      : `/api/receipts/${encodeURIComponent(current.receiptId)}/original-image?r=${retryCount}`,
   );
 
   // 切换附件时，左侧报销单跟随滚动到该凭证所属的报销页（多页报销单上下分屏时保持单据可见）。
@@ -84,7 +84,7 @@ export function ReconcileWorkspace({ batch, previewUrl }: { batch: Batch; previe
     if (current === null) return;
     const row = rows.find((item) => item.key === current.rowKey);
     if (row === undefined) return;
-    const canvas = formRef.current?.querySelector(`canvas[data-page-number="${row.sheetIndex + 1}"]`);
+    const canvas = formRef.current?.querySelector(`canvas[data-sheet-index="${row.sheetIndex}"]`);
     (canvas as HTMLElement | undefined)?.scrollIntoView?.({ block: 'nearest' });
   }, [current, rows]);
 

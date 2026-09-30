@@ -13,6 +13,8 @@ const ACCEPTED_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
 const CHUNK_SIZE = 3;
 const CONCURRENCY = 2;
 
+type RejectedRow = UploadResult['rejected'][number] & { name: string };
+
 interface FileFailure {
   name: string;
   reason: string;
@@ -61,7 +63,7 @@ export function UploadPage({ client = api }: { client?: UploadClient }): React.J
   const [isUploading, setIsUploading] = useState(false);
   const [accepted, setAccepted] = useState<UploadResult['accepted']>([]);
   const [acceptedFiles, setAcceptedFiles] = useState<File[]>([]);
-  const [rejected, setRejected] = useState<UploadResult['rejected']>([]);
+  const [rejected, setRejected] = useState<RejectedRow[]>([]);
   const [failedFiles, setFailedFiles] = useState<FileFailure[]>([]);
   const [batchFiles, setBatchFiles] = useState<File[]>([]);
   const [uploadDone, setUploadDone] = useState(0);
@@ -122,7 +124,8 @@ export function UploadPage({ client = api }: { client?: UploadClient }): React.J
     };
   }, [activeIds, client, pollError, retryVersion]);
 
-  async function submit(incoming: File[], carry: FileFailure[] = []): Promise<void> {
+  // append=true 用于「重试失败文件」：结果追加到已有列表，不覆盖之前已接收的文件和识别进度
+  async function submit(incoming: File[], carry: FileFailure[] = [], append = false): Promise<void> {
     if (incoming.length === 0 || isUploading) return;
     setError(null);
     setPollError(null);
@@ -149,51 +152,54 @@ export function UploadPage({ client = api }: { client?: UploadClient }): React.J
     setIsUploading(true);
     setUploadDone(0);
     try {
-      // P-12：先压缩（长边 2000px、JPEG 0.85），失败自动回退原图
-      const prepared = await Promise.all(valid.map((file) => compressForUpload(file)));
-      setBatchFiles(prepared);
+      setBatchFiles(valid);
       const chunks: File[][] = [];
-      for (let start = 0; start < prepared.length; start += CHUNK_SIZE) {
-        chunks.push(prepared.slice(start, start + CHUNK_SIZE));
+      for (let start = 0; start < valid.length; start += CHUNK_SIZE) {
+        chunks.push(valid.slice(start, start + CHUNK_SIZE));
       }
       const results: (UploadResult | null)[] = chunks.map(() => null);
+      const failureReasons = chunks.map(() => '网络错误或服务器不可用');
+      // 字节进度：压缩前先按原文件大小估算，每批压缩完换成实际上传大小
       const chunkTotals = chunks.map((chunk) => chunk.reduce((sum, file) => sum + file.size, 0));
       const chunkLoaded = chunks.map(() => 0);
-      const totalBytes = chunkTotals.reduce((sum, value) => sum + value, 0);
-      setUploadBytes({ loaded: 0, total: totalBytes });
+      const reportBytes = (): void => setUploadBytes({
+        loaded: chunkLoaded.reduce((sum, value) => sum + value, 0),
+        total: chunkTotals.reduce((sum, value) => sum + value, 0),
+      });
+      reportBytes();
       let completed = 0;
       await runPool(chunks, CONCURRENCY, async (chunkFiles, index) => {
         try {
-          results[index] = await client.upload(chunkFiles, (loaded) => {
+          // 压缩放进上传并发池按批进行（P-12 压缩失败自动回退原图）：同一时刻最多
+          // CONCURRENCY × CHUNK_SIZE 张在内存里解码，避免手机一次选几十张照片时同时解码全部原图
+          const prepared = await Promise.all(chunkFiles.map((file) => compressForUpload(file)));
+          chunkTotals[index] = prepared.reduce((sum, file) => sum + file.size, 0);
+          reportBytes();
+          results[index] = await client.upload(prepared, (loaded) => {
             chunkLoaded[index] = Math.min(loaded, chunkTotals[index]!);
-            setUploadBytes({
-              loaded: chunkLoaded.reduce((sum, value) => sum + value, 0),
-              total: totalBytes,
-            });
+            reportBytes();
           });
           chunkLoaded[index] = chunkTotals[index]!;
-        } catch {
-          // 单批失败不拖累其他批，记入失败列表稍后重试
+        } catch (reason) {
+          // 单批失败不拖累其他批；保留服务器给出的原因（例如限流「上传过于频繁」），方便判断何时重试
           results[index] = null;
+          if (reason instanceof Error && reason.message !== '') failureReasons[index] = reason.message;
         } finally {
           completed += chunkFiles.length;
           setUploadDone(completed);
-          setUploadBytes({
-            loaded: chunkLoaded.reduce((sum, value) => sum + value, 0),
-            total: totalBytes,
-          });
+          reportBytes();
         }
       });
 
       const acceptedAll: UploadResult['accepted'] = [];
       const acceptedFilesAll: File[] = [];
-      const rejectedAll: UploadResult['rejected'] = [];
+      const rejectedAll: RejectedRow[] = [];
       const networkFailures: FileFailure[] = [];
       chunks.forEach((chunkFiles, chunkIndex) => {
         const result = results[chunkIndex];
         if (result === null) {
           for (const file of chunkFiles) {
-            networkFailures.push({ name: file.name, reason: '网络错误或服务器不可用', file, retryable: true });
+            networkFailures.push({ name: file.name, reason: failureReasons[chunkIndex]!, file, retryable: true });
           }
           return;
         }
@@ -202,7 +208,7 @@ export function UploadPage({ client = api }: { client?: UploadClient }): React.J
         chunkFiles.forEach((file, localIndex) => {
           const rejection = rejectedIndexes.get(localIndex);
           if (rejection !== undefined) {
-            rejectedAll.push({ ...rejection, index: chunkIndex * CHUNK_SIZE + localIndex });
+            rejectedAll.push({ ...rejection, index: chunkIndex * CHUNK_SIZE + localIndex, name: file.name });
             return;
           }
           const receipt = result.accepted[acceptedCursor];
@@ -214,13 +220,22 @@ export function UploadPage({ client = api }: { client?: UploadClient }): React.J
         });
       });
 
-      setAccepted(acceptedAll);
-      setAcceptedFiles(acceptedFilesAll);
-      setRejected(rejectedAll);
+      setAccepted((previous) => (append ? [...previous, ...acceptedAll] : acceptedAll));
+      setAcceptedFiles((previous) => (append ? [...previous, ...acceptedFilesAll] : acceptedFilesAll));
+      setRejected((previous) => (append ? [...previous, ...rejectedAll] : rejectedAll));
       setFailedFiles([...carry, ...failures, ...networkFailures]);
       const ids = acceptedAll.map((receipt) => receipt.id);
-      setProgress({ total: ids.length, recognizing: ids.length, ready: 0, pending: 0 });
-      setActiveIds(ids);
+      if (append) {
+        setProgress((previous) => ({
+          ...previous,
+          total: previous.total + ids.length,
+          recognizing: previous.recognizing + ids.length,
+        }));
+        setActiveIds((previous) => [...previous, ...ids]);
+      } else {
+        setProgress({ total: ids.length, recognizing: ids.length, ready: 0, pending: 0 });
+        setActiveIds(ids);
+      }
     } finally {
       setIsUploading(false);
     }
@@ -236,7 +251,7 @@ export function UploadPage({ client = api }: { client?: UploadClient }): React.J
     const retryable = failedFiles.filter((failure) => failure.retryable);
     if (retryable.length === 0) return;
     const keep = failedFiles.filter((failure) => !failure.retryable);
-    await submit(retryable.map((failure) => failure.file), keep);
+    await submit(retryable.map((failure) => failure.file), keep, true);
   }
 
   return (
@@ -305,7 +320,7 @@ export function UploadPage({ client = api }: { client?: UploadClient }): React.J
             <ul aria-label="被拒绝文件">
               {rejected.map((item) => (
                 <li key={`${item.index}-${item.code}`}>
-                  {item.code === 'DELETED_DUPLICATE' ? '重复文件（在回收站）' : item.duplicateId ? '重复文件' : '未接收文件'}：{batchFiles[item.index]?.name ?? `第 ${item.index + 1} 张`}
+                  {item.code === 'DELETED_DUPLICATE' ? '重复文件（在回收站）' : item.duplicateId ? '重复文件' : '未接收文件'}：{item.name}
                   {!item.duplicateId && `（${rejectionReason(item.code)}）`}
                   {item.duplicateId && item.code !== 'DELETED_DUPLICATE' && <>（<a href={client.receiptOriginalUrl(item.duplicateId)} onClick={(event) => { event.preventDefault(); void api.openAuthed(`/api/receipts/${encodeURIComponent(item.duplicateId!)}/original-image`); }}>查看重复凭证</a>）</>}
                   {item.code === 'DELETED_DUPLICATE' && item.duplicateId && (

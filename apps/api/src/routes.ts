@@ -310,11 +310,12 @@ export function createRouter(
         response.status(304).end();
         return;
       }
-      const cached = previewCache.get(batch.id);
+      // 只缓存「仅报销单页」的轻量预览；含凭证页的完整预览可能几十 MB，不常驻内存（浏览器侧仍有 ETag）
+      const cached = withAttachments ? undefined : previewCache.get(batch.id);
       const bytes = cached !== undefined && cached.key === cacheKey
         ? cached.bytes
         : await renderBatchPdf(store, config, batch, { attachments: withAttachments });
-      previewCache.set(batch.id, { key: cacheKey, bytes });
+      if (!withAttachments) previewCache.set(batch.id, { key: cacheKey, bytes });
       response
         .set('Cache-Control', 'private, no-cache')
         .set('ETag', etag)

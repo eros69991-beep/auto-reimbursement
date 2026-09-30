@@ -178,7 +178,10 @@ fieldset { margin: 1rem 0; }
   .reconcile { height: calc(100dvh - 11rem); min-height: min(24rem, 55dvh); }
   .reconcile-form { flex: 0 1 40%; min-height: 0; overflow-y: auto; }
   .reconcile-side { flex: 1 1 60%; min-height: 0; display: flex; flex-direction: column; }
-  .reconcile-rows { position: sticky; top: 0; z-index: 1; padding: .25rem 0; background: #f5f7fb; }
+  /* 分类行在窄屏改为单行横向滑动：分类多时不再把上半区挤满，报销单始终看得到 */
+  .reconcile-rows { position: sticky; top: 0; z-index: 1; padding: .25rem 0; background: #f5f7fb; flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .reconcile-rows li { flex: 0 0 auto; }
+  .reconcile-rows button { white-space: nowrap; }
 }
 
 /* 窄屏横屏：头部更高，收紧对账区高度保证附件工具栏不被挤出视口 */

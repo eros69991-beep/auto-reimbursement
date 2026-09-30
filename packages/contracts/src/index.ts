@@ -56,7 +56,13 @@ export interface ImageRef {
   id: string;
   path: string;
   mime: 'image/jpeg' | 'image/png' | 'image/webp';
+  /** 用户上传原始字节的 SHA-256：查重指纹，去 EXIF 重编码前计算，保证同一文件重复上传结果稳定。 */
   sha256: string;
+  /**
+   * 实际落盘字节的 SHA-256（去 EXIF 重编码后），文件索引用它做完整性校验。
+   * 旧数据没有此字段，表示落盘字节就是上传原始字节（与 sha256 相同）。
+   */
+  fileSha256?: string;
   perceptualHash: string;
   bytes: number;
   width: number;

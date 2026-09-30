@@ -9,7 +9,7 @@ import {
 import type { Config } from './config.js';
 import type { Store } from './db.js';
 import { assertMutable } from './receipts.js';
-import { safePath, storeImage, type InputImage } from './storage.js';
+import { fileIndexSha256, safePath, storeImage, type InputImage } from './storage.js';
 
 export function setRefund(
   store: Store,
@@ -53,7 +53,8 @@ export async function addRefundImage(
         ownerId: current.id,
         kind: 'refund',
         path: image.path,
-        sha256: image.sha256,
+        // 索引记录落盘字节的哈希（去 EXIF 后），导出时按它校验
+        sha256: fileIndexSha256(image),
         deletedAt: null,
       };
       store.put('receipts', updated);

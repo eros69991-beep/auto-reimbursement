@@ -1,6 +1,8 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { fetchBlobUrl } from '../api';
+
 import type { Batch, ImageRef, Snapshot } from '@auto-reimbursement/contracts';
 
 vi.mock('../api', () => ({
@@ -14,8 +16,9 @@ vi.mock('../api', () => ({
 vi.mock('./PdfPreview', () => ({
   PdfPreview: ({ url }: { url: string }) => (
     <div data-testid="pdf-preview" data-url={url}>
-      <canvas data-page-number="1" />
+      <canvas data-page-number="1" data-sheet-index="0" />
       <canvas data-page-number="2" />
+      <canvas data-page-number="3" data-sheet-index="1" />
     </div>
   ),
 }));
@@ -77,6 +80,8 @@ describe('reconcile workspace', () => {
     expect(screen.getByText('第 1 / 3 张 · 能耗费 · 电力公司营业厅 · 实付 277.20')).toBeInTheDocument();
     // 图片经带鉴权的 fetch 加载为 object URL
     expect(await screen.findByRole('img', { name: /凭证 1/ })).toHaveAttribute('src', 'blob:mock');
+    // 必须传相对路径：fetchBlobUrl 会自己拼 API 地址，传完整 URL 会被拼两次（曾导致 404）
+    expect(vi.mocked(fetchBlobUrl)).toHaveBeenCalledWith('/api/receipts/r1/original-image?r=0');
     // 初始高亮第一行
     expect(screen.getByRole('button', { name: /能耗费/ })).toHaveAttribute('aria-current', 'true');
   });
@@ -144,6 +149,8 @@ describe('reconcile workspace', () => {
     scrollIntoView.mockClear();
     fireEvent.click(screen.getByRole('button', { name: /耗材：合计/ }));
     await waitFor(() => expect(scrollIntoView).toHaveBeenCalledTimes(1));
+    // 跳到第 2 张报销单所在的画布（中间隔着附件页/续页，不能按页码 2 推算）
+    expect((scrollIntoView.mock.contexts[0] as HTMLElement).dataset.pageNumber).toBe('3');
     // 按钮标注所属页
     expect(screen.getByRole('button', { name: /第 2 页 · 耗材：合计/ })).toBeInTheDocument();
     delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView;

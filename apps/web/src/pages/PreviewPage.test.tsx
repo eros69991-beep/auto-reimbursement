@@ -61,6 +61,15 @@ function sampleBatch(overrides: Partial<Batch> = {}): Batch {
   };
 }
 
+// 与真实接口一致：PATCH options 返回保存后的完整批次（选项与每页备注关联按请求落库）
+function echoSave(base: Batch) {
+  return async (_id: string, options: Batch['options'], noteBySheet: Record<string, string | null>) => ({
+    ...base,
+    options,
+    sheets: base.sheets.map((sheet) => ({ ...sheet, noteId: noteBySheet[sheet.id] ?? null })),
+  });
+}
+
 describe('preview page note editing', () => {
   afterEach(() => cleanup());
   beforeEach(() => {
@@ -104,7 +113,12 @@ describe('preview page note editing', () => {
         sheets: [{ ...sampleBatch().sheets[0]!, noteId: 'note-own' }],
       }),
     );
-    updateBatchNote.mockResolvedValue(sampleBatch());
+    const updated = sampleBatch({
+      notes: [{ id: 'note-own', name: '第 1 页手写备注', content: '新内容\n第二行' }],
+      sheets: [{ ...sampleBatch().sheets[0]!, noteId: 'note-own' }],
+    });
+    updateBatchNote.mockResolvedValue(updated);
+    saveBatchOptions.mockImplementation(echoSave(updated));
 
     render(<PreviewPage batchId="batch-1" />);
     fireEvent.click(await screen.findByRole('button', { name: '编辑备注' }));
@@ -114,6 +128,9 @@ describe('preview page note editing', () => {
     fireEvent.click(screen.getByRole('button', { name: '保存' }));
 
     await waitFor(() => expect(updateBatchNote).toHaveBeenCalledWith('batch-1', 'note-own', { content: '新内容\n第二行' }));
+    await waitFor(() =>
+      expect(saveBatchOptions).toHaveBeenCalledWith('batch-1', expect.anything(), expect.objectContaining({ 'sheet-1': 'note-own' })),
+    );
     expect(createBatchNote).not.toHaveBeenCalled();
   });
 
@@ -202,10 +219,12 @@ describe('preview page note editing', () => {
         sheets: [{ ...sampleBatch().sheets[0]!, noteId: 'note-own' }],
       }),
     );
-    updateBatchNote.mockResolvedValue(sampleBatch({
+    const updated = sampleBatch({
       notes: [{ id: 'note-own', name: '第 1 页手写备注', content: '新内容' }],
       sheets: [{ ...sampleBatch().sheets[0]!, noteId: 'note-own' }],
-    }));
+    });
+    updateBatchNote.mockResolvedValue(updated);
+    saveBatchOptions.mockImplementation(echoSave(updated));
 
     render(<PreviewPage batchId="batch-1" />);
     fireEvent.change(await screen.findByLabelText('部门'), { target: { value: '未保存的新部门' } });
@@ -214,7 +233,39 @@ describe('preview page note editing', () => {
     fireEvent.click(screen.getByRole('button', { name: '保存' }));
 
     await waitFor(() => expect(updateBatchNote).toHaveBeenCalledWith('batch-1', 'note-own', { content: '新内容' }));
+    // 保存备注时一并保存本地输入，界面不回写成服务器旧值
+    await waitFor(() =>
+      expect(saveBatchOptions).toHaveBeenCalledWith(
+        'batch-1',
+        expect.objectContaining({ department: '未保存的新部门' }),
+        expect.objectContaining({ 'sheet-1': 'note-own' }),
+      ),
+    );
     await waitFor(() => expect(screen.getByLabelText('部门')).toHaveValue('未保存的新部门'));
+  });
+
+  it('attaches a template to the sheet when it is picked and then edited (review #4)', async () => {
+    // 服务器上本页没有备注；批次里有一条模板快照
+    updateBatchNote.mockImplementation(async (_id: string, noteId: string, input: { content: string }) =>
+      sampleBatch({ notes: [{ id: noteId, name: '通用模板', content: input.content }] }),
+    );
+    saveBatchOptions.mockImplementation(echoSave(sampleBatch({ notes: [{ id: 'note-template', name: '通用模板', content: '模板内容（本月补充说明）' }] })));
+
+    render(<PreviewPage batchId="batch-1" />);
+    fireEvent.change(await screen.findByLabelText('第 1 页备注模板'), { target: { value: 'note-template' } });
+    fireEvent.click(screen.getByRole('button', { name: '编辑备注' }));
+    const textarea = await screen.findByLabelText('备注内容');
+    expect(textarea).toHaveValue('模板内容');
+    fireEvent.change(textarea, { target: { value: '模板内容（本月补充说明）' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存' }));
+
+    // 关联必须落库：本页 → 这条模板备注
+    await waitFor(() =>
+      expect(saveBatchOptions).toHaveBeenCalledWith('batch-1', expect.anything(), expect.objectContaining({ 'sheet-1': 'note-template' })),
+    );
+    await waitFor(() => expect(screen.queryByLabelText('备注内容')).not.toBeInTheDocument());
+    expect(screen.getByLabelText('第 1 页备注模板')).toHaveValue('note-template');
+    expect(screen.queryByText(/有未保存的修改/)).not.toBeInTheDocument();
   });
 });
 
@@ -284,6 +335,36 @@ describe('preview page unsaved-changes handling (P-05)', () => {
     // 服务器返回的旧快照不能覆盖本地未保存输入
     await waitFor(() => expect(screen.getByLabelText('部门')).toHaveValue('未保存的新部门'));
     expect(screen.getByRole('status')).toHaveTextContent('有未保存的修改');
+  });
+
+  it('does not report unsaved changes just because a move added a page', async () => {
+    moveGroup.mockResolvedValue(
+      sampleBatch({
+        sheets: [
+          { id: 'sheet-1', noteId: null, groups: [] },
+          { id: 'sheet-2', noteId: null, groups: [{ category: '百慕达食材', totalFen: 10000, receiptIds: ['a'], amountsFen: [10000] }] },
+        ],
+      }),
+    );
+
+    render(<PreviewPage batchId="batch-1" />);
+    fireEvent.click(await screen.findByRole('button', { name: '下一页' }));
+    await waitFor(() => expect(moveGroup).toHaveBeenCalled());
+    await screen.findByLabelText('第 2 页备注模板');
+    expect(screen.queryByText(/有未保存的修改/)).not.toBeInTheDocument();
+  });
+
+  it('clears an earlier error once a later save succeeds', async () => {
+    saveBatchOptions
+      .mockRejectedValueOnce(Object.assign(new Error('请求参数无效'), { code: 'INVALID_OPTIONS' }))
+      .mockImplementation(echoSave(sampleBatch()));
+
+    render(<PreviewPage batchId="batch-1" />);
+    fireEvent.change(await screen.findByLabelText('部门'), { target: { value: '新部门' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存预览设置' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('请求参数无效');
+    fireEvent.click(screen.getByRole('button', { name: '保存预览设置' }));
+    await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument());
   });
 
   // P-27：快速切换批次时，迟到的旧批次响应不能覆盖新批次

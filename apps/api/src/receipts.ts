@@ -13,7 +13,7 @@ import type { Config } from './config.js';
 import type { Store } from './db.js';
 import { findDuplicates } from './duplicates.js';
 import { recordCorrectionInTransaction } from './learning.js';
-import { safePath, storeImage, type InputImage } from './storage.js';
+import { fileIndexSha256, safePath, storeImage, type InputImage } from './storage.js';
 import { businessMonth } from './time.js';
 
 function rejectionCode(error: unknown): string | null {
@@ -111,7 +111,8 @@ export async function uploadReceipts(
           ownerId: row.id,
           kind: 'original',
           path: original.path,
-          sha256: original.sha256,
+          // 索引记录落盘字节的哈希（去 EXIF 后），导出时按它校验
+          sha256: fileIndexSha256(original),
           deletedAt: null,
         };
         store.put('receipts', row);

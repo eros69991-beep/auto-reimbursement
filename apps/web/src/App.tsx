@@ -13,7 +13,8 @@ import { SettingsPage } from './pages/SettingsPage';
 type NavKey = 'home' | 'upload' | 'pool' | 'pending' | 'preview' | 'history' | 'settings';
 
 // P-28：直接进入 #preview（刷新后内存中没有选中批次）时，
-// 自动跳到最近一个未撤销、未归档的草稿批次；没有草稿才显示引导
+// 自动跳到最近一个未撤销、未归档、尚未生成 PDF 的草稿批次；没有草稿才显示引导。
+// 注意：正常批次没有 cancelledAt 字段（只有撤销时才写入），不能用 === null 判断。
 function LatestDraftPreview({ onResolve }: { onResolve: (id: string) => void }): React.JSX.Element {
   const [state, setState] = useState<'loading' | 'empty'>('loading');
   useEffect(() => {
@@ -21,7 +22,7 @@ function LatestDraftPreview({ onResolve }: { onResolve: (id: string) => void }):
     void api.history().then((months) => {
       const draft = months
         .flatMap((month) => month.batches)
-        .filter((batch) => batch.cancelledAt === null && batch.archivedAt === null)
+        .filter((batch) => !batch.cancelledAt && !batch.archivedAt && batch.pdfPath === null)
         .sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0];
       if (draft !== undefined) {
         onResolve(draft.id);

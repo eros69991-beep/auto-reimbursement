@@ -31,6 +31,7 @@ export function PdfPreview({ url }: { url: string }): React.JSX.Element {
         const document_ = await task.promise;
         const width = container.clientWidth > 0 ? container.clientWidth : 600;
         const pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
+        let sheetIndex = 0;
         for (let pageNumber = 1; pageNumber <= document_.numPages; pageNumber += 1) {
           if (cancelled) return;
           const page = await document_.getPage(pageNumber);
@@ -49,6 +50,14 @@ export function PdfPreview({ url }: { url: string }): React.JSX.Element {
           const context = canvas.getContext('2d');
           if (context === null) throw new Error('CANVAS_UNAVAILABLE');
           await page.render({ canvas, canvasContext: context, viewport }).promise;
+          // 标出第几张报销单（data-sheet-index），供对账区按报销单跳转。
+          // 备注续页、凭证附件页夹在报销单之间，不能用页码推算。
+          const content = await page.getTextContent();
+          const text = content.items.map((item) => ('str' in item ? item.str : '')).join('');
+          if (text.includes('单据及附件共') && text.includes('会计主管')) {
+            canvas.dataset.sheetIndex = String(sheetIndex);
+            sheetIndex += 1;
+          }
           if (cancelled) return;
           container.appendChild(canvas);
         }

@@ -101,6 +101,7 @@ export function PreviewPage({ batchId, onCancelled }: { batchId: string | null; 
       const savedBatch = await api.saveBatchOptions(batch.id, options, notes);
       setBatch(savedBatch);
       setSaved(snapshotOf(savedBatch));
+      setError(null);
       setNotice('已保存');
       setRevision((value) => value + 1);
     } catch (reason) {
@@ -124,6 +125,9 @@ export function PreviewPage({ batchId, onCancelled }: { batchId: string | null; 
           return local === undefined ? sheet : { ...sheet, noteId: local.noteId };
         }),
       });
+      // 移动可能新增或删掉一页；已保存快照要跟随服务器的新页面集合，否则会误报「有未保存的修改」
+      setSaved(snapshotOf(moved));
+      setError(null);
       setRevision((value) => value + 1);
     } catch (reason) {
       setError(errorText(reason, '调整失败'));
@@ -164,6 +168,7 @@ export function PreviewPage({ batchId, onCancelled }: { batchId: string | null; 
       const exported = await api.exportBatch(batch.id);
       setBatch(exported);
       setSaved(snapshotOf(exported));
+      setError(null);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : '生成失败');
     } finally {
@@ -187,28 +192,24 @@ export function PreviewPage({ batchId, onCancelled }: { batchId: string | null; 
   }
 
   // 备注保存：空字符串 = 清空本页备注（解除关联）；有独立备注则就地更新批次快照；
-  // 无备注或备注被其他页共用则新建批次内备注再关联。失败保留弹窗与输入。
+  // 无备注或备注被其他页共用则新建批次内备注。三种情况最后都把「本页用哪条备注」连同
+  // 本地的部门/日期/签名人、其他页的备注选择一起保存——否则「先选模板再编辑备注」时
+  // 只改了模板内容、关联没存上，报销单上不会出现这条备注。失败保留弹窗与输入。
   async function saveSheetNote(sheetId: string, content: string): Promise<void> {
     if (!batch) return;
+    const sheet = batch.sheets.find((item) => item.id === sheetId);
+    if (sheet === undefined) return;
     setBusy(true);
     setNoteError(null);
     try {
-      if (content === '') {
-        const noteBySheet = Object.fromEntries(batch.sheets.map((sheet) => [sheet.id, sheet.noteId]));
-        const persisted = { ...noteBySheet, [sheetId]: null };
-        setBatch(await api.saveBatchOptions(batch.id, batch.options, persisted));
-        // 该调用同时持久化了本地 options，saved 快照同步推进
-        setSaved({ options: batch.options, noteBySheet: persisted });
-      } else {
-        const sheet = batch.sheets.find((item) => item.id === sheetId);
-        if (sheet === undefined) return;
+      let noteId: string | null = null;
+      if (content !== '') {
         const shared =
           sheet.noteId !== null &&
           batch.sheets.some((item) => item.id !== sheetId && item.noteId === sheet.noteId);
         if (sheet.noteId !== null && !shared) {
-          // 保留用户尚未保存的本地选项（部门/日期/签名人），不能用服务器快照覆盖
-          const updated = await api.updateBatchNote(batch.id, sheet.noteId, { content });
-          setBatch({ ...updated, options: batch.options });
+          await api.updateBatchNote(batch.id, sheet.noteId, { content });
+          noteId = sheet.noteId;
         } else {
           const sheetIndex = batch.sheets.findIndex((item) => item.id === sheetId);
           const withNote = await api.createBatchNote(batch.id, {
@@ -219,13 +220,17 @@ export function PreviewPage({ batchId, onCancelled }: { batchId: string | null; 
             (note) => !batch.notes.some((existing) => existing.id === note.id),
           );
           if (created === undefined) throw new Error('备注创建失败');
-          const noteBySheet = Object.fromEntries(withNote.sheets.map((item) => [item.id, item.noteId]));
-          // 用本地当前 options 保存，避免把未保存的部门/签名人输入回写成服务器旧值
-          const persisted = { ...noteBySheet, [sheetId]: created.id };
-          setBatch(await api.saveBatchOptions(batch.id, batch.options, persisted));
-          setSaved({ options: batch.options, noteBySheet: persisted });
+          noteId = created.id;
         }
       }
+      const savedBatch = await api.saveBatchOptions(batch.id, batch.options, {
+        ...noteBySheetOf(batch),
+        [sheetId]: noteId,
+      });
+      setBatch(savedBatch);
+      setSaved(snapshotOf(savedBatch));
+      setError(null);
+      setNotice('已保存');
       setRevision((value) => value + 1);
       setEditingSheetId(null);
     } catch (reason) {
@@ -266,18 +271,20 @@ export function PreviewPage({ batchId, onCancelled }: { batchId: string | null; 
       {error && <p role="alert">{error}</p>}
       <ReconcileWorkspace batch={batch} previewUrl={`${previewUrl}?revision=${revision}`} />
       <p>
+        {/* 草稿打开的是含凭证页的完整预览（未定稿）；左侧对账区只渲染报销单页以提速 */}
         <a
-          href={batch.pdfPath === null ? previewUrl : apiUrl(`/api/batches/${encodeURIComponent(batch.id)}/pdf`)}
+          href={batch.pdfPath === null ? `${previewUrl}?attachments=1` : apiUrl(`/api/batches/${encodeURIComponent(batch.id)}/pdf`)}
           onClick={(event) => {
             event.preventDefault();
-            void openAuthed(
-              batch.pdfPath === null
-                ? `/api/batches/${encodeURIComponent(batch.id)}/preview.pdf`
-                : `/api/batches/${encodeURIComponent(batch.id)}/pdf`,
+            const path = batch.pdfPath === null
+              ? `/api/batches/${encodeURIComponent(batch.id)}/preview.pdf?attachments=1`
+              : `/api/batches/${encodeURIComponent(batch.id)}/pdf`;
+            void openAuthed(path, `报销单-${batch.month}-${batch.id.slice(0, 8)}.pdf`).catch((reason: unknown) =>
+              setError(errorText(reason, '打开 PDF 失败')),
             );
           }}
         >
-          打开或下载 PDF
+          {batch.pdfPath === null ? '预览完整 PDF（未定稿，含凭证页）' : '打开或下载 PDF'}
         </a>
       </p>
       <fieldset disabled={readonly || busy}>

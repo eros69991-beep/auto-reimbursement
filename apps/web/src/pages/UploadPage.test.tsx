@@ -193,12 +193,42 @@ describe('UploadPage', () => {
     });
 
     const failures = await screen.findByRole('list', { name: '上传失败文件' });
-    expect(failures).toHaveTextContent('retry.png：网络错误或服务器不可用');
+    // 显示服务器/网络层给出的真实原因，而不是笼统的「网络错误」
+    expect(failures).toHaveTextContent('retry.png：无法连接服务器，请检查网络后重试');
 
     fireEvent.click(screen.getByRole('button', { name: '重试失败文件' }));
     await waitFor(() => expect(client.upload).toHaveBeenCalledTimes(2));
     expect(client.upload.mock.calls[1]?.[0]).toEqual([file]);
     await waitFor(() => expect(screen.queryByRole('list', { name: '上传失败文件' })).not.toBeInTheDocument());
     expect(await screen.findByRole('list', { name: '已接收文件' })).toHaveTextContent('已接收：retry.png');
+  });
+  it('shows the server reason for a rate-limited batch and keeps earlier results after retrying it', async () => {
+    const client = {
+      upload: vi.fn(async (files: File[]) => {
+        if (files.some((file) => file.name === 'd.png') && client.upload.mock.calls.length <= 2) {
+          throw new Error('上传过于频繁，请稍后再试');
+        }
+        return uploadResult(files.map((file) => `id-${file.name}`));
+      }),
+      progress: vi.fn().mockResolvedValue(emptyProgress),
+      imageUrl: (id: string) => `/api/images/${id}`,
+      receiptOriginalUrl: (id: string) => `/api/receipts/${id}/original-image`,
+    };
+    const files = ['a.png', 'b.png', 'c.png', 'd.png'].map((name) => new File(['x'], name, { type: 'image/png' }));
+
+    render(<UploadPage client={client} />);
+    fireEvent.change(screen.getByLabelText('选择凭证图片'), { target: { files } });
+
+    const failures = await screen.findByRole('list', { name: '上传失败文件' });
+    expect(failures).toHaveTextContent('d.png：上传过于频繁，请稍后再试');
+    expect(screen.getByRole('list', { name: '已接收文件' })).toHaveTextContent('已接收：c.png');
+
+    fireEvent.click(screen.getByRole('button', { name: '重试失败文件' }));
+    await waitFor(() => expect(screen.queryByRole('list', { name: '上传失败文件' })).not.toBeInTheDocument());
+    // 重试成功后追加，之前已接收的 a/b/c 仍在列表里
+    const accepted = screen.getByRole('list', { name: '已接收文件' });
+    for (const name of ['a.png', 'b.png', 'c.png', 'd.png']) {
+      expect(accepted).toHaveTextContent(`已接收：${name}`);
+    }
   });
 });

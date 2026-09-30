@@ -39,6 +39,15 @@ export function safePath(root: string, input: string): string {
   return target;
 }
 
+/**
+ * 文件索引（FileIndexEntry.sha256）必须记录「落盘字节」的哈希，readVerifiedFile 按它校验。
+ * storeImage 会去 EXIF 重编码，落盘字节与上传原始字节不同；ImageRef.sha256 仍是上传指纹（查重用），
+ * 落盘哈希在 fileSha256。旧数据没有 fileSha256，两者相同。
+ */
+export function fileIndexSha256(image: ImageRef): string {
+  return image.fileSha256 ?? image.sha256;
+}
+
 export async function readVerifiedFile(
   config: Config,
   entry: FileIndexEntry,
@@ -161,6 +170,8 @@ export async function storeImage(
     )
     .toBuffer();
   const strippedMetadata = await sharp(stripped).metadata();
+  // 完整性校验按实际写盘的字节计算；不能沿用上传指纹，否则导出时 readVerifiedFile 必然失败
+  const fileSha256 = createHash('sha256').update(stripped).digest('hex');
   await ensureMonthDirs(config.dataDir, month);
 
   let handle;
@@ -190,6 +201,7 @@ export async function storeImage(
     path,
     mime: format.mime,
     sha256: hashes.sha256,
+    fileSha256,
     perceptualHash: hashes.perceptualHash,
     bytes: stripped.length,
     width: strippedMetadata.width ?? metadata.width,

@@ -40,14 +40,16 @@ API 默认监听 `127.0.0.1:3000`，前端默认直接访问
 先部署后端并取得公网域名，再配置 Netlify。当前包含部署修复的分支是
 `feature/mvp-implementation`；若已将它合并到生产分支，则选择合并后的生产分支。
 
-在 Railway 打开后端服务的 **Settings**，逐项填写：
+在 Railway 打开后端服务的 **Settings**，逐项填写。仓库根目录的 `railway.json`
+（配置即代码）会覆盖界面上的 Builder、构建/启动命令、健康检查与重启策略，
+两边的值保持一致即可：
 
 | Railway 字段 | 填写值 |
 | --- | --- |
 | Source / Branch | `feature/mvp-implementation`，或包含这些改动的生产分支 |
 | Root Directory | `/` |
 | Builder | `Railpack` |
-| Build Command | `pnpm install --frozen-lockfile` |
+| Build Command | `pnpm install --frozen-lockfile && pnpm typecheck` |
 | Start Command | `pnpm run start:api` |
 | Healthcheck Path | `/health` |
 | Healthcheck Timeout | `300` 秒 |
@@ -68,9 +70,14 @@ API 默认监听 `127.0.0.1:3000`，前端默认直接访问
 | `AI_MODEL` | `deepseek-v4-flash-vision-exp` | 否 |
 | `AI_API_KEY` | 你自己的 DeepSeek API Key | **是，只在 Railway 中填写** |
 | `CONCURRENCY` | `4`，可选 | 否 |
-| `ACCESS_CODE_SHA256` | 访问码的 SHA-256（`printf '你的访问码' | sha256sum`），设置后全站需要访问码 | **是** |
+| `ACCESS_CODE_SHA256` | 访问码的 SHA-256（生成方法见下方「访问码」），设置后全站需要访问码 | **是** |
 | `TZ` | `Asia/Shanghai`（日志时间戳用北京时间；业务归月已不依赖它） | 否 |
-| `REQUIRE_VOLUME` | `1`：要求 `/app/data/.volume-id` 存在才启动，防止卷未挂载时数据写进容器临时盘 | 否 |
+| `REQUIRE_VOLUME` | `1`：要求 `/app/data/.volume-id` 存在才启动。**必须先按下方 Volume 一节写好标记文件再加**，否则服务会拒绝启动 | 否 |
+| `TRUST_PROXY` | 一般不填：在 Railway 上自动按 1 层代理识别真实客户端 IP（限流按 IP 分桶依赖它）。只有在 Railway 前面再套 Cloudflare 等代理时才填 `2` | 否 |
+
+访问码：建议用随机生成的 16 位以上字符串，例如 `openssl rand -base64 18`。
+计算 SHA-256（注意 `printf` 不带换行）：Mac 用 `printf '你的访问码' | shasum -a 256`，
+Git Bash / Linux 用 `printf '你的访问码' | sha256sum`，取输出第一列的 64 位十六进制。
 
 不要手工添加 `PORT`；Railway 会在运行时自动注入它。根据 2026-09-14 的
 DeepSeek 官方文档，图片输入需要 vision 模型
@@ -93,10 +100,15 @@ SQLite 数据库、上传的原始凭证、退款凭证、签名和导出的 PDF
 应在上传真实凭证之前挂载 Volume。Volume 只在运行时可用，构建阶段不可用，
 因此 Build Command 不应尝试访问 `/app/data`。
 
-设置 `REQUIRE_VOLUME=1` 后，还需在卷根目录写入一次标记文件
-`/app/data/.volume-id`（例如通过一次性 Job 执行 `touch /app/data/.volume-id`），
-否则服务会拒绝启动——这是故意的：卷没挂上时宁可启动失败，也不让数据静默写进
-容器临时盘。
+`REQUIRE_VOLUME=1` 要求卷根目录存在标记文件 `/app/data/.volume-id`，否则服务拒绝
+启动——卷没挂上时宁可启动失败，也不让数据静默写进容器临时盘。顺序很重要：
+
+1. 挂好 Volume，**先不要**设 `REQUIRE_VOLUME`，正常部署并确认 `/health` 返回 200。
+2. 打开这个服务的 Shell（Railway CLI：`railway ssh`），执行 `touch /app/data/.volume-id`。
+3. 再添加变量 `REQUIRE_VOLUME=1`，重新部署，确认 `/health` 仍返回 200。
+
+如果先设了变量、后写标记，新部署会拒绝启动，服务下线后也进不了 Shell 补文件，
+只能先删掉 `REQUIRE_VOLUME` 再按上面的顺序来。
 
 ### Railway 公网域名与健康检查
 
@@ -174,7 +186,10 @@ Volume。复制或恢复数据前应先停止 API，让识别队列与 SQLite �
 
 CORS 只限制其他网页从浏览器读取或提交请求，它不是用户身份验证。当前的身份
 边界是访问码：在 Railway 设置 `ACCESS_CODE_SHA256` 后，所有 API 与图片都需要先
-通过访问码校验（全局限流 + 安全响应头已内置）。访问码解决"陌生访客"，但仍按
+通过访问码校验（安全响应头已内置）。限流按客户端 IP 分桶：访问码错误每个 IP
+15 分钟内最多 30 次；通过鉴权后每个 IP 5 分钟 1200 次请求、10 分钟 200 次上传请求
+（每批 3 张，约 600 张）。按 IP 分桶依赖 `TRUST_PROXY`（见上文），否则所有人会共用
+一份额度。访问码解决"陌生访客"，但仍按
 单人使用设计：没有操作留痕，多人同时编辑同一批次时后写覆盖先写。因此不要公开
 分享访问码，多人或高敏感场景请先完成账号体系设计。启用访问码后建议更换一次
 Railway 公网域名。

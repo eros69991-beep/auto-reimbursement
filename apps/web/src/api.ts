@@ -29,6 +29,8 @@ export function apiUrl(
   path: string,
   baseUrl = configuredApiBaseUrl,
 ): string {
+  // 已经是完整地址时原样返回，避免被再拼一次 base（曾导致对账页凭证图 404）
+  if (/^https?:\/\//i.test(path)) return path;
   return `${normalizeApiBaseUrl(baseUrl)}/${path.replace(/^\/+/, '')}`;
 }
 
@@ -112,11 +114,33 @@ export async function fetchBlobUrl(path: string): Promise<string> {
   return URL.createObjectURL(await response.blob());
 }
 
-/** 带鉴权获取资源并在新标签页打开（用于 PDF、原图等链接）。 */
-export async function openAuthed(path: string): Promise<void> {
-  const url = await fetchBlobUrl(path);
-  window.open(url, '_blank', 'noopener');
-  window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+/**
+ * 带鉴权获取资源并在新标签页打开（用于 PDF、原图等链接）。
+ * 必须在点击事件里同步先开一个空白窗口，下载完再把它导向文件：
+ * 等下载完才 window.open 会超出浏览器允许弹窗的「用户操作」时限，手机上大 PDF 会被静默拦截。
+ * 窗口被拦截时退回为直接下载（带文件名）。
+ */
+export async function openAuthed(path: string, filename?: string): Promise<void> {
+  const target = window.open('', '_blank');
+  if (target !== null) target.opener = null;
+  try {
+    const url = await fetchBlobUrl(path);
+    if (target !== null && !target.closed) {
+      target.location.href = url;
+    } else {
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = filename ?? '';
+      document.body.append(link);
+      link.click();
+      link.remove();
+    }
+    // 给新标签页足够时间加载与另存；过早回收会让另存为/刷新失败
+    window.setTimeout(() => URL.revokeObjectURL(url), 10 * 60_000);
+  } catch (error) {
+    target?.close();
+    throw error;
+  }
 }
 
 // P-12：用 XHR 上传以拿到字节级进度（fetch 不支持上传进度）；

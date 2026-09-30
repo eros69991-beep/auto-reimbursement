@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { CATEGORIES, formatFen, parseFen, type Category, type Receipt } from '@auto-reimbursement/contracts';
-import { api } from '../api';
+import { api, type ReceiptPatch } from '../api';
 
 type EditorProps = { receipt: Receipt; onSaved: (receipt: Receipt) => void };
 
@@ -33,25 +33,21 @@ export function ReceiptEditor({ receipt, onSaved }: EditorProps): React.JSX.Elem
       setError(`实付金额不能小于已登记的退款 ${formatFen(receipt.refundFen)}，请先调整退款`);
       return;
     }
-    // P-11：商户（打印在报销单摘要栏）与日期（参与查重）随确认一起修正
+    // P-11：商户（打印在报销单摘要栏）与日期（参与查重）可随确认一起修正。
+    // 两者选填：AI 没识别出来时不强迫用户编造（编造的商户会进学习规则、印到摘要栏）；留空则保持原值。
     const trimmedMerchant = merchant.trim();
-    if (trimmedMerchant === '') {
-      setError('请输入商户名称');
-      return;
-    }
     if (trimmedMerchant.length > 50) {
       setError('商户名称不能超过 50 字');
       return;
     }
-    if (date === '') {
-      setError('请选择日期');
-      return;
-    }
+    const patch: ReceiptPatch = { paidFen, category };
+    if (trimmedMerchant !== '') patch.merchant = trimmedMerchant;
+    if (date !== '') patch.date = date;
     setBusy(true);
     setError(null);
     // P-10：修改 + 确认一次原子请求；失败时凭证保持原状态，仍可见可重试
     try {
-      onSaved(await api.confirmReceipt(receipt.id, { paidFen, category, merchant: trimmedMerchant, date }));
+      onSaved(await api.confirmReceipt(receipt.id, patch));
     } catch (reason) {
       setError(`确认可报销失败：${message(reason)}`);
     } finally {
@@ -111,8 +107,8 @@ export function ReceiptEditor({ receipt, onSaved }: EditorProps): React.JSX.Elem
 
   return (
     <section className="receipt-editor" aria-label="编辑凭证">
-      <label>商户<input aria-label="商户" maxLength={50} value={merchant} disabled={busy} onChange={(event) => setMerchant(event.target.value)} /></label>
-      <label>日期<input aria-label="日期" type="date" value={date} disabled={busy} onChange={(event) => setDate(event.target.value)} /></label>
+      <label>商户（选填）<input aria-label="商户" maxLength={50} value={merchant} disabled={busy} onChange={(event) => setMerchant(event.target.value)} /></label>
+      <label>日期（选填）<input aria-label="日期" type="date" value={date} disabled={busy} onChange={(event) => setDate(event.target.value)} /></label>
       <label>最终实付金额<input aria-label="最终实付金额" inputMode="decimal" value={amount} disabled={busy} onChange={(event) => setAmount(event.target.value)} /></label>
       <label>分类<select aria-label="分类" value={category} disabled={busy} onChange={(event) => setCategory(event.target.value as Category | '')}>
         <option value="">请选择分类</option>

@@ -36,3 +36,12 @@ it('requires confirmation, cancels a batch and labels preserved historical PDFs 
   expect(screen.getByRole('link', { name: /作废 PDF/ }).getAttribute('href')).toContain('http');
   expect(screen.queryByRole('button', { name: '查看预览' })).not.toBeInTheDocument();
 });
+it('offers unarchive for an archived month even though active batches carry no cancelledAt field', async () => {
+  // 真实接口返回的正常批次没有 cancelledAt 字段（只有撤销后才写入）
+  const archived = { id: 'batch-archived', month: '2026-08', createdAt: '2026-08-31T00:00:00.000Z', totalFen: 3633, items: [], sheets: [], notes: [], options: { department: '', date: null, signerMode: 'text' as const, signerName: '', signature: null }, pdfPath: 'file.pdf', archivedAt: '2026-09-01T00:00:00.000Z' };
+  vi.spyOn(api, 'history').mockResolvedValue([{ month: '2026-08', batches: [archived] }]);
+  const unarchive = vi.spyOn(api, 'unarchive').mockResolvedValue({ affected: 1 });
+  render(<HistoryPage onPreview={() => {}} />);
+  fireEvent.click(await screen.findByRole('button', { name: '取消归档' }));
+  await waitFor(() => expect(unarchive).toHaveBeenCalledWith('2026-08'));
+});
