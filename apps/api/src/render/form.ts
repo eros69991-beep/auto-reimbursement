@@ -360,6 +360,26 @@ interface NotePagination {
   continuation: string[];
 }
 
+const NOTE_LINE_GAP = 4;
+
+// 备注按换行拆成段；末尾的一个换行不多占一行（与 PDFKit 整段量高的结果一致）。
+function noteParagraphs(note: string): string[] {
+  const paragraphs = note.split('\n');
+  if (paragraphs.length > 1 && paragraphs.at(-1) === '') paragraphs.pop();
+  return paragraphs;
+}
+
+// 逐段量高，空段算一行。和 PDFKit 对整段文字量出的高度相同，
+// 但可以配合下面「逐段居中」绘制（见 drawNote）。
+function noteHeight(doc: PDFKit.PDFDocument, note: string, width: number): number {
+  if (note === '') return 0;
+  const emptyLine = doc.currentLineHeight(true) + NOTE_LINE_GAP;
+  return noteParagraphs(note).reduce(
+    (sum, paragraph) => sum + (paragraph === '' ? emptyLine : doc.heightOfString(paragraph, { width, lineGap: NOTE_LINE_GAP })),
+    0,
+  );
+}
+
 // 备注超出批注区时不报错：第一页画放得下的前缀并标注「（接续页）」，剩余内容分页画到续页。
 function paginateNote(
   doc: PDFKit.PDFDocument,
@@ -370,29 +390,27 @@ function paginateNote(
   continuationHeight: number,
 ): NotePagination {
   if (note === '') return { firstPage: '', continuation: [] };
-  const firstOptions = { width: firstWidth, lineGap: 4 };
   doc.fontSize(10);
-  if (doc.heightOfString(note, firstOptions) <= firstHeight) {
+  if (noteHeight(doc, note, firstWidth) <= firstHeight) {
     return { firstPage: note, continuation: [] };
   }
   const suffix = '（接续页）';
-  const fitPrefix = (text: string, options: { width: number; lineGap: number }, height: number): number => {
+  const fitPrefix = (text: string, width: number, height: number): number => {
     let low = 0;
     let high = text.length;
     while (low < high) {
       const mid = Math.ceil((low + high) / 2);
-      if (doc.heightOfString(text.slice(0, mid), options) <= height) low = mid;
+      if (noteHeight(doc, text.slice(0, mid), width) <= height) low = mid;
       else high = mid - 1;
     }
     return low;
   };
-  const prefixLength = fitPrefix(note, firstOptions, firstHeight - doc.heightOfString(suffix, firstOptions) - 4);
+  const prefixLength = fitPrefix(note, firstWidth, firstHeight - noteHeight(doc, suffix, firstWidth) - 4);
   const firstPage = `${note.slice(0, prefixLength)}${suffix}`;
   let rest = note.slice(prefixLength);
   const continuation: string[] = [];
-  const continuationOptions = { width: continuationWidth, lineGap: 4 };
   while (rest.length > 0) {
-    const take = fitPrefix(rest, continuationOptions, continuationHeight);
+    const take = fitPrefix(rest, continuationWidth, continuationHeight);
     if (take === 0) throw new Error('NOTE_OVERFLOW');
     continuation.push(rest.slice(0, take));
     rest = rest.slice(take);
@@ -400,12 +418,29 @@ function paginateNote(
   return { firstPage, continuation };
 }
 
+// 备注在格子里水平、垂直居中（试点反馈）。放不下的部分已由 paginateNote 挪到接续页，
+// 这里只会收到放得下的内容；超出仍抛 NOTE_OVERFLOW，不悄悄画出格子。
+// PDFKit 居中时会把行尾换行符的宽度也算进去，显式换行的那几行会偏左半个字，
+// 所以按段落逐段居中绘制（自动折行的行不受影响）。
 function drawNote(doc: PDFKit.PDFDocument, note: string, x: number, top: number, width: number, height: number): void {
   if (note === '') return;
   doc.fontSize(10);
-  const options = { width: width - 12, lineGap: 4 };
-  if (doc.heightOfString(note, options) > height - 12 + 0.01) throw new Error('NOTE_OVERFLOW');
-  doc.fillColor(BLACK).text(note, x + 6, top + 6, options);
+  const textWidth = width - 12;
+  const total = noteHeight(doc, note, textWidth);
+  if (total > height - 12 + 0.01) throw new Error('NOTE_OVERFLOW');
+  const emptyLine = doc.currentLineHeight(true) + NOTE_LINE_GAP;
+  // 量出的高度在末行之后还带着一个行距，居中要按看得见的高度算
+  let y = top + (height - (total - NOTE_LINE_GAP)) / 2;
+  doc.fillColor(BLACK);
+  for (const paragraph of noteParagraphs(note)) {
+    if (paragraph === '') {
+      y += emptyLine;
+      continue;
+    }
+    const options = { width: textWidth, lineGap: NOTE_LINE_GAP, align: 'center' as const };
+    doc.text(paragraph, x + 6, y, options);
+    y += doc.heightOfString(paragraph, options);
+  }
 }
 
 function drawNoteContinuationPages(doc: PDFKit.PDFDocument, pages: string[]): void {

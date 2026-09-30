@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+
 import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import sharp from 'sharp';
 import { describe, expect, it } from 'vitest';
@@ -179,5 +182,101 @@ describe('Chinese reimbursement form', () => {
     } finally {
       store.close();
     }
+  });
+});
+
+// 试点反馈：备注在格子里水平、垂直居中（之前偏左上）。
+describe('note box centering', () => {
+  const geometry = JSON.parse(
+    readFileSync(join(__dirname, '../assets/form-geometry.json'), 'utf8'),
+  ) as {
+    page: { height: number };
+    table: { x: number; y: number; width: number; notesSplitY: number; columns: { notes: number } };
+  };
+  const mm = (value: number): number => (value * 72) / 25.4;
+  const cellLeft = mm(geometry.table.x + geometry.table.width - geometry.table.columns.notes);
+  const cellRight = mm(geometry.table.x + geometry.table.width);
+  const cellCenterX = (cellLeft + cellRight) / 2;
+  // pdf.js 的纵坐标从页面底部向上数
+  const cellTop = mm(geometry.page.height) - mm(geometry.table.y);
+  const cellBottom = mm(geometry.page.height) - mm(geometry.table.notesSplitY);
+  const cellCenterY = (cellTop + cellBottom) / 2;
+
+  interface Line { text: string; centerX: number; baseline: number }
+
+  async function noteLines(note: string): Promise<Line[]> {
+    const store = openStore(':memory:');
+    try {
+      store.put('receipts', sampleReceipt({ id: 'centered', paidFen: 100, category: '耗材' }));
+      const batch = createBatch(
+        store,
+        ['centered'],
+        { department: '', date: null, signerMode: 'text', signerName: '', signature: null },
+        new Date('2026-09-04T00:00:00.000Z'),
+      );
+      const noted = {
+        ...batch,
+        notes: [{ id: 'note-centered', name: '居中', content: note }],
+        sheets: [{ ...batch.sheets[0]!, noteId: 'note-centered' }],
+      };
+      const doc = createFormDocument();
+      const chunks: Buffer[] = [];
+      doc.on('data', (chunk: Buffer) => chunks.push(chunk));
+      const done = new Promise<Buffer>((resolve) => doc.on('end', () => resolve(Buffer.concat(chunks))));
+      drawForm(doc, noted, noted.sheets[0]!, null);
+      doc.end();
+      const pdf = await getDocument({ data: new Uint8Array(await done), useSystemFonts: false }).promise;
+      const content = await (await pdf.getPage(1)).getTextContent();
+      return content.items.flatMap((item) => {
+        if (!('str' in item) || item.str.trim() === '') return [];
+        const [, , , , x, baseline] = item.transform as number[];
+        const centerX = x! + item.width / 2;
+        const inside = centerX > cellLeft && centerX < cellRight && baseline! < cellTop && baseline! > cellBottom;
+        return inside ? [{ text: item.str, centerX, baseline: baseline! }] : [];
+      }).sort((left, right) => right.baseline - left.baseline);
+    } finally {
+      store.close();
+    }
+  }
+
+  // 字形的视觉中心大约在基线上方 0.35 个字号
+  const visualCenter = (lines: Line[]): number =>
+    (lines[0]!.baseline + lines.at(-1)!.baseline) / 2 + 3.5;
+
+  it('centers a one-line note in the note cell both ways', async () => {
+    const lines = await noteLines('居中测试');
+    expect(lines).toHaveLength(1);
+    expect(Math.abs(lines[0]!.centerX - cellCenterX)).toBeLessThan(0.6);
+    expect(Math.abs(visualCenter(lines) - cellCenterY)).toBeLessThan(2.5);
+  });
+
+  it('centers every line of a multi-line note, including lines ended by an explicit newline', async () => {
+    const lines = await noteLines('第一行\n第二行文字更长\n第三行');
+    expect(lines.map((line) => line.text)).toEqual(['第一行', '第二行文字更长', '第三行']);
+    for (const line of lines) {
+      // PDFKit 原本会把行尾换行符的宽度算进去，让前两行偏左半个字
+      expect(Math.abs(line.centerX - cellCenterX)).toBeLessThan(0.6);
+    }
+    expect(Math.abs(visualCenter(lines) - cellCenterY)).toBeLessThan(2.5);
+  });
+
+  it('keeps blank lines as spacing and centers a long wrapped line', async () => {
+    const spaced = await noteLines('甲\n\n乙');
+    expect(spaced.map((line) => line.text)).toEqual(['甲', '乙']);
+    // 中间空一行：两行基线相差两个行距
+    expect(spaced[0]!.baseline - spaced[1]!.baseline).toBeCloseTo(2 * 18.48, 1);
+    expect(Math.abs(visualCenter(spaced) - cellCenterY)).toBeLessThan(2.5);
+
+    const wrapped = await noteLines('很长的一行备注文字'.repeat(6));
+    expect(wrapped.length).toBeGreaterThan(1);
+    for (const line of wrapped) expect(Math.abs(line.centerX - cellCenterX)).toBeLessThan(0.6);
+    expect(Math.abs(visualCenter(wrapped) - cellCenterY)).toBeLessThan(2.5);
+  });
+
+  it('does not add a phantom line for a trailing newline', async () => {
+    const plain = await noteLines('只有一行');
+    const trailing = await noteLines('只有一行\n');
+    expect(trailing).toHaveLength(1);
+    expect(trailing[0]!.baseline).toBeCloseTo(plain[0]!.baseline, 1);
   });
 });
