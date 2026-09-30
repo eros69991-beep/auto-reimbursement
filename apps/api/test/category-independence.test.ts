@@ -151,7 +151,8 @@ describe('百慕达食材与食材分类独立', () => {
     expect(rules[0]!.strong).toBe(true);
     expect(rules[0]!.category).toBe('百慕达食材');
 
-    // 新凭证同商家但 AI 说食材：规则只产生冲突待确认，不改写类别、不静默放行
+    // 新凭证同商家但 AI 说食材：学习规则只产生冲突待确认，不改写类别、不静默放行；
+    // 规则的分类作为建议附上，由人一键选择（试点反馈：冲突时 AI 也可能是对的）
     const decision = decide(
       analysisOf('食材', '50.00', '百慕达供应'),
       rules,
@@ -160,6 +161,7 @@ describe('百慕达食材与食材分类独立', () => {
     expect(decision.status).toBe('pending');
     expect(decision.reasons).toContain('rule_conflict');
     expect(decision.category).toBe('食材');
+    expect(decision.ruleMatch).toMatchObject({ mode: 'suggested', category: '百慕达食材' });
 
     // 精确匹配先于包含：「食材」规则不匹配「百慕达供应」商家以外的语义，归一化不裁剪
     const other = decide(
@@ -169,6 +171,30 @@ describe('百慕达食材与食材分类独立', () => {
     );
     expect(other.status).toBe('ready');
     expect(other.category).toBe('百慕达食材');
+  });
+
+  it('lets a fixed rule file 武汉仓 orders under 百慕达食材 even when the AI says 食材', () => {
+    // 固定规则（设置页手动添加）是唯一会改写 AI 分类的规则，优先级：人工 > 固定规则 > AI
+    store.put('rules', {
+      id: 'fixed-wuhan',
+      kind: 'keyword',
+      key: '武汉仓',
+      originalCategory: null,
+      category: '百慕达食材',
+      confirmations: 0,
+      strong: false,
+      updatedAt: '2026-09-30T00:00:00.000Z',
+      source: 'manual',
+    });
+    store.put('receipts', sampleReceipt({ id: 'wuhan', status: 'recognizing', category: null, paidFen: null, recognizedFen: null }));
+
+    const receipt = applyAnalysis(store, 'wuhan', {
+      ...analysisOf('食材', '624.61', '武汉仓'),
+      confidence: { amount: 0.99, category: 0.55 },
+    });
+
+    expect(receipt).toMatchObject({ status: 'ready', category: '百慕达食材' });
+    expect(receipt.analysis?.category).toBe('食材');
   });
 
   async function seedReceipt(id: string, overrides: Partial<Receipt> = {}): Promise<ImageRef> {

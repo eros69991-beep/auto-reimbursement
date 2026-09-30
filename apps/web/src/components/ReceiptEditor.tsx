@@ -12,6 +12,8 @@ export function ReceiptEditor({ receipt, onSaved }: EditorProps): React.JSX.Elem
   const [refund, setRefund] = useState(formatFen(receipt.refundFen));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // 学习规则与 AI 冲突时的建议分类：分类保持 AI 的判断，这里给一键改用
+  const suggestion = receipt.ruleMatch?.mode === 'suggested' ? receipt.ruleMatch : null;
 
   function message(reason: unknown): string {
     return reason instanceof Error ? reason.message : '请求失败';
@@ -114,6 +116,14 @@ export function ReceiptEditor({ receipt, onSaved }: EditorProps): React.JSX.Elem
         <option value="">请选择分类</option>
         {CATEGORIES.map((value) => <option key={value} value={value}>{value}</option>)}
       </select></label>
+      {suggestion !== null && category !== suggestion.category && (
+        <p className="rule-note">
+          历史规则「{suggestion.key}」建议归「{suggestion.category}」{' '}
+          <button type="button" disabled={busy} onClick={() => setCategory(suggestion.category)}>
+            改用规则分类：{suggestion.category}
+          </button>
+        </p>
+      )}
       <button type="button" disabled={busy} onClick={() => void confirm()}>确认可报销</button>
       <div className="refund-editor">
         <label>退款金额<input aria-label="退款金额" inputMode="decimal" value={refund} disabled={busy} onChange={(event) => setRefund(event.target.value)} /></label>

@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 
 import { createApp } from '../src/app.js';
 import { createAnalyzer, getApiStatus } from '../src/ai/openai-compatible.js';
-import { RECEIPT_PROMPT } from '../src/ai/prompt.js';
+import { CATEGORY_HINTS, RECEIPT_PROMPT } from '../src/ai/prompt.js';
 import { AiError } from '../src/ai/types.js';
 import { validateAnalysis } from '../src/ai/validate.js';
 import type { Config } from '../src/config.js';
@@ -291,6 +291,18 @@ describe('OpenAI-compatible receipt analyzer', () => {
     }
     expect(RECEIPT_PROMPT).toContain('amount=null');
     expect(RECEIPT_PROMPT).toContain('ambiguous=true');
+  });
+
+  it('explains every category so 百慕达食材 is not confused with 食材', () => {
+    for (const category of CATEGORIES) {
+      expect(CATEGORY_HINTS[category].length).toBeGreaterThan(0);
+      expect(RECEIPT_PROMPT).toContain(`- ${category}：${CATEGORY_HINTS[category]}`);
+    }
+    expect(CATEGORY_HINTS.百慕达食材).toContain('武汉仓');
+    expect(CATEGORY_HINTS.百慕达食材).toContain('酒水');
+    // AI 必须把仓库/小程序名写进商户和关键词，固定规则和学习规则才有得匹配
+    expect(RECEIPT_PROMPT).toContain('merchant 填图中显示的店铺名、小程序名或仓库名');
+    expect(RECEIPT_PROMPT).toContain('keywords 必须包含');
   });
 
   it('rejects unknown response content forms as retryable invalid responses', async () => {

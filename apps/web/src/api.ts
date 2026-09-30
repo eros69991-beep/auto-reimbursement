@@ -301,6 +301,8 @@ function deleteNote(id: string): Promise<void> { return requestJson(`/api/notes/
 function rules(): Promise<Rule[]> { return requestJson('/api/rules'); }
 function saveRule(rule: Rule): Promise<Rule> { return requestJson(`/api/rules/${encodeURIComponent(rule.id)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(rule) }); }
 function deleteRule(id: string): Promise<void> { return requestJson(`/api/rules/${encodeURIComponent(id)}`, { method: 'DELETE' }); }
+// 规则改动后对待处理凭证重新套用（不调用 AI），返回有变化的张数
+function reapplyRules(): Promise<MaintenanceResult> { return requestJson('/api/rules/reapply', { method: 'POST' }); }
 function apiStatus(): Promise<import('@auto-reimbursement/contracts').ApiStatus> { return requestJson('/api/ai/status'); }
 function archive(month: string): Promise<MaintenanceResult> { return requestJson(`/api/archive/${encodeURIComponent(month)}`, { method: 'POST' }); }
 function unarchive(month: string): Promise<MaintenanceResult> { return requestJson(`/api/unarchive/${encodeURIComponent(month)}`, { method: 'POST' }); }
@@ -362,6 +364,7 @@ export const api = {
   rules,
   saveRule,
   deleteRule,
+  reapplyRules,
   apiStatus,
   archive,
   unarchive,

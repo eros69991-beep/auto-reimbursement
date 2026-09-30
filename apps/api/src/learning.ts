@@ -1,5 +1,7 @@
 import {
   CATEGORIES,
+  isManualRule,
+  MIN_MANUAL_RULE_KEY_LENGTH,
   type Category,
   type Receipt,
   type Rule,
@@ -38,6 +40,10 @@ export function recordCorrectionInTransaction(
 
   const ruleId = `${feature.kind}:${feature.key}`;
   const previous = store.get('rules', ruleId);
+  // 已被用户设为固定规则的特征，不再被确认记录改写（否则一次手动改类会把固定规则悄悄改回学习规则）
+  if (previous !== null && isManualRule(previous)) {
+    return previous;
+  }
   if (!store.recordConfirmation(id, category)) {
     return previous;
   }
@@ -68,7 +74,11 @@ export function saveRule(store: Store, rule: Rule): Rule {
   if (rule.kind !== 'merchant' && rule.kind !== 'keyword') {
     throw new Error('INVALID_RULE_KIND');
   }
-  if (normalizeFeature(rule.key) === '') {
+  if (rule.source !== undefined && rule.source !== 'manual' && rule.source !== 'learned') {
+    throw new Error('INVALID_RULE_SOURCE');
+  }
+  const key = normalizeFeature(rule.key);
+  if (key === '') {
     throw new Error('INVALID_RULE_KEY');
   }
   if (
@@ -81,10 +91,19 @@ export function saveRule(store: Store, rule: Rule): Rule {
   if (rule.originalCategory !== null) {
     assertCategory(rule.originalCategory);
   }
+  if (isManualRule(rule)) {
+    // 固定规则保存即生效，不需要确认次数；「强规则」只对学习规则有意义
+    if ([...key].length < MIN_MANUAL_RULE_KEY_LENGTH) {
+      throw new Error('RULE_KEY_TOO_SHORT');
+    }
+    const saved: Rule = { ...rule, key, strong: false };
+    store.put('rules', saved);
+    return saved;
+  }
   if (rule.strong && rule.confirmations < 3) {
     throw new Error('INVALID_STRONG_RULE');
   }
-  const saved: Rule = { ...rule, key: normalizeFeature(rule.key) };
+  const saved: Rule = { ...rule, key };
   store.put('rules', saved);
   return saved;
 }

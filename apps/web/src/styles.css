@@ -155,6 +155,15 @@ fieldset { margin: 1rem 0; }
 .note-hint { margin: .4rem 0; font-size: .85rem; color: #5b6472; }
 .modal-actions { position: sticky; bottom: 0; display: flex; gap: .5rem; padding-top: .5rem; background: #fff; }
 
+/* 分类规则（设置页）：列表而非表格，手机上不横向溢出 */
+.rules-editor ul { margin: .5rem 0; padding: 0; list-style: none; }
+.rules-editor li { display: flex; flex-wrap: wrap; align-items: center; gap: .25rem .5rem; padding: .5rem 0; border-bottom: 1px solid #d9e0ea; }
+.rules-editor li > span { flex: 1 1 14rem; min-width: 0; overflow-wrap: anywhere; }
+.rules-editor small { color: #5b6472; }
+.rule-draft { margin: .75rem 0; padding: .75rem; background: #fff; border: 1px solid #d9e0ea; border-radius: .75rem; }
+.rule-hint { margin: .4rem 0; font-size: .85rem; color: #5b6472; }
+.rule-note { margin: .25rem 0; font-size: .9rem; color: #174a7e; overflow-wrap: anywhere; }
+
 /* 同屏对账工作区：窄屏上下分区（Task 06 微调比例），宽屏左右双栏各自滚动 */
 .reconcile { display: flex; flex-direction: column; gap: 1rem; }
 .reconcile-rows { display: flex; flex-wrap: wrap; gap: .5rem; margin: 0 0 .75rem; padding: 0; list-style: none; }

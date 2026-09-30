@@ -1,10 +1,13 @@
 import {
+  isManualRule,
+  MIN_MANUAL_RULE_KEY_LENGTH,
   parseFen,
   type Analysis,
   type Category,
   type Reason,
   type Receipt,
   type Rule,
+  type RuleMatch,
   type Settings,
 } from '@auto-reimbursement/contracts';
 
@@ -20,11 +23,39 @@ export type Decision = {
   status: 'ready' | 'pending';
   reasons: Reason[];
   category: Category | null;
+  /** 只在规则起作用时出现：固定规则决定了分类，或学习规则与 AI 不一致时给出的建议。 */
+  ruleMatch?: RuleMatch;
 };
 
+/**
+ * 分类决策。优先级：人工确认（不经过这里）> 固定规则 > AI。
+ * - 固定规则（设置页手动添加）命中就直接定分类，只剩金额需要把关。
+ * - 学习到的强规则只能放行或报冲突，不改写分类；冲突时把规则的分类作为建议附上，由人一键选择。
+ */
 export function decide(
   analysis: Analysis,
   rules: Rule[],
+  settings: Settings,
+): Decision {
+  const manualMatches = rules.filter(
+    (rule) => isManualRule(rule) && matchesManualRule(rule, analysis),
+  );
+  if (manualMatches.length > 0) {
+    return decideByManualRules(analysis, manualMatches, settings);
+  }
+  const strongMatches = rules.filter(
+    (rule) => !isManualRule(rule) && rule.strong && matchesRule(rule, analysis),
+  );
+  return withSuggestion(
+    decideByAi(analysis, strongMatches, settings),
+    strongMatches,
+    analysis.category,
+  );
+}
+
+function decideByAi(
+  analysis: Analysis,
+  matchingStrongRules: Rule[],
   settings: Settings,
 ): Decision {
   if (analysis.ambiguous) {
@@ -43,9 +74,6 @@ export function decide(
     return pending(confidenceReasons(analysis, settings), analysis.category);
   }
 
-  const matchingStrongRules = rules.filter(
-    (rule) => rule.strong && matchesRule(rule, analysis),
-  );
   if (
     matchingStrongRules.some((rule) => rule.category !== analysis.category) ||
     new Set(matchingStrongRules.map((rule) => rule.category)).size > 1
@@ -64,6 +92,55 @@ export function decide(
     return ready(analysis.category);
   }
   return pending(confidenceReasons(analysis, settings), analysis.category);
+}
+
+function decideByManualRules(
+  analysis: Analysis,
+  matches: Rule[],
+  settings: Settings,
+): Decision {
+  const amountReasons = amountUncertainty(analysis, settings);
+  if (new Set(matches.map((rule) => rule.category)).size > 1) {
+    // 多条固定规则给出不同分类：不替用户挑，保留 AI 的判断交给人工
+    return pending(['rule_conflict', ...amountReasons], analysis.category);
+  }
+  const rule = [...matches].sort(compareRules)[0]!;
+  const ruleMatch: RuleMatch = {
+    mode: 'applied',
+    ruleId: rule.id,
+    key: rule.key,
+    category: rule.category,
+  };
+  if (amountReasons.length > 0) {
+    return { ...pending(amountReasons, rule.category), ruleMatch };
+  }
+  return { ...ready(rule.category), ruleMatch };
+}
+
+// 学习规则一致给出同一个、且与 AI 不同的分类时，附上建议；分类本身保持 AI 的判断。
+// （试点反馈里的冲突，AI 判断的酒水才是对的，所以不预选规则分类，两边都给一键可选。）
+function withSuggestion(
+  decision: Decision,
+  strongMatches: Rule[],
+  aiCategory: Category | null,
+): Decision {
+  if (decision.status !== 'pending' || strongMatches.length === 0) {
+    return decision;
+  }
+  const categories = new Set(strongMatches.map((rule) => rule.category));
+  if (categories.size !== 1 || categories.has(aiCategory as Category)) {
+    return decision;
+  }
+  const rule = [...strongMatches].sort(compareRules)[0]!;
+  return {
+    ...decision,
+    ruleMatch: {
+      mode: 'suggested',
+      ruleId: rule.id,
+      key: rule.key,
+      category: rule.category,
+    },
+  };
 }
 
 export function applyAnalysis(
@@ -94,6 +171,7 @@ export function applyAnalysis(
       pendingReasons: decision.reasons,
       duplicateIds: [],
       nextAttemptAt: null,
+      ruleMatch: decision.ruleMatch ?? null,
     };
     const duplicateIds = refineDuplicates(store, analyzed);
     const duplicateReasons: Reason[] =
@@ -119,6 +197,85 @@ export function applyAnalysis(
   });
 }
 
+const DECISION_REASONS: ReadonlySet<Reason> = new Set<Reason>([
+  'amount_uncertain',
+  'category_uncertain',
+  'ambiguous_amount',
+  'rule_conflict',
+]);
+
+/**
+ * 设置页「套用到待处理」：规则改动后，用已保存的识别结果重新走一遍分类决策（不调用 AI）。
+ * 只处理仍保持识别原样的待处理凭证——人工改过金额或分类的、疑似重复、识别失败的都不动。
+ * 返回有变化的凭证数。
+ */
+export function reapplyRules(store: Store): number {
+  return store.transact(() => {
+    const rules = store.list('rules');
+    const settings = getSettings(store);
+    let affected = 0;
+    for (const receipt of store.list('receipts')) {
+      if (!canReapply(receipt)) {
+        continue;
+      }
+      const decision = decide(receipt.analysis!, rules, settings);
+      const next: Receipt = {
+        ...receipt,
+        category: decision.category,
+        status: decision.status,
+        pendingReasons: decision.reasons,
+        ruleMatch: decision.ruleMatch ?? null,
+      };
+      if (next.status === 'ready' && (next.paidFen === null || next.category === null)) {
+        continue;
+      }
+      if (sameDecision(receipt, next)) {
+        continue;
+      }
+      store.put('receipts', next);
+      affected += 1;
+    }
+    return affected;
+  });
+}
+
+function canReapply(receipt: Receipt): boolean {
+  if (
+    receipt.status !== 'pending' ||
+    receipt.deletedAt !== null ||
+    receipt.batchId !== null ||
+    receipt.archivedAt !== null ||
+    receipt.analysis === null ||
+    receipt.duplicateIds.length > 0
+  ) {
+    return false;
+  }
+  // 原因为空是「修改待确认」：人工改过，交给人确认
+  if (
+    receipt.pendingReasons.length === 0 ||
+    !receipt.pendingReasons.every((reason) => DECISION_REASONS.has(reason))
+  ) {
+    return false;
+  }
+  if (receipt.paidFen !== receipt.recognizedFen) {
+    return false;
+  }
+  const automaticCategory =
+    receipt.ruleMatch?.mode === 'applied'
+      ? receipt.ruleMatch.category
+      : receipt.analysis.category;
+  return receipt.category === automaticCategory;
+}
+
+function sameDecision(left: Receipt, right: Receipt): boolean {
+  return (
+    left.category === right.category &&
+    left.status === right.status &&
+    JSON.stringify(left.pendingReasons) === JSON.stringify(right.pendingReasons) &&
+    JSON.stringify(left.ruleMatch ?? null) === JSON.stringify(right.ruleMatch ?? null)
+  );
+}
+
 function ready(category: Category): Decision {
   return { status: 'ready', reasons: [], category };
 }
@@ -138,6 +295,21 @@ function confidenceReasons(analysis: Analysis, settings: Settings): Reason[] {
   return reasons;
 }
 
+// 固定规则只替代分类判断，金额仍按原标准把关
+function amountUncertainty(analysis: Analysis, settings: Settings): Reason[] {
+  if (analysis.ambiguous) {
+    return ['ambiguous_amount'];
+  }
+  if (
+    analysis.amount === null ||
+    analysis.confidence.amount < AMOUNT_FLOOR ||
+    analysis.confidence.amount < settings.amountThreshold
+  ) {
+    return ['amount_uncertain'];
+  }
+  return [];
+}
+
 function matchesRule(rule: Rule, analysis: Analysis): boolean {
   if (rule.kind === 'merchant') {
     return (
@@ -149,6 +321,32 @@ function matchesRule(rule: Rule, analysis: Analysis): boolean {
   return (
     key !== '' &&
     analysis.keywords.some((keyword) => normalizeFeature(keyword) === key)
+  );
+}
+
+// 固定规则按「包含」匹配（忽略空格与全半角、大小写）：
+// 商户规则只看商户；关键词规则看商户、关键词和识别原文。
+export function matchesManualRule(rule: Rule, analysis: Analysis): boolean {
+  const key = compact(rule.key);
+  if ([...key].length < MIN_MANUAL_RULE_KEY_LENGTH) {
+    return false;
+  }
+  const texts =
+    rule.kind === 'merchant'
+      ? [analysis.merchant ?? '']
+      : [analysis.merchant ?? '', ...analysis.keywords, analysis.evidence];
+  return texts.some((text) => compact(text).includes(key));
+}
+
+function compact(value: string): string {
+  return normalizeFeature(value).replace(/\s+/g, '');
+}
+
+// 多条同类规则同时命中时取文字最长（最具体）的一条，其次按 id，保证结果稳定
+function compareRules(left: Rule, right: Rule): number {
+  return (
+    [...right.key].length - [...left.key].length ||
+    left.id.localeCompare(right.id)
   );
 }
 

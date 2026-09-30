@@ -30,6 +30,7 @@ import {
 } from './batches.js';
 import type { Config } from './config.js';
 import type { Store } from './db.js';
+import { reapplyRules } from './decision.js';
 import { HttpError, toHttpError } from './errors.js';
 import { logger } from './logger.js';
 import { confirmDistinct } from './duplicates.js';
@@ -581,6 +582,15 @@ export function createRouter(
     response.json(listRules(store));
   });
 
+  // 规则改动后，对仍保持识别原样的待处理凭证重新套用规则（不调用 AI）
+  router.post('/rules/reapply', (_request, response, next) => {
+    try {
+      response.json({ affected: reapplyRules(store) });
+    } catch (error) {
+      next(correctionHttpError(error));
+    }
+  });
+
   router.put('/rules/:id', (request, response, next) => {
     try {
       response.json(
@@ -643,11 +653,12 @@ function ruleFromRequest(id: string, body: unknown): Rule {
     (value.originalCategory !== null &&
       typeof value.originalCategory !== 'string') ||
     typeof value.confirmations !== 'number' ||
-    typeof value.strong !== 'boolean'
+    typeof value.strong !== 'boolean' ||
+    (value.source !== undefined && value.source !== 'manual' && value.source !== 'learned')
   ) {
     throw new Error('INVALID_RULE');
   }
-  return {
+  const rule: Rule = {
     id,
     kind: value.kind,
     key: value.key,
@@ -657,6 +668,10 @@ function ruleFromRequest(id: string, body: unknown): Rule {
     strong: value.strong,
     updatedAt: new Date().toISOString(),
   };
+  if (value.source !== undefined) {
+    rule.source = value.source;
+  }
+  return rule;
 }
 
 // P-11：PATCH/confirm 除 paidFen/category 外还接受 merchant（≤50 字）和 date（YYYY-MM-DD）

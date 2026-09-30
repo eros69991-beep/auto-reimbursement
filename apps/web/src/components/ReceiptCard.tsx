@@ -33,6 +33,9 @@ export function ReceiptCard({ receipt, children }: { receipt: Receipt; children?
           <span className="status-badge">{STATUS_LABELS[receipt.status]}</span>
         </div>
         <p>{receipt.date ?? '日期待确认'} · {receipt.category ?? '分类待确认'}</p>
+        {receipt.ruleMatch?.mode === 'applied' && receipt.ruleMatch.category === receipt.category && (
+          <p className="rule-note">按固定规则「{receipt.ruleMatch.key}」归类</p>
+        )}
         <dl className="receipt-amounts">
           <div aria-label={`原金额：${originalAmount}`}><dt>原金额：</dt><dd>{originalAmount}</dd></div>
           <div aria-label={`已退款：${formatFen(receipt.refundFen)}`}><dt>已退款：</dt><dd>{formatFen(receipt.refundFen)}</dd></div>

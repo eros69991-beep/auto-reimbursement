@@ -12,8 +12,16 @@ const labels: Record<Reason, string> = {
   suspected_duplicate: '疑似重复',
   ambiguous_amount: '存在多个支付金额',
   unreadable: '图片无法读取',
-  rule_conflict: '历史规则冲突',
+  rule_conflict: '分类规则冲突',
 };
+
+// 学习规则与 AI 判断不一致时，把两边说清楚，编辑框里可一键改用规则的分类
+function reasonLabel(receipt: Receipt, reason: Reason): string {
+  if (reason === 'rule_conflict' && receipt.ruleMatch?.mode === 'suggested') {
+    return `历史规则冲突：「${receipt.ruleMatch.key}」以前都归「${receipt.ruleMatch.category}」，这次 AI 判断为「${receipt.category ?? '未识别'}」`;
+  }
+  return labels[reason];
+}
 
 export function PendingPage(): React.JSX.Element {
   const [rows, setRows] = useState<Receipt[]>([]);
@@ -90,7 +98,7 @@ export function PendingPage(): React.JSX.Element {
         {rows.map((receipt) => <ReceiptCard key={receipt.id} receipt={receipt}>
           <ul className="reason-list" aria-label="待处理原因">{receipt.pendingReasons.length === 0
             ? <li>修改待确认</li>
-            : receipt.pendingReasons.map((reason) => <li key={reason}>{labels[reason]}</li>)}</ul>
+            : receipt.pendingReasons.map((reason) => <li key={reason}>{reasonLabel(receipt, reason)}</li>)}</ul>
           {receipt.pendingReasons.includes('suspected_duplicate') && <>
             {receipt.duplicateIds.map((id) => <a key={id} href={api.receiptOriginalUrl(id)} onClick={(event) => { event.preventDefault(); void api.openAuthed(`/api/receipts/${encodeURIComponent(id)}/original-image`); }}>查看历史凭证</a>)}
             <button type="button" onClick={() => void confirmDistinct(receipt.id)}>确认不是重复，继续加入</button>

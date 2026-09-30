@@ -96,6 +96,8 @@ export interface Receipt {
   archivedAt: string | null;
   statusBeforeArchive: Status | null;
   deletedAt: string | null;
+  /** 规则对本张分类的影响，供界面说明；旧数据没有此字段。 */
+  ruleMatch?: RuleMatch | null;
 }
 
 export interface Rule {
@@ -107,6 +109,26 @@ export interface Rule {
   confirmations: number;
   strong: boolean;
   updatedAt: string;
+  /**
+   * 规则来源。'manual'：设置页手动添加的固定规则——保存即生效，按「包含」匹配，命中就直接决定分类。
+   * 缺省或 'learned'：确认分类时自动学到的规则（旧数据没有此字段）。
+   */
+  source?: 'manual' | 'learned';
+}
+
+export interface RuleMatch {
+  /** applied：固定规则直接决定了分类；suggested：学习到的强规则与 AI 判断不一致，只作为可一键采用的建议。 */
+  mode: 'applied' | 'suggested';
+  ruleId: string;
+  key: string;
+  category: Category;
+}
+
+/** 固定规则的文字至少 2 个字，避免「肉」这类单字把大量凭证误归类。 */
+export const MIN_MANUAL_RULE_KEY_LENGTH = 2;
+
+export function isManualRule(rule: Pick<Rule, 'source'>): boolean {
+  return rule.source === 'manual';
 }
 
 export interface Note {

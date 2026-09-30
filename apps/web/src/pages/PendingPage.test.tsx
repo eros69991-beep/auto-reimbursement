@@ -134,6 +134,33 @@ describe('PendingPage', () => {
     expect(mockedApi.updateReceipt).not.toHaveBeenCalled();
   });
 
+  it('spells out a learned rule conflict and notes when a fixed rule chose the category', async () => {
+    mockedApi.receipts.mockResolvedValue([
+      receipt({
+        id: 'conflict',
+        status: 'pending',
+        merchant: '武汉仓',
+        category: '酒水',
+        pendingReasons: ['rule_conflict'],
+        ruleMatch: { mode: 'suggested', ruleId: 'merchant:武汉仓', key: '武汉仓', category: '百慕达食材' },
+      }),
+      receipt({
+        id: 'fixed',
+        status: 'pending',
+        category: '百慕达食材',
+        pendingReasons: ['amount_uncertain'],
+        ruleMatch: { mode: 'applied', ruleId: 'fixed-1', key: '武汉仓', category: '百慕达食材' },
+      }),
+    ]);
+    render(<PendingPage />);
+
+    expect(
+      await screen.findByText('历史规则冲突：「武汉仓」以前都归「百慕达食材」，这次 AI 判断为「酒水」'),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '改用规则分类：百慕达食材' })).toBeInTheDocument();
+    expect(screen.getByText('按固定规则「武汉仓」归类')).toBeInTheDocument();
+  });
+
   it('removes a deleted exception from the review list', async () => {
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
     render(<PendingPage />);

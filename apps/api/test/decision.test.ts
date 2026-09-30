@@ -183,6 +183,155 @@ describe('confidence decisions', () => {
   });
 });
 
+function fixedRule(overrides: Partial<Rule> = {}): Rule {
+  return {
+    id: 'fixed-1',
+    kind: 'keyword',
+    key: '武汉仓',
+    originalCategory: null,
+    category: '百慕达食材',
+    confirmations: 0,
+    strong: false,
+    updatedAt: '2026-09-30T00:00:00.000Z',
+    source: 'manual',
+    ...overrides,
+  };
+}
+
+describe('fixed (manual) rules', () => {
+  it('decides the category from a contained keyword even when the AI is unsure or wrong', () => {
+    // 试点反馈图 3/4：武汉仓订单，AI 没认出商户、以低置信度判成食材
+    const decision = decide(
+      analysis({
+        amount: '624.61',
+        category: '食材',
+        merchant: null,
+        evidence: '订单列表 武汉仓 2026-09-25 21:22 实付 624.61',
+        confidence: { amount: 0.97, category: 0.5 },
+      }),
+      [fixedRule()],
+      settings,
+    );
+    expect(decision).toEqual({
+      status: 'ready',
+      reasons: [],
+      category: '百慕达食材',
+      ruleMatch: { mode: 'applied', ruleId: 'fixed-1', key: '武汉仓', category: '百慕达食材' },
+    });
+  });
+
+  it('matches merchant text by containment, ignoring spaces and width', () => {
+    expect(
+      decide(
+        analysis({ category: '食材', merchant: '百慕达 武汉 仓（配送）' }),
+        [fixedRule({ kind: 'merchant' })],
+        settings,
+      ).category,
+    ).toBe('百慕达食材');
+    expect(
+      decide(analysis({ merchant: 'ＡＣＭＥ Store 2' }), [fixedRule({ key: 'acme store', category: '肉类' })], settings)
+        .category,
+    ).toBe('肉类');
+  });
+
+  it('limits merchant rules to the merchant and keyword rules to merchant, keywords and evidence', () => {
+    const onlyInKeywords = analysis({ category: '食材', merchant: null, keywords: ['武汉仓'] });
+    expect(decide(onlyInKeywords, [fixedRule({ kind: 'merchant' })], settings).ruleMatch).toBeUndefined();
+    expect(decide(onlyInKeywords, [fixedRule()], settings).category).toBe('百慕达食材');
+  });
+
+  it('still holds back an uncertain amount but keeps the rule category', () => {
+    expect(
+      decide(
+        analysis({ category: '食材', merchant: '武汉仓', confidence: { amount: 0.9, category: 0.99 } }),
+        [fixedRule()],
+        settings,
+      ),
+    ).toEqual({
+      status: 'pending',
+      reasons: ['amount_uncertain'],
+      category: '百慕达食材',
+      ruleMatch: { mode: 'applied', ruleId: 'fixed-1', key: '武汉仓', category: '百慕达食材' },
+    });
+    expect(
+      decide(analysis({ amount: null, ambiguous: true, merchant: '武汉仓' }), [fixedRule()], settings),
+    ).toMatchObject({ status: 'pending', reasons: ['ambiguous_amount'], category: '百慕达食材' });
+  });
+
+  it('refuses to pick between fixed rules that disagree and keeps the AI category', () => {
+    expect(
+      decide(
+        analysis({ category: '食材', merchant: '武汉仓 酒水专区' }),
+        [fixedRule(), fixedRule({ id: 'fixed-2', key: '酒水专区', category: '酒水' })],
+        settings,
+      ),
+    ).toEqual({ status: 'pending', reasons: ['rule_conflict'], category: '食材' });
+  });
+
+  it('prefers the most specific of several agreeing fixed rules', () => {
+    expect(
+      decide(
+        analysis({ merchant: '百慕达武汉仓' }),
+        [fixedRule({ id: 'short', key: '百慕达' }), fixedRule({ id: 'long', key: '百慕达武汉仓' })],
+        settings,
+      ).ruleMatch?.ruleId,
+    ).toBe('long');
+  });
+
+  it('ignores fixed rules whose text is shorter than two characters', () => {
+    expect(decide(analysis({ merchant: '武汉仓' }), [fixedRule({ key: '仓' })], settings).ruleMatch).toBeUndefined();
+  });
+
+  it('outranks a conflicting learned strong rule', () => {
+    expect(
+      decide(
+        analysis({ category: '食材', merchant: '武汉仓' }),
+        [fixedRule(), strongRule({ key: '武汉仓', category: '食材' })],
+        settings,
+      ),
+    ).toMatchObject({ status: 'ready', category: '百慕达食材' });
+  });
+});
+
+describe('learned strong rule suggestions', () => {
+  it('keeps the AI category on conflict and attaches the rule category as a suggestion', () => {
+    // 试点反馈图 6：武汉仓 201.45 AI 判酒水、学习规则说百慕达食材，最后酒水才是对的
+    expect(
+      decide(
+        analysis({ category: '酒水', merchant: '武汉仓' }),
+        [strongRule({ key: '武汉仓', category: '百慕达食材' })],
+        settings,
+      ),
+    ).toEqual({
+      status: 'pending',
+      reasons: ['rule_conflict'],
+      category: '酒水',
+      ruleMatch: { mode: 'suggested', ruleId: 'rule-1', key: '武汉仓', category: '百慕达食材' },
+    });
+  });
+
+  it('suggests the rule category when the AI is too unsure to name one', () => {
+    expect(
+      decide(analysis({ category: null, merchant: 'ACME STORE' }), [strongRule({ category: '食材' })], settings),
+    ).toMatchObject({
+      status: 'pending',
+      reasons: ['category_uncertain'],
+      category: null,
+      ruleMatch: { mode: 'suggested', category: '食材' },
+    });
+  });
+
+  it('does not suggest from unconfirmed learned rules', () => {
+    expect(
+      decide(
+        analysis({ category: null, merchant: 'ACME STORE' }),
+        [strongRule({ category: '食材', strong: false, confirmations: 2 })],
+        settings,
+      ).ruleMatch,
+    ).toBeUndefined();
+  });
+});
+
 describe('analysis application', () => {
   let store: Store;
 
@@ -270,6 +419,27 @@ describe('analysis application', () => {
       status: 'pending',
       pendingReasons: ['suspected_duplicate'],
       duplicateIds: ['historical'],
+    });
+  });
+
+  it('stores which fixed rule decided the category', () => {
+    const receipt = sampleReceipt({
+      id: 'fixed',
+      status: 'recognizing',
+      analysis: null,
+      recognizedFen: null,
+      paidFen: null,
+      category: null,
+    });
+    store.put('receipts', receipt);
+    store.put('rules', fixedRule());
+
+    expect(
+      applyAnalysis(store, receipt.id, analysis({ category: '食材', merchant: '武汉仓' })),
+    ).toMatchObject({
+      status: 'ready',
+      category: '百慕达食材',
+      ruleMatch: { mode: 'applied', key: '武汉仓', category: '百慕达食材' },
     });
   });
 

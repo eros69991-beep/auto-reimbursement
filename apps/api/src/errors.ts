@@ -41,6 +41,7 @@ const ERROR_TABLE: Record<string, ErrorSpec> = {
   FORM_TEXT_OVERFLOW: { status: 400, message: '报销单内容超出版式容量，请减少单批凭证数量或缩短填写内容' },
   FORM_AMOUNT_OVERFLOW: { status: 400, message: '报销单内容超出版式容量，请减少单批凭证数量或缩短填写内容' },
   INVALID_CLEANUP_CONFIRMATION: { status: 400, message: '确认文字不正确' },
+  RULE_KEY_TOO_SHORT: { status: 400, message: '固定规则的文字至少要 2 个字' },
   // 400 通用参数错误（不带 INVALID_ 前缀的少数历史错误码）
   LAYOUT_OVERFLOW: { status: 400, message: '请求参数无效' },
   CATEGORY_TOO_LARGE: { status: 400, message: '请求参数无效' },

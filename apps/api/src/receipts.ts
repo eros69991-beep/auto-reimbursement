@@ -186,13 +186,18 @@ function isCalendarDate(value: string): boolean {
 }
 
 function applyPatch(receipt: Receipt, patch: ReceiptPatch): Receipt {
-  return {
+  const patched: Receipt = {
     ...receipt,
     paidFen: patch.paidFen ?? receipt.paidFen,
     category: patch.category ?? receipt.category,
     merchant: patch.merchant === undefined ? receipt.merchant : patch.merchant.trim(),
     date: patch.date ?? receipt.date,
   };
+  // 人工改了分类，规则说明（按规则归类 / 规则建议）就不再适用
+  if (patched.category !== receipt.category && receipt.ruleMatch) {
+    patched.ruleMatch = null;
+  }
+  return patched;
 }
 
 export function updateReceipt(
@@ -256,6 +261,10 @@ export function confirmReceipt(
       pendingReasons: [],
       nextAttemptAt: null,
     };
+    // 人工确认即解决了规则冲突，建议不再保留
+    if (confirmed.ruleMatch?.mode === 'suggested') {
+      confirmed.ruleMatch = null;
+    }
     store.put('receipts', confirmed);
     recordCorrectionInTransaction(store, id, category);
     return confirmed;
