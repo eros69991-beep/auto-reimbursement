@@ -6,6 +6,7 @@ import {
   netFen,
   type Batch,
   type Category,
+  type FormGroup,
   type FormOptions,
   type FormSheet,
   type Receipt,
@@ -313,7 +314,8 @@ function assertLayoutWithMetrics(
   );
   const existingNotes = new Map(batch.sheets.map((sheet) => [sheet.id, sheet.noteId]));
   const seenSheetIds = new Set<string>();
-  const seenCategories = new Set<Category>();
+  // 一个分类可能被拆成几部分排在不同的报销单上，按出现的先后收集
+  const partsByCategory = new Map<Category, FormGroup[]>();
   for (const [index, sheet] of sheets.entries()) {
     if (
       sheet === null ||
@@ -342,17 +344,60 @@ function assertLayoutWithMetrics(
     if (!sheetFits(sheet.groups, metrics)) {
       throw new Error('CATEGORY_TOO_LARGE');
     }
+    const categoriesOnSheet = new Set<Category>();
     for (const group of sheet.groups) {
-      const original = expected.get(group.category);
-      if (original === undefined || seenCategories.has(group.category) || !sameGroup(group, original)) {
+      // 同一个分类的各部分一定在不同的报销单上
+      if (!expected.has(group.category) || categoriesOnSheet.has(group.category)) {
         throw new Error('INVALID_LAYOUT');
       }
-      seenCategories.add(group.category);
+      categoriesOnSheet.add(group.category);
+      const parts = partsByCategory.get(group.category) ?? [];
+      parts.push(group);
+      partsByCategory.set(group.category, parts);
     }
   }
-  if (seenCategories.size !== expected.size) {
+  if (partsByCategory.size !== expected.size) {
     throw new Error('INVALID_LAYOUT');
   }
+  for (const [category, original] of expected) {
+    const parts = partsByCategory.get(category);
+    if (parts === undefined || !coversGroup(parts, original)) {
+      throw new Error('INVALID_LAYOUT');
+    }
+  }
+}
+
+// 排版里某个分类的所有部分合起来必须正好是该分类的全部凭证（顺序、金额都不变）：
+// 整组排在一起（没有 part），或按 1、2、3… 的次序拆成几部分，每部分小计等于它自己金额之和。
+function coversGroup(parts: FormGroup[], original: FormGroup): boolean {
+  if (parts.length === 1 && parts[0]!.part === undefined) {
+    return sameGroup(parts[0]!, original);
+  }
+  if (parts.length < 2) {
+    return false;
+  }
+  const receiptIds: string[] = [];
+  const amounts: number[] = [];
+  let total = 0;
+  for (const [index, part] of parts.entries()) {
+    if (
+      part.part !== index + 1 ||
+      part.receiptIds.length === 0 ||
+      part.receiptIds.length !== part.amountsFen.length ||
+      part.totalFen !== part.amountsFen.reduce((sum, amount) => sum + amount, 0)
+    ) {
+      return false;
+    }
+    receiptIds.push(...part.receiptIds);
+    amounts.push(...part.amountsFen);
+    total += part.totalFen;
+  }
+  return (
+    total === original.totalFen &&
+    receiptIds.length === original.receiptIds.length &&
+    receiptIds.every((id, index) => id === original.receiptIds[index]) &&
+    amounts.every((amount, index) => amount === original.amountsFen[index])
+  );
 }
 
 function sameGroup(left: FormSheet['groups'][number], right: FormSheet['groups'][number]): boolean {
@@ -372,6 +417,7 @@ function isFormGroup(value: unknown): value is FormSheet['groups'][number] {
   const group = value as Record<string, unknown>;
   return (
     typeof group.category === 'string' &&
+    (group.part === undefined || (typeof group.part === 'number' && Number.isSafeInteger(group.part) && group.part >= 1)) &&
     typeof group.totalFen === 'number' &&
     Number.isSafeInteger(group.totalFen) &&
     Array.isArray(group.receiptIds) &&

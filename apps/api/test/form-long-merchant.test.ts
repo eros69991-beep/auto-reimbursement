@@ -19,6 +19,7 @@ import { safePath } from '../src/storage.js';
 import { sampleReceipt } from './support.js';
 
 // P-04 回归：长商户名（发票销售方全称）不得让整批预览/导出 500。
+// 试点反馈后摘要栏只写每张的金额，报销单上不再印商户；商户只留在凭证数据里。
 describe('long merchant names (P-04)', () => {
   let store: Store;
   let temp: string;
@@ -82,13 +83,15 @@ describe('long merchant names (P-04)', () => {
     return text.items.map((item) => ('str' in item ? item.str : '')).join('');
   }
 
-  it('shrinks a 27-char merchant into the summary column instead of 500', async () => {
+  it('does not print a 27-char merchant on the form and still previews and exports', async () => {
     const merchant = '深圳市百慕达国际海鲜餐饮管理有限公司远洋分店酒水专柜';
     const batchId = await seed(merchant);
     const batch = store.get('batches', batchId)!;
     const joined = await firstPageText(await renderBatchPdf(store, config, batch));
-    // 缩字号后完整放下，不截断、不抛错
-    expect(joined).toContain(merchant);
+    // 摘要栏只写金额：商户不上表，也不再有缩字号、省略号这些处理
+    expect(joined).toContain('1280.00');
+    expect(joined).not.toContain(merchant.slice(0, 8));
+    expect(joined).not.toContain('…');
 
     const application = createApp({ store, config });
     const preview = await request(application).get(`/api/batches/${batchId}/preview.pdf`);
@@ -97,13 +100,13 @@ describe('long merchant names (P-04)', () => {
     expect(exported.status).toBe(200);
   });
 
-  it('truncates an extremely long merchant with an ellipsis instead of 500', async () => {
+  it('previews an extremely long merchant without any problem', async () => {
     const merchant = '深圳市百慕达国际海鲜餐饮管理有限公司远洋分店酒水专柜暨进口生鲜冷链配送中心华南大区旗舰总店财务结算专用';
     const batchId = await seed(merchant);
     const batch = store.get('batches', batchId)!;
     const joined = await firstPageText(await renderBatchPdf(store, config, batch));
-    expect(joined).toContain('…');
-    expect(joined).not.toContain(merchant);
+    expect(joined).not.toContain(merchant.slice(0, 8));
+    expect(joined).not.toContain('…');
 
     const application = createApp({ store, config });
     const preview = await request(application).get(`/api/batches/${batchId}/preview.pdf`);

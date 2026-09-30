@@ -31,6 +31,8 @@ const ERROR_TABLE: Record<string, ErrorSpec> = {
   BATCH_RECEIPT_CONFLICT: { status: 409, message: '凭证关联已改变，未执行撤销' },
   NOT_ELIGIBLE: { status: 409, message: '凭证当前状态不可生成' },
   BATCH_FINALIZED: { status: 409, message: '已导出的报销单不可修改' },
+  LAYOUT_OUTDATED: { status: 409, message: '这张报销单是按旧版式生成的，放不下新版式。请到「历史」页撤销本单，再从报销池重新生成。' },
+  CATEGORY_SPLIT: { status: 409, message: '这个分类的凭证较多，已分到多张报销单上，不能单独移动。' },
   IMMUTABLE_RECEIPT: { status: 409, message: '凭证当前状态不可确认' },
   INCOMPLETE_RECEIPT: { status: 409, message: '凭证当前状态不可确认' },
   UNRESOLVED_DUPLICATE: { status: 409, message: '凭证当前状态不可确认' },
@@ -44,7 +46,7 @@ const ERROR_TABLE: Record<string, ErrorSpec> = {
   RULE_KEY_TOO_SHORT: { status: 400, message: '固定规则的文字至少要 2 个字' },
   // 400 通用参数错误（不带 INVALID_ 前缀的少数历史错误码）
   LAYOUT_OVERFLOW: { status: 400, message: '请求参数无效' },
-  CATEGORY_TOO_LARGE: { status: 400, message: '请求参数无效' },
+  CATEGORY_TOO_LARGE: { status: 400, message: '这张报销单放不下这个分类（每张最多 5 行，合计不能超过 9999999.99 元）' },
   NOTE_OVERFLOW: { status: 400, message: '请求参数无效' },
   // 413
   IMAGE_TOO_LARGE: { status: 413, message: '上传图片数量或大小超出限制' },

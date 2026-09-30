@@ -1,11 +1,13 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { type Batch, type FormGroup, type FormSheet } from '@auto-reimbursement/contracts';
+import { formGroupLabel, type Batch, type FormSheet } from '@auto-reimbursement/contracts';
 import PDFDocument from 'pdfkit';
 
 import {
-  groupHeight,
+  mergedRowBoundaries,
+  placeGroups,
+  type GroupPlacement,
   type LayoutMetrics,
 } from './layout.js';
 import { toUppercaseCells } from '../uppercase.js';
@@ -80,7 +82,11 @@ export function formMetrics(doc: PDFKit.PDFDocument): LayoutMetrics {
     lineHeight: 14,
     groupPadding: 8,
     maxSheetFen: 999999999,
-    measure: (text) => doc.widthOfString(text),
+    // 摘要栏折行用 10pt；绘制过程中字号会变，所以每次量之前都重新设定
+    measure: (text) => {
+      doc.font('NotoSansSC').fontSize(10);
+      return doc.widthOfString(text);
+    },
   };
 }
 
@@ -115,6 +121,8 @@ export function drawForm(
   const totalBottom = bodyBottom + mm(table.totalHeight);
   const formBottom = totalBottom + mm(table.uppercaseHeight);
   const notesSplit = mm(table.notesSplitY);
+  // 旧版式生成的草稿在新版式下放不下时，这里抛 LAYOUT_OUTDATED（提示撤销后重新生成）
+  const placements = placeGroups(sheet.groups, metrics);
   const total = sheet.groups.reduce((sum, group) => sum + group.totalFen, 0);
   const digits = String(total).padStart(3, '0').padStart(9, ' ');
   if (digits.length > 9) throw new Error('FORM_AMOUNT_OVERFLOW');
@@ -132,9 +140,13 @@ export function drawForm(
   doc.font('NotoSansSC').fontSize(10).fillColor(PRINTED_BLUE);
   drawTitle(doc);
   drawMetadata(doc, batch, sheet, notePages.continuation.length);
-  drawStructure(doc, { x, y, projectX, summaryX, amountX, verticalLabelX, notesX, right, headerSplit, headerBottom, bodyBottom, totalBottom, formBottom, notesSplit });
+  drawStructure(
+    doc,
+    { x, y, projectX, summaryX, amountX, verticalLabelX, notesX, right, headerSplit, headerBottom, bodyBottom, totalBottom, formBottom, notesSplit },
+    mergedRowBoundaries(placements),
+  );
   drawHeaders(doc, { projectX, summaryX, amountX, verticalLabelX, notesX, right, headerSplit, headerBottom, y, notesSplit, totalBottom });
-  drawGroups(doc, batch, sheet, metrics, { projectX, summaryX, amountX, verticalLabelX, headerBottom, bodyBottom });
+  drawGroups(doc, placements, { projectX, summaryX, amountX, verticalLabelX, headerBottom, bodyBottom });
   drawTotal(doc, digits, x, amountX, bodyBottom, mm(columns.amount), mm(table.totalHeight));
   drawUppercase(doc, digits, x, right, totalBottom, formBottom);
   drawNote(doc, notePages.firstPage, notesX, y, mm(columns.notes), notesSplit - y);
@@ -208,7 +220,7 @@ interface Bounds {
   notesSplit: number;
 }
 
-function drawStructure(doc: PDFKit.PDFDocument, bounds: Bounds): void {
+function drawStructure(doc: PDFKit.PDFDocument, bounds: Bounds, mergedBoundaries: ReadonlySet<number>): void {
   const { x, y, projectX, summaryX, amountX, verticalLabelX, notesX, right, headerSplit, headerBottom, bodyBottom, totalBottom, formBottom, notesSplit } = bounds;
   doc.lineWidth(0.5).strokeColor(BLACK).opacity(1);
 
@@ -230,10 +242,13 @@ function drawStructure(doc: PDFKit.PDFDocument, bounds: Bounds): void {
   doc.moveTo(x, y).lineTo(right, y).stroke();
   doc.moveTo(amountX, headerSplit).lineTo(notesX, headerSplit).stroke();
   doc.moveTo(x, headerBottom).lineTo(verticalLabelX, headerBottom).stroke();
+  // 表体 5 行线。分类占多行时，它内部的线只留在摘要栏（每行一排金额），
+  // 「报销项目」「金额」两栏不画，像合并单元格。
   const rows = geometry.table.bodyRows;
   for (let row = 1; row < rows; row += 1) {
     const rowY = headerBottom + (mm(geometry.table.bodyHeight) * row) / rows;
-    doc.moveTo(projectX, rowY).lineTo(verticalLabelX, rowY).stroke();
+    if (mergedBoundaries.has(row)) doc.moveTo(summaryX, rowY).lineTo(amountX, rowY).stroke();
+    else doc.moveTo(projectX, rowY).lineTo(verticalLabelX, rowY).stroke();
   }
   doc.moveTo(x, bodyBottom).lineTo(verticalLabelX, bodyBottom).stroke();
   doc.moveTo(verticalLabelX, notesSplit).lineTo(right, notesSplit).stroke();
@@ -260,44 +275,38 @@ function drawHeaders(doc: PDFKit.PDFDocument, bounds: Pick<Bounds, 'projectX' | 
 
 function drawGroups(
   doc: PDFKit.PDFDocument,
-  batch: Batch,
-  sheet: FormSheet,
-  metrics: LayoutMetrics,
+  placements: GroupPlacement[],
   bounds: Pick<Bounds, 'projectX' | 'summaryX' | 'amountX' | 'verticalLabelX' | 'headerBottom' | 'bodyBottom'>,
 ): void {
-  let y = bounds.headerBottom;
-  const merchantById = new Map(batch.items.map((item) => [item.receiptId, item.merchant ?? null]));
-  for (const group of sheet.groups) {
-    // 汇总版式：每个分类固定占一行，摘要写「共 N 张：商户A、商户B 等」，
-    // 金额填分类合计（P-02/P-07）。表体 5 行线已在 drawFrame 统一画好，这里不再重画。
-    const height = groupHeight(group, metrics);
-    if (y + height > bounds.bodyBottom + 0.01) throw new Error('FORM_TEXT_OVERFLOW');
-    const textY = y + (height - 10) / 2;
-    assertFits(doc, group.category, bounds.summaryX - bounds.projectX - 12, 'FORM_TEXT_OVERFLOW');
-    doc.fillColor(BLACK).fontSize(10).text(group.category, bounds.projectX + 6, textY, {
-      width: bounds.summaryX - bounds.projectX - 12,
-      lineBreak: false,
+  const rowHeight = (bounds.bodyBottom - bounds.headerBottom) / geometry.table.bodyRows;
+  const projectWidth = bounds.summaryX - bounds.projectX - 12;
+  for (const { group, startRow, rowCount, lines } of placements) {
+    // 每个分类占 rowCount 行：摘要栏每行写一排实报金额（上传顺序、空格隔开），
+    // 分类名和金额栏的分类合计（被拆到多张时是这一部分的小计）在这几行里上下居中、只写一次。
+    const top = bounds.headerBottom + startRow * rowHeight;
+    const height = rowCount * rowHeight;
+    if (top + height > bounds.bodyBottom + 0.01) throw new Error('FORM_TEXT_OVERFLOW');
+    const textY = centeredTextTop(doc, top, height);
+    const label = formGroupLabel(group);
+    doc.fontSize(10);
+    assertFits(doc, label, projectWidth, 'FORM_TEXT_OVERFLOW');
+    doc.fillColor(BLACK).text(label, bounds.projectX + 6, textY, { width: projectWidth, lineBreak: false });
+    lines.forEach((line, index) => {
+      const lineY = centeredTextTop(doc, top + index * rowHeight, rowHeight);
+      doc.fontSize(10).fillColor(BLACK).text(line, bounds.summaryX + 6, lineY, { lineBreak: false });
     });
-    // 长摘要缩字号→截断加省略号，绝不让整批 500；逐张明细仍保留在附件页。
-    drawSummaryText(doc, summarizeGroup(group, merchantById), bounds.summaryX + 6, textY, metrics.summaryWidth);
     const digits = String(group.totalFen).padStart(3, '0').padStart(9, ' ');
     if (digits.length > 9) throw new Error('FORM_AMOUNT_OVERFLOW');
-    drawAmountDigits(doc, digits, bounds.amountX, textY - 3, mm(geometry.table.columns.amount), metrics.lineHeight);
-    y += height;
+    drawAmountDigits(doc, digits, bounds.amountX, textY - 3, mm(geometry.table.columns.amount), 14);
   }
 }
 
-function summarizeGroup(group: FormGroup, merchantById: Map<string, string | null>): string {
-  const merchants = [
-    ...new Set(
-      group.receiptIds
-        .map((id) => merchantById.get(id))
-        .filter((merchant): merchant is string => typeof merchant === 'string' && merchant.length > 0),
-    ),
-  ];
-  if (group.receiptIds.length === 1) return merchants[0] ?? group.category;
-  if (merchants.length === 0) return `共 ${group.receiptIds.length} 张，明细见附件`;
-  return `共 ${group.receiptIds.length} 张：${merchants.slice(0, 2).join('、')}${merchants.length > 2 ? ' 等' : ''}`;
+// 一行 10pt 文字在 height 高的格子里上下居中时，文字框顶边的纵坐标。
+// 按字体的行框（上升 + 下降，10pt 约 14.5pt）居中，和备注栏的居中方式一致，
+// 字形的视觉中心与格子中心相差不到 1pt。
+function centeredTextTop(doc: PDFKit.PDFDocument, top: number, height: number): number {
+  doc.font('NotoSansSC').fontSize(10);
+  return top + (height - doc.currentLineHeight(true)) / 2;
 }
 
 function drawTotal(doc: PDFKit.PDFDocument, digits: string, left: number, amountX: number, top: number, width: number, height: number): void {
@@ -511,26 +520,6 @@ function verticalText(doc: PDFKit.PDFDocument, text: string, x: number, top: num
 
 function assertFits(doc: PDFKit.PDFDocument, text: string, width: number, code: 'FORM_TEXT_OVERFLOW'): void {
   if (text !== '' && doc.widthOfString(text) > width) throw new Error(code);
-}
-
-// 摘要栏专用：10→7pt 逐级缩字号单行放下；仍超宽则截断加“…”，不抛错（P-04）。
-function drawSummaryText(doc: PDFKit.PDFDocument, text: string, x: number, y: number, width: number): void {
-  doc.fillColor(BLACK);
-  if (text === '') return;
-  for (const size of [10, 9, 8, 7]) {
-    doc.fontSize(size);
-    if (doc.widthOfString(text) <= width) {
-      doc.text(text, x, y, { width, lineBreak: false });
-      return;
-    }
-  }
-  doc.fontSize(7);
-  const chars = [...text];
-  let end = chars.length;
-  while (end > 1 && doc.widthOfString(`${chars.slice(0, end).join('')}…`) > width) {
-    end -= 1;
-  }
-  doc.text(`${chars.slice(0, end).join('')}…`, x, y, { width, lineBreak: false });
 }
 
 // 长文本自适应：10→7pt 逐级缩字号单行放下；仍超宽则用 7pt 在 maxHeight 内换行；再超才抛错。

@@ -165,4 +165,25 @@ describe('reconcile workspace', () => {
     // 左侧报销行仍在
     expect(screen.getByRole('button', { name: /能耗费：合计/ })).toBeInTheDocument();
   });
+  it('labels the parts of a category that continues on the next sheet and keeps their receipts in order', async () => {
+    const splitBatch = sampleBatch({
+      items: [
+        item('r1', 1, '耗材', '店甲', 10000),
+        item('r2', 2, '耗材', '店乙', 10001),
+        item('r3', 3, '耗材', '店丙', 10002),
+      ],
+      sheets: [
+        { id: 'sheet-1', noteId: null, groups: [{ category: '耗材', totalFen: 20001, receiptIds: ['r1', 'r2'], amountsFen: [10000, 10001], part: 1 }] },
+        { id: 'sheet-2', noteId: null, groups: [{ category: '耗材', totalFen: 10002, receiptIds: ['r3'], amountsFen: [10002], part: 2 }] },
+      ],
+    });
+    render(<ReconcileWorkspace batch={splitBatch} previewUrl="http://api.test/preview.pdf" />);
+
+    // 报销单上第 2 部分写「耗材（续）」，这里的报销行与它一致，各自的小计和凭证数分开写
+    expect(screen.getByRole('button', { name: /第 1 页 · 耗材：合计 200\.01（2 张凭证）/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /第 2 页 · 耗材（续）：合计 100\.02（1 张凭证）/ })).toBeInTheDocument();
+    // 点「耗材（续）」直接定位到它的第一张凭证，也就是全批次的第 3 张
+    fireEvent.click(screen.getByRole('button', { name: /耗材（续）：合计/ }));
+    expect(await screen.findByText('第 3 / 3 张 · 耗材 · 店丙 · 实付 100.02')).toBeInTheDocument();
+  });
 });

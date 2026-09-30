@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { api, apiUrl, normalizeApiBaseUrl, requestJson } from './api';
+import { api, apiUrl, fetchBlobUrl, normalizeApiBaseUrl, requestJson } from './api';
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -49,5 +49,27 @@ describe('hosted API URLs', () => {
     );
     expect(image.origin).toMatch(/^https?:\/\//);
     expect(receipt.origin).toMatch(/^https?:\/\//);
+  });
+});
+
+describe('authenticated file downloads', () => {
+  it('reports the reason the server gives when it refuses the file', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ code: 'LAYOUT_OUTDATED', message: '请到「历史」页撤销本单，再重新生成。' }), {
+        status: 409,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+
+    await expect(fetchBlobUrl('/api/batches/b1/preview.pdf?attachments=1')).rejects.toMatchObject({
+      message: '请到「历史」页撤销本单，再重新生成。',
+      code: 'LAYOUT_OUTDATED',
+    });
+  });
+
+  it('falls back to a generic message when the refusal has no readable reason', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('bad gateway', { status: 502 }));
+
+    await expect(fetchBlobUrl('/api/batches/b1/pdf')).rejects.toThrow('加载失败');
   });
 });

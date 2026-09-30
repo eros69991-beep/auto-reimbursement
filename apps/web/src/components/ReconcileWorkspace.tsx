@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 
-import { formatFen, type Batch } from '@auto-reimbursement/contracts';
+import { formGroupLabel, formatFen, type Batch } from '@auto-reimbursement/contracts';
 
 import { useAuthedUrl } from './AuthedImage';
 import { PdfPreview } from './PdfPreview';
@@ -9,6 +9,8 @@ interface ReconcileRow {
   key: string;
   sheetIndex: number;
   category: string;
+  /** 报销单上写的分类名；被拆到多张上的分类，第 2 部分起带「（续）」 */
+  label: string;
   totalFen: number;
   receiptIds: string[];
 }
@@ -38,6 +40,7 @@ export function ReconcileWorkspace({ batch, previewUrl }: { batch: Batch; previe
         key: `${sheet.id}:${group.category}`,
         sheetIndex,
         category: group.category,
+        label: formGroupLabel(group),
         totalFen: group.totalFen,
         receiptIds: group.receiptIds
           .filter((receiptId) => uploadOrder.has(receiptId))
@@ -108,7 +111,7 @@ export function ReconcileWorkspace({ batch, previewUrl }: { batch: Batch; previe
                 }}
               >
                 {rows.some((item) => item.sheetIndex !== row.sheetIndex) ? `第 ${row.sheetIndex + 1} 页 · ` : ''}
-                {row.category}：合计 {formatFen(row.totalFen)}（{row.receiptIds.length} 张凭证）
+                {row.label}：合计 {formatFen(row.totalFen)}（{row.receiptIds.length} 张凭证）
               </button>
             </li>
           ))}

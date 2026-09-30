@@ -2,6 +2,18 @@ import { useEffect, useRef, useState } from 'react';
 
 import { authHeaders } from '../api';
 
+// 预览请求被服务器拒绝时，再取一次看它返回的说明；取不到就返回 null，由调用方用通用提示。
+async function serverReason(url: string): Promise<string | null> {
+  try {
+    const response = await fetch(url, { headers: authHeaders() });
+    if (response.ok) return null;
+    const body = await response.json().catch(() => null) as { message?: unknown } | null;
+    return typeof body?.message === 'string' && body.message !== '' ? body.message : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Renders every page of a PDF scaled to the container width, stacked
  * vertically. Replaces the browser PDF-plugin iframe, which clips wide
@@ -65,7 +77,11 @@ export function PdfPreview({ url }: { url: string }): React.JSX.Element {
         loadingTask = null;
       } catch (cause) {
         console.error('[PdfPreview] 加载失败', cause);
-        if (!cancelled) setError('预览加载失败，请使用下方链接打开或下载 PDF。');
+        if (cancelled) return;
+        // 服务器拒绝时（例如旧版式的草稿要撤销重做）把它给的原因告诉用户，而不是笼统的「加载失败」
+        const status = (cause as { status?: unknown } | null)?.status;
+        const reason = typeof status === 'number' && status >= 400 ? await serverReason(url) : null;
+        if (!cancelled) setError(reason ?? '预览加载失败，请使用下方链接打开或下载 PDF。');
       }
     })();
     return () => {

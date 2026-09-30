@@ -145,6 +145,46 @@ describe('full reimbursement PDFs', () => {
     expect((await request(application).get(`/api/batches/${batch.id}/pdf`)).status).toBe(404);
   });
 
+  it('renders a category split across sheets as consecutive forms, each followed by its own receipts', { timeout: 30000 }, async () => {
+    // 食材 40 张：第一张报销单写前 30 张，第二张「食材（续）」写后 10 张
+    const ids = Array.from({ length: 40 }, (_, index) => `split-${index}`);
+    for (const [index, id] of ids.entries()) {
+      const original = await indexedImage(`${id}-original`, '#245c77');
+      await writeImage(original);
+      indexImage(id, 'original', original);
+      store.put('receipts', sampleReceipt({ id, uploadOrder: index + 1, category: '食材', paidFen: 10000 + index, original }));
+    }
+    const batch = createBatch(
+      store,
+      ids,
+      resolveOptions(getSettings(store), new Date('2026-09-04T00:00:00.000Z')),
+      new Date('2026-09-04T00:00:00.000Z'),
+    );
+    expect(batch.sheets.map((sheet) => sheet.groups.map((group) => [group.part, group.receiptIds.length]))).toEqual([
+      [[1, 30]],
+      [[2, 10]],
+    ]);
+    expect(orderedAttachments(batch, batch.sheets[0]!).map((attachment) => attachment.receiptId)).toEqual(ids.slice(0, 30));
+    expect(orderedAttachments(batch, batch.sheets[1]!).map((attachment) => attachment.receiptId)).toEqual(ids.slice(30));
+
+    const formsOnly = await pageText(await renderBatchPdf(store, config, batch, { attachments: false }));
+    expect(formsOnly).toHaveLength(2);
+    expect(formsOnly[0]).toContain('食材');
+    expect(formsOnly[0]).not.toContain('（续）');
+    expect(formsOnly[1]).toContain('食材（续）');
+
+    const pages = await pageText(await renderBatchPdf(store, config, batch));
+    expect(pages).toHaveLength(2 + 40);
+    expect(pages[0]!.replace(/\s+/g, '')).toContain('费用报销单');
+    expect(pages.slice(1, 31).every((page) => page.includes('原始凭证'))).toBe(true);
+    expect(pages[31]!.replace(/\s+/g, '')).toContain('食材（续）');
+    expect(pages.slice(32).every((page) => page.includes('原始凭证'))).toBe(true);
+
+    const exported = await exportBatchPdf(store, config, batch.id);
+    expect(exported.pdfPath).not.toBeNull();
+    expect(await pageText(await readFile(safePath(temp, exported.pdfPath!)))).toHaveLength(42);
+  });
+
   it('renders both signer modes and rejects a missing attachment without exporting', async () => {
     const original = await indexedImage('signer-original', '#245c77');
     const signature = await indexedImage('signature', '#101010', 'settings/signatures/signature.webp');

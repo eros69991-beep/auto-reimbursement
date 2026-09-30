@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Batch } from '@auto-reimbursement/contracts';
@@ -387,5 +387,60 @@ describe('preview page unsaved-changes handling (P-05)', () => {
     resolveFirst(sampleBatch({ id: 'batch-1', options: { ...sampleBatch().options, department: '旧批次部门' } }));
     await waitFor(() => expect(screen.getByLabelText('部门')).toHaveValue('新批次部门'));
     expect(screen.queryByDisplayValue('旧批次部门')).not.toBeInTheDocument();
+  });
+});
+
+describe('preview page category order', () => {
+  afterEach(() => cleanup());
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  const food = { category: '食材' as const, receiptIds: ['a', 'b'], amountsFen: [10000, 10001], totalFen: 20001 };
+
+  it('does not offer to move a category up when it is already on the first page', async () => {
+    batchApi.mockResolvedValue(sampleBatch());
+
+    render(<PreviewPage batchId="batch-1" />);
+
+    expect(await screen.findByRole('button', { name: '上一页' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '下一页' })).toBeEnabled();
+  });
+
+  it('can move a category that sits on a later page back up', async () => {
+    batchApi.mockResolvedValue(sampleBatch({
+      sheets: [
+        { id: 'sheet-1', noteId: null, groups: [{ ...food, category: '肉类' }] },
+        { id: 'sheet-2', noteId: null, groups: [food] },
+      ],
+    }));
+    moveGroup.mockResolvedValue(sampleBatch());
+
+    render(<PreviewPage batchId="batch-1" />);
+    const row = (await screen.findByText(/^食材/)).closest('p')!;
+    fireEvent.click(within(row).getByRole('button', { name: '上一页' }));
+
+    await waitFor(() => expect(moveGroup).toHaveBeenCalledWith('batch-1', '食材', -1));
+  });
+
+  it('locks a category that was split across several pages and says why', async () => {
+    batchApi.mockResolvedValue(sampleBatch({
+      sheets: [
+        { id: 'sheet-1', noteId: null, groups: [{ ...food, part: 1 }] },
+        { id: 'sheet-2', noteId: null, groups: [{ ...food, part: 2 }, { category: '酒水', receiptIds: ['c'], amountsFen: [5600], totalFen: 5600 }] },
+      ],
+    }));
+
+    render(<PreviewPage batchId="batch-1" />);
+
+    const splitRow = (await screen.findByText(/凭证较多，分在第 1、2 页上，不能单独移动/)).closest('p')!;
+    expect(splitRow).toHaveTextContent(/^食材/);
+    for (const name of ['上一页', '下一页']) {
+      expect(within(splitRow).getByRole('button', { name })).toBeDisabled();
+    }
+    // 没拆开的分类照常可以移动
+    const wineRow = screen.getByText(/^酒水/).closest('p')!;
+    expect(within(wineRow).getByRole('button', { name: '上一页' })).toBeEnabled();
+    expect(within(wineRow).getByRole('button', { name: '下一页' })).toBeEnabled();
   });
 });

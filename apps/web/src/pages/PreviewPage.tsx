@@ -373,19 +373,35 @@ export function PreviewPage({ batchId, onCancelled }: { batchId: string | null; 
       </fieldset>
       <section>
         <h3>分类顺序</h3>
-        {CATEGORIES.filter((category) =>
-          batch.sheets.some((sheet) => sheet.groups.some((group) => group.category === category)),
-        ).map((category) => (
-          <p key={category}>
-            {category}{' '}
-            <button type="button" disabled={readonly || busy} onClick={() => void move(category, -1)}>
-              上一页
-            </button>{' '}
-            <button type="button" disabled={readonly || busy} onClick={() => void move(category, 1)}>
-              下一页
-            </button>
-          </p>
-        ))}
+        {CATEGORIES.map((category) => ({
+          category,
+          // 这个分类在第几页上（从 0 起）；凭证多到一张放不下的分类会分在好几页上
+          pages: batch.sheets.flatMap((sheet, index) =>
+            sheet.groups.some((group) => group.category === category) ? [index] : [],
+          ),
+        })).filter(({ pages }) => pages.length > 0).map(({ category, pages }) => {
+          const split = pages.length > 1;
+          return (
+            <p key={category}>
+              {category}{' '}
+              <button
+                type="button"
+                disabled={readonly || busy || split || pages[0] === 0}
+                onClick={() => void move(category, -1)}
+              >
+                上一页
+              </button>{' '}
+              <button type="button" disabled={readonly || busy || split} onClick={() => void move(category, 1)}>
+                下一页
+              </button>
+              {split && (
+                <span className="category-split-note">
+                  {' '}（凭证较多，分在第 {pages.map((page) => page + 1).join('、')} 页上，不能单独移动）
+                </span>
+              )}
+            </p>
+          );
+        })}
       </section>
       <button type="button" disabled={busy || readonly} onClick={() => void exportCurrent()}>
         生成 PDF

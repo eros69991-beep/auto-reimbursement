@@ -161,7 +161,7 @@ export interface Snapshot {
   receiptId: string;
   uploadOrder: number;
   category: Category;
-  /** Absent in older batches; the form falls back to the category as summary text. */
+  /** Absent in older batches. Kept for the reconcile view; the form no longer prints it (the summary lists amounts). */
   merchant?: string | null;
   paidFen: number;
   refundFen: number;
@@ -175,6 +175,16 @@ export interface FormGroup {
   receiptIds: string[];
   amountsFen: number[];
   totalFen: number;
+  /**
+   * 只在一个分类的凭证多到一张报销单放不下、被拆到多张上时才有：这是第几部分（从 1 开始）。
+   * 这时 totalFen 是这一部分的小计；第 2 部分起报销单上写「分类（续）」。
+   */
+  part?: number;
+}
+
+/** 报销单上写的分类名：被拆到多张上的分类，第 2 部分起带「（续）」。 */
+export function formGroupLabel(group: Pick<FormGroup, 'category' | 'part'>): string {
+  return group.part !== undefined && group.part > 1 ? `${group.category}（续）` : group.category;
 }
 
 export interface FormSheet {

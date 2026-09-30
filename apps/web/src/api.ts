@@ -109,7 +109,11 @@ export async function fetchBlobUrl(path: string): Promise<string> {
     if (response.status === 401) {
       notifyUnauthorized();
     }
-    throw new Error('加载失败');
+    // 服务器说明了原因（例如旧版式的草稿要撤销重做）时原样告诉用户，否则只说加载失败
+    const error = await response.json().catch(() => null) as Partial<ApiErrorBody> | null;
+    const failure = new Error(typeof error?.message === 'string' && error.message !== '' ? error.message : '加载失败');
+    Object.assign(failure, { code: typeof error?.code === 'string' ? error.code : null });
+    throw failure;
   }
   return URL.createObjectURL(await response.blob());
 }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { formatFen, netFen, parseFen } from './index';
+import { formGroupLabel, formatFen, netFen, parseFen } from './index';
 
 describe('exact money helpers', () => {
   it('calculates exact fen and rejects uncertain input', () => {
@@ -63,5 +63,14 @@ describe('exact money helpers', () => {
     expect(netFen({ paidFen: 999999999999, refundFen: 0 })).toBe(
       999999999999,
     );
+  });
+});
+
+describe('form group labels', () => {
+  it('writes the plain category name unless the category continues from an earlier form', () => {
+    expect(formGroupLabel({ category: '食材' })).toBe('食材');
+    expect(formGroupLabel({ category: '食材', part: 1 })).toBe('食材');
+    expect(formGroupLabel({ category: '食材', part: 2 })).toBe('食材（续）');
+    expect(formGroupLabel({ category: '百慕达食材', part: 3 })).toBe('百慕达食材（续）');
   });
 });
