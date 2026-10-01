@@ -1,4 +1,4 @@
-import type { Analysis, ImageRef } from '@auto-reimbursement/contracts';
+import type { Analysis, ImageRef, Ledger } from '@auto-reimbursement/contracts';
 
 export type AiErrorCode =
   | 'NOT_CONFIGURED'
@@ -22,6 +22,11 @@ export type AiImage = {
   mime: ImageRef['mime'];
 };
 
+export type AnalyzeOptions = {
+  /** 凭证所在的区：公账（company）用公账的提示词和校验；不给就是店内 */
+  ledger?: Ledger;
+};
+
 export interface ReceiptAnalyzer {
-  analyzeReceipt(image: AiImage): Promise<Analysis>;
+  analyzeReceipt(image: AiImage, options?: AnalyzeOptions): Promise<Analysis>;
 }

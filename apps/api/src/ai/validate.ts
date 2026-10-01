@@ -1,10 +1,18 @@
 import {
   CATEGORIES,
+  COMPANY_CATEGORIES,
   parseFen,
+  parsePeriod,
   type Analysis,
 } from '@auto-reimbursement/contracts';
 import { z } from 'zod';
 
+import {
+  cleanPayee,
+  companyCategoryFromText,
+  looksLikeAccountNumber,
+  scrubAccountNumbers,
+} from '../company.js';
 import { AiError } from './types.js';
 
 function isMoney(value: string): boolean {
@@ -85,6 +93,142 @@ function usableHints(input: unknown): unknown {
 
 export function validateAnalysis(input: unknown): Analysis {
   const result = analysisSchema.safeParse(usableHints(input));
+  if (!result.success) {
+    throw new AiError('INVALID_RESPONSE', true);
+  }
+  return result.data;
+}
+
+// ---- 公账区：银行回单、收费通知单 ----
+
+const periodSchema = z.string().regex(/^20\d{2}-(0[1-9]|1[0-2])$/);
+
+const companyAnalysisSchema = z
+  .object({
+    amount: z.string().refine(isMoney).nullable(),
+    category: z.enum(COMPANY_CATEGORIES).nullable(),
+    merchant: z.string().max(200).nullable(),
+    date: z.string().refine(isRealIsoDate).nullable(),
+    confidence: confidenceSchema,
+    ambiguous: z.boolean(),
+    keywords: z.array(z.string().max(100)).max(20),
+    evidence: z.string().max(2000),
+    incomplete: z.boolean().optional(),
+    orderNo: z.string().max(100).optional(),
+    period: periodSchema.optional(),
+    payee: z
+      .object({
+        name: z.string().max(100).optional(),
+        bank: z.string().max(100).optional(),
+        account: z.string().max(34).optional(),
+      })
+      .strict()
+      .optional(),
+    lines: z
+      .array(
+        z
+          .object({
+            label: z.string().min(1).max(100),
+            amount: z.string().refine(isMoney),
+            period: periodSchema.optional(),
+          })
+          .strict(),
+      )
+      .max(20)
+      .optional(),
+  })
+  .strict()
+  .superRefine((analysis, context) => {
+    if (analysis.ambiguous && analysis.amount !== null) {
+      context.addIssue({
+        code: 'custom',
+        path: ['amount'],
+        message: 'Ambiguous payment amounts must remain null',
+      });
+    }
+  });
+
+/** 金额：去掉千分位逗号、货币符号和「元」，数字类型转成两位小数的字符串；空字符串当没有。 */
+function normalizeMoney(value: unknown): unknown {
+  if (typeof value === 'number') {
+    return Number.isFinite(value) && value >= 0 ? value.toFixed(2) : value;
+  }
+  if (typeof value !== 'string') {
+    return value;
+  }
+  const text = value
+    .normalize('NFKC')
+    .replace(/人民币|RMB|CNY|[¥￥$,\s元]/gi, '')
+    .replace(/(\.\d{2})0+$/, '$1');
+  return text === '' ? null : text;
+}
+
+/** 日期：「2026年9月3日」「2026/09/03」这类写法转成 YYYY-MM-DD；认不出的原样交给后面的校验。 */
+function normalizeDate(value: unknown): unknown {
+  if (typeof value !== 'string') {
+    return value;
+  }
+  const match = /^(20\d{2})[年\-/.](\d{1,2})[月\-/.](\d{1,2})日?$/.exec(value.normalize('NFKC').replace(/\s+/g, ''));
+  if (match === null) {
+    return value === '' ? null : value;
+  }
+  return `${match[1]}-${match[2]!.padStart(2, '0')}-${match[3]!.padStart(2, '0')}`;
+}
+
+function usableLines(input: unknown): Array<{ label: string; amount: string; period?: string }> | undefined {
+  if (!Array.isArray(input)) {
+    return undefined;
+  }
+  const lines: Array<{ label: string; amount: string; period?: string }> = [];
+  for (const item of input.slice(0, 20)) {
+    if (typeof item !== 'object' || item === null || Array.isArray(item)) {
+      continue;
+    }
+    const raw = item as Record<string, unknown>;
+    const label = typeof raw.label === 'string' ? scrubAccountNumbers(raw.label.replace(/\s+/g, ' ').trim()) : '';
+    const amount = normalizeMoney(raw.amount);
+    // 金额认不出、是 0 或负数的项丢掉：合计对不上时由决策标出来让人核对，不替人悄悄补
+    if (label === '' || [...label].length > 100 || typeof amount !== 'string' || !isMoney(amount) || parseFen(amount) <= 0) {
+      continue;
+    }
+    const period = parsePeriod(raw.period);
+    lines.push({ label, amount, ...(period === null ? {} : { period }) });
+  }
+  return lines.length === 0 ? undefined : lines;
+}
+
+/**
+ * 公账区的结果比店内宽松一档：模型常把金额写成「12,909.49」「¥6,785.00」，分类写成别的叫法，
+ * 月份写成「2026年7月」，这些先整理成规范的值；不认识的分类、月份当作没有，不让整张凭证识别失败。
+ * 账号只留在 payee.account 里：商户名、依据、关键词里出现账号一律抹掉（关键词会被学成规则，不能是账号）。
+ */
+function usableCompanyFields(input: unknown): unknown {
+  const base = usableHints(input);
+  if (typeof base !== 'object' || base === null || Array.isArray(base)) {
+    return base;
+  }
+  const { amount, category, merchant, date, keywords, evidence, lines, period, payee, ...rest } = base as Record<string, unknown>;
+  const cleanedLines = usableLines(lines);
+  const cleanedPayee = cleanPayee(payee);
+  const parsedPeriod = parsePeriod(period);
+  return {
+    ...rest,
+    amount: normalizeMoney(amount),
+    category: companyCategoryFromText(category),
+    merchant: typeof merchant === 'string' ? scrubAccountNumbers(merchant) : merchant,
+    date: normalizeDate(date),
+    keywords: Array.isArray(keywords)
+      ? keywords.filter((keyword) => typeof keyword !== 'string' || !looksLikeAccountNumber(keyword))
+      : keywords,
+    evidence: typeof evidence === 'string' ? scrubAccountNumbers(evidence) : evidence,
+    ...(cleanedLines === undefined ? {} : { lines: cleanedLines }),
+    ...(parsedPeriod === null ? {} : { period: parsedPeriod }),
+    ...(cleanedPayee === undefined ? {} : { payee: cleanedPayee }),
+  };
+}
+
+export function validateCompanyAnalysis(input: unknown): Analysis {
+  const result = companyAnalysisSchema.safeParse(usableCompanyFields(input));
   if (!result.success) {
     throw new AiError('INVALID_RESPONSE', true);
   }

@@ -1,11 +1,21 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  ALL_CATEGORIES,
+  CATEGORIES,
+  COMPANY_CATEGORIES,
   canMergeReceipt,
+  categoriesFor,
+  categoryLedger,
   formGroupLabel,
   formatFen,
+  formatPeriod,
+  isLedger,
+  isPeriod,
+  ledgerOf,
   netFen,
   parseFen,
+  parsePeriod,
   receiptCaption,
   suggestMerges,
   type Analysis,
@@ -312,5 +322,119 @@ describe('suggestMerges', () => {
     expect(suggestMerges([half(1), receipt(2), receipt(2), half(1)])).toEqual([
       { receiptIds: ['r1', 'r2'], basis: ['merchant', 'date'] },
     ]);
+  });
+});
+
+describe('ledgers and company categories', () => {
+  it('keeps the two ledgers\' categories apart and knows which ledger a category belongs to', () => {
+    expect(COMPANY_CATEGORIES).toEqual([
+      '肉款',
+      '品牌管理费',
+      '店面租金',
+      '物业费',
+      '水费',
+      '电费',
+      '空调能源费',
+      '其他公账支出',
+    ]);
+    expect(CATEGORIES.some((category) => (COMPANY_CATEGORIES as readonly string[]).includes(category))).toBe(false);
+    expect(ALL_CATEGORIES).toHaveLength(CATEGORIES.length + COMPANY_CATEGORIES.length);
+    expect(categoriesFor('store')).toBe(CATEGORIES);
+    expect(categoriesFor('company')).toBe(COMPANY_CATEGORIES);
+    for (const category of CATEGORIES) expect(categoryLedger(category)).toBe('store');
+    for (const category of COMPANY_CATEGORIES) expect(categoryLedger(category)).toBe('company');
+    // 店内原有的「肉类」「租金及管理费」不动，也不会被当成公账分类
+    expect(categoryLedger('肉类')).toBe('store');
+    expect(categoryLedger('租金及管理费')).toBe('store');
+  });
+
+  it('treats a row without a ledger, or with one it does not know, as the store', () => {
+    expect(ledgerOf({})).toBe('store');
+    expect(ledgerOf({ ledger: 'store' })).toBe('store');
+    expect(ledgerOf({ ledger: 'company' })).toBe('company');
+    expect(ledgerOf(null)).toBe('store');
+    expect(ledgerOf(undefined)).toBe('store');
+    expect(ledgerOf({ ledger: 'other' as never })).toBe('store');
+    expect(isLedger('store')).toBe(true);
+    expect(isLedger('company')).toBe(true);
+    for (const value of ['', 'Company', 'both', null, undefined, 1, {}]) expect(isLedger(value)).toBe(false);
+  });
+});
+
+describe('expense months', () => {
+  it('accepts only YYYY-MM from 2000 to 2099 with a month from 01 to 12', () => {
+    for (const value of ['2026-07', '2026-09', '2000-01', '2099-12', '2026-10', '2026-12']) {
+      expect(isPeriod(value)).toBe(true);
+    }
+    for (const value of [
+      '2026-7',
+      '2026-00',
+      '2026-13',
+      '1999-12',
+      '2100-01',
+      '2026-07-01',
+      '2026年7月',
+      ' 2026-07',
+      '2026-07 ',
+      '',
+      null,
+      undefined,
+      202607,
+    ]) {
+      expect(isPeriod(value)).toBe(false);
+    }
+  });
+
+  it('reads the ways a month is written on bank receipts and fee notices', () => {
+    const accepted: Array<[string, string]> = [
+      ['2026-07', '2026-07'],
+      ['2026-7', '2026-07'],
+      ['2026年7月', '2026-07'],
+      ['2026年07月', '2026-07'],
+      ['2026年 7 月', '2026-07'],
+      ['2026年12月', '2026-12'],
+      ['2026/7', '2026-07'],
+      ['2026/07', '2026-07'],
+      ['2026.07', '2026-07'],
+      ['2026.7月', '2026-07'],
+      ['202607', '2026-07'],
+      ['２０２６年９月', '2026-09'],
+      ['  2026-09  ', '2026-09'],
+    ];
+    for (const [written, period] of accepted) expect(parsePeriod(written)).toBe(period);
+  });
+
+  it('does not guess when a month cannot be read', () => {
+    for (const value of [
+      '',
+      '7月',
+      '2026',
+      '2026年',
+      '2026年0月',
+      '2026年13月',
+      '2026-13',
+      '2026-00',
+      '1999年7月',
+      '2026年7月1日',
+      '2026-07-15',
+      '上个月',
+      null,
+      undefined,
+      202607,
+      {},
+    ]) {
+      expect(parsePeriod(value)).toBeNull();
+    }
+  });
+
+  it('writes a month the way the payment form shows it', () => {
+    expect(formatPeriod('2026-07')).toBe('2026年7月');
+    expect(formatPeriod('2026-09')).toBe('2026年9月');
+    expect(formatPeriod('2026-12')).toBe('2026年12月');
+    expect(formatPeriod('2031-01')).toBe('2031年1月');
+    for (const written of ['2026年7月', '2026-7', '202609']) {
+      expect(isPeriod(parsePeriod(written))).toBe(true);
+      expect(formatPeriod(parsePeriod(written)!)).toMatch(/^2026年(7|9)月$/);
+    }
   });
 });

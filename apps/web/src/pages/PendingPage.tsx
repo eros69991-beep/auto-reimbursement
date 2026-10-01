@@ -25,6 +25,7 @@ const labels: Record<Reason, string> = {
   unreadable: '图片无法读取',
   rule_conflict: '分类规则冲突',
   incomplete_screenshot: '截图不完整：可能只是同一单的一部分，可以和相邻的截图合并',
+  lines_mismatch: '各项金额加起来和合计对不上，请核对每一项',
 };
 
 const basisLabels: Record<MergeSuggestion['basis'][number], string> = {

@@ -1,9 +1,9 @@
 import type { Analysis, ApiStatus } from '@auto-reimbursement/contracts';
 
 import type { Config } from '../config.js';
-import { RECEIPT_PROMPT } from './prompt.js';
-import { AiError, type AiImage, type ReceiptAnalyzer } from './types.js';
-import { validateAnalysis } from './validate.js';
+import { COMPANY_PROMPT, RECEIPT_PROMPT } from './prompt.js';
+import { AiError, type AiImage, type AnalyzeOptions, type ReceiptAnalyzer } from './types.js';
+import { validateAnalysis, validateCompanyAnalysis } from './validate.js';
 
 function contentFromResponse(input: unknown): string {
   if (
@@ -35,10 +35,12 @@ async function analyze(
   config: Config,
   fetcher: typeof fetch,
   image: AiImage,
+  options: AnalyzeOptions = {},
 ): Promise<Analysis> {
   if (config.ai === null) {
     throw new AiError('NOT_CONFIGURED', false);
   }
+  const company = options.ledger === 'company';
 
   let response: Response;
   try {
@@ -58,7 +60,7 @@ async function analyze(
             {
               role: 'user',
               content: [
-                { type: 'text', text: RECEIPT_PROMPT },
+                { type: 'text', text: company ? COMPANY_PROMPT : RECEIPT_PROMPT },
                 {
                   type: 'image_url',
                   image_url: {
@@ -110,7 +112,7 @@ async function analyze(
     }
     throw new AiError('INVALID_RESPONSE', true);
   }
-  return validateAnalysis(parsed);
+  return company ? validateCompanyAnalysis(parsed) : validateAnalysis(parsed);
 }
 
 export function createAnalyzer(
@@ -118,7 +120,7 @@ export function createAnalyzer(
   fetcher: typeof fetch = fetch,
 ): ReceiptAnalyzer {
   return {
-    analyzeReceipt: (image) => analyze(config, fetcher, image),
+    analyzeReceipt: (image, options) => analyze(config, fetcher, image, options),
   };
 }
 

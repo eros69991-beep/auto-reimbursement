@@ -12,15 +12,18 @@ export const CATEGORIES = [
 ] as const;
 
 /**
- * 公账付款区的分类：公司账户付出的款（肉款、品牌管理费、租金、物业费、水电空调）。
- * 和上面店内报销的分类互不相干，两个区各用各的；「其他公账支出」是兜底，装修款、广告费这类不在前五类里的也能记下来。
+ * 公账付款区的分类：公司账户付出的款（肉款、品牌管理费、租金、物业费、水费、电费、空调能源费）。
+ * 和上面店内报销的分类互不相干，两个区各用各的。水费、电费、空调能源费各是一类，付款单上各占一行；
+ * 「其他公账支出」是兜底，装修款、广告费这类不在前面几类里的也能记下来。
  */
 export const COMPANY_CATEGORIES = [
   '肉款',
   '品牌管理费',
   '店面租金',
   '物业费',
-  '水电空调',
+  '水费',
+  '电费',
+  '空调能源费',
   '其他公账支出',
 ] as const;
 
@@ -57,6 +60,41 @@ export function categoryLedger(category: Category): Ledger {
   return (COMPANY_CATEGORIES as readonly string[]).includes(category) ? 'company' : 'store';
 }
 
+// ---- 公账区：费用所属月份、收款方 ----
+
+/** 费用所属月份：「YYYY-MM」，例如 2026-07。通知单上每个收费项目的「期间」，回单用途里写的月份。 */
+export function isPeriod(value: unknown): value is string {
+  return typeof value === 'string' && /^20\d{2}-(0[1-9]|1[0-2])$/.test(value);
+}
+
+/**
+ * 把各种写法认成「YYYY-MM」：2026-07、2026-7、2026年7月、2026年07月、2026/7、2026.07、202607。
+ * 认不出（包括不是 20xx 年、月份不在 1–12）返回 null。
+ */
+export function parsePeriod(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const text = value.normalize('NFKC').replace(/\s+/g, '');
+  const match = /^(20\d{2})(?:年|[-/.])?(0?[1-9]|1[0-2])月?$/.exec(text);
+  if (match === null) return null;
+  return `${match[1]}-${match[2]!.padStart(2, '0')}`;
+}
+
+/** 写在付款单上的月份：2026-07 → 2026年7月 */
+export function formatPeriod(period: string): string {
+  const [year, month] = period.split('-');
+  return `${year}年${Number(month)}月`;
+}
+
+/**
+ * 收款方：付款单「备注」栏里写的收款户名、开户银行、银行账号。公账区的回单、收费通知单上有，AI 读出来，可以改。
+ * 账号只放在这一个字段里，依据、关键词、日志里都不出现。三项都可以没有。
+ */
+export interface Payee {
+  name?: string;
+  bank?: string;
+  account?: string;
+}
+
 export type Status =
   | 'recognizing'
   | 'pending'
@@ -80,11 +118,32 @@ export type Reason =
   | 'ambiguous_amount'
   | 'unreadable'
   | 'rule_conflict'
-  | 'incomplete_screenshot';
+  | 'incomplete_screenshot'
+  /** 公账区的多项凭证（收费通知单）：各项金额加起来和合计对不上 */
+  | 'lines_mismatch';
 
 export interface Confidence {
   amount: number;
   category: number;
+}
+
+/**
+ * 一张凭证上的一项：公账区的收费通知单拆成租金、物业费、水电空调几项，每项一个分类和金额（分）。
+ * 只在公账区出现；一张凭证至少 2 项、分类不重复、每项大于 0。
+ */
+export interface ReceiptLine {
+  category: Category;
+  fen: number;
+  /** 这一项的费用所属月份（YYYY-MM），通知单上每项的「期间」；没写就没有 */
+  period?: string;
+}
+
+/** AI 从收费通知单上读到的一个收费项目：项目名称原文 + 金额。服务器再把它映射成分类，留作依据。 */
+export interface AnalysisLine {
+  label: string;
+  amount: string;
+  /** 这一项的期间（YYYY-MM）；通知单上没写或认不出就没有 */
+  period?: string;
 }
 
 export interface Analysis {
@@ -100,6 +159,12 @@ export interface Analysis {
   incomplete?: boolean;
   /** 图中的订单号，用来判断两张截图是不是同一单。旧数据没有此字段。 */
   orderNo?: string | null;
+  /** 公账区的收费通知单：图上列出的各收费项目（照抄原文）。只在公账区识别时出现；amount 是通知单的合计。 */
+  lines?: AnalysisLine[];
+  /** 公账区：这笔款所属的月份（YYYY-MM），回单用途里写了月份或单据上写了费用期间才有。 */
+  period?: string;
+  /** 公账区：图上的收款方（户名、开户银行、账号）。 */
+  payee?: Payee;
 }
 
 export interface ImageRef {
@@ -130,6 +195,16 @@ export interface Receipt {
   poolExcluded?: boolean;
   /** 属于哪个区（店内报销 / 公账付款）。缺省（老数据）就是店内；创建后不再变。 */
   ledger?: Ledger;
+  /**
+   * 一张凭证拆成多项（公账区的收费通知单）：每项一个分类和金额；至少 2 项、分类不重复、每项大于 0，确认后各项之和等于 paidFen。
+   * 有这个字段时 category 取第一项，只作为兼容字段。没有就是单分类凭证（店内的都没有）。
+   * 「至少 2 项」指不同的（分类、月份）至少 2 种；分类相同但月份不同也是两项。
+   */
+  lines?: ReceiptLine[];
+  /** 公账区单分类凭证的费用所属月份（YYYY-MM）；有 lines 时月份在各项里，这里不用。 */
+  period?: string;
+  /** 公账区：收款方（户名、开户银行、账号），付款单备注栏里写。 */
+  payee?: Payee;
   id: string;
   original: ImageRef;
   refundImages: ImageRef[];

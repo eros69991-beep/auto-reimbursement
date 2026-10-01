@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises';
 
 import {
+  ledgerOf,
   parseFen,
   type Analysis,
   type Progress,
@@ -203,10 +204,12 @@ export function createQueue({
         throw new Error('ORIGINAL_UNAVAILABLE');
       }
       const bytes = await readFile(safePath(config.dataDir, entry.path));
-      const result = await analyzer.analyzeReceipt({
-        bytes,
-        mime: claimed.original.mime,
-      });
+      const image = { bytes, mime: claimed.original.mime };
+      // 公账区的凭证用公账的提示词和校验；店内的照旧只传图（调用方式和以前完全一样）
+      const result =
+        ledgerOf(claimed) === 'company'
+          ? await analyzer.analyzeReceipt(image, { ledger: 'company' })
+          : await analyzer.analyzeReceipt(image);
       onAnalyzed(id, result);
     } catch (error) {
       recordFailure(id, error);

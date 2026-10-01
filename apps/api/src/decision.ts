@@ -14,6 +14,7 @@ import {
   type Settings,
 } from '@auto-reimbursement/contracts';
 
+import { splitIntoLines, type LineSplit } from './company.js';
 import type { Store } from './db.js';
 import { refineDuplicates } from './duplicates.js';
 import { normalizeFeature } from './learning.js';
@@ -57,6 +58,44 @@ export function decide(
     strongMatches,
     analysis.category,
   );
+}
+
+/**
+ * 一张凭证按哪个区的规矩决策。公账区的收费通知单（AI 给了各收费项目）按明细决策：
+ * 分类由收费项目的关键词映射，不看规则、也不看 AI 的 category 置信度；其余按单分类决策（decide）。
+ */
+export function decideForLedger(
+  analysis: Analysis,
+  allRules: Rule[],
+  settings: Settings,
+  ledger: Ledger,
+): { decision: Decision; split: LineSplit | null } {
+  const split = ledger === 'company' ? splitIntoLines(analysis) : null;
+  return split === null
+    ? { decision: decide(analysis, allRules, settings, ledger), split }
+    : { decision: decideByLines(analysis, split, settings), split };
+}
+
+/**
+ * 多项（或只有一项、认得出分类的）收费通知单的决策：金额照常把关（置信度、是否有多个候选、截图是否完整），
+ * 另外各项金额之和必须等于合计（否则 lines_mismatch），有认不出的收费项目要人看一眼（category_uncertain）。
+ * 分类取第一项，只是兼容字段；每一项的分类和月份在 lines 里。
+ */
+function decideByLines(analysis: Analysis, split: LineSplit, settings: Settings): Decision {
+  const category = split.lines[0]!.category;
+  const reasons: Reason[] = amountUncertainty(analysis, settings);
+  if (
+    analysis.amount !== null &&
+    analysis.incomplete !== true &&
+    !analysis.ambiguous &&
+    split.sumFen !== parseFen(analysis.amount)
+  ) {
+    reasons.push('lines_mismatch');
+  }
+  if (split.hasFallback) {
+    reasons.push('category_uncertain');
+  }
+  return reasons.length === 0 ? ready(category) : pending(reasons, category);
 }
 
 function decideByAi(
@@ -168,9 +207,16 @@ export function applyAnalysis(
     }
 
     const recognizedFen = analysis.amount === null ? null : parseFen(analysis.amount);
-    const decision = decide(analysis, store.list('rules'), getSettings(store), ledgerOf(receipt));
+    const ledger = ledgerOf(receipt);
+    const { decision, split } = decideForLedger(analysis, store.list('rules'), getSettings(store), ledger);
+    // 公账区的明细、月份、收款方每次识别都重新来：先清掉旧的，再按这次的结果写
+    const base: Receipt = { ...receipt };
+    delete base.lines;
+    delete base.period;
+    delete base.payee;
     const analyzed: Receipt = {
-      ...receipt,
+      ...base,
+      ...(ledger === 'company' ? companyFields(analysis, split) : {}),
       analysis,
       recognizedFen,
       paidFen: recognizedFen,
@@ -207,6 +253,20 @@ export function applyAnalysis(
   });
 }
 
+/** 公账区识别结果落到凭证上的几项：多项明细、费用月份、收款方。 */
+function companyFields(analysis: Analysis, split: LineSplit | null): Pick<Receipt, 'lines' | 'period' | 'payee'> {
+  const fields: Pick<Receipt, 'lines' | 'period' | 'payee'> = {};
+  if (split !== null && split.lines.length >= 2) {
+    fields.lines = split.lines;
+  } else {
+    // 单分类：只有一项明细的通知单用这一项的月份，回单用单据上写的月份
+    const period = split?.lines[0]?.period ?? analysis.period;
+    if (period !== undefined) fields.period = period;
+  }
+  if (analysis.payee !== undefined) fields.payee = analysis.payee;
+  return fields;
+}
+
 const DECISION_REASONS: ReadonlySet<Reason> = new Set<Reason>([
   'amount_uncertain',
   'category_uncertain',
@@ -229,7 +289,7 @@ export function reapplyRules(store: Store, ledger?: Ledger): number {
       if (!canReapply(receipt) || (ledger !== undefined && ledgerOf(receipt) !== ledger)) {
         continue;
       }
-      const decision = decide(receipt.analysis!, rules, settings, ledgerOf(receipt));
+      const { decision } = decideForLedger(receipt.analysis!, rules, settings, ledgerOf(receipt));
       const next: Receipt = {
         ...receipt,
         category: decision.category,
@@ -271,10 +331,14 @@ function canReapply(receipt: Receipt): boolean {
   if (receipt.paidFen !== receipt.recognizedFen) {
     return false;
   }
+  // 公账区只有一项、认得出分类的收费通知单：自动判断的分类是这一项映射出来的，不是 AI 的 category 字段
+  const split = ledgerOf(receipt) === 'company' ? splitIntoLines(receipt.analysis) : null;
   const automaticCategory =
     receipt.ruleMatch?.mode === 'applied'
       ? receipt.ruleMatch.category
-      : receipt.analysis.category;
+      : split !== null
+        ? split.lines[0]!.category
+        : receipt.analysis.category;
   return receipt.category === automaticCategory;
 }
 
