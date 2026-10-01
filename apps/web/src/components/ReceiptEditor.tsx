@@ -1,6 +1,7 @@
 import { useId, useState } from 'react';
-import { CATEGORIES, formatFen, netFenOrNull, parseFen, type Category, type Receipt } from '@auto-reimbursement/contracts';
+import { CATEGORIES, formatFen, ledgerOf, netFenOrNull, parseFen, type Category, type Receipt } from '@auto-reimbursement/contracts';
 import { api, type ReceiptPatch } from '../api';
+import { CompanyReceiptEditor } from './CompanyReceiptEditor';
 
 type EditorProps = { receipt: Receipt; onSaved: (receipt: Receipt) => void };
 
@@ -11,7 +12,8 @@ function initialAmount(receipt: Receipt): string {
   return net === null ? '' : formatFen(net);
 }
 
-export function ReceiptEditor({ receipt, onSaved }: EditorProps): React.JSX.Element {
+// 店内凭证的编辑框：金额、分类、日期。公账凭证另有自己的编辑框（费用月份、拆成多项、收款方），见 ReceiptEditor
+function StoreReceiptEditor({ receipt, onSaved }: EditorProps): React.JSX.Element {
   const [amount, setAmount] = useState(initialAmount(receipt));
   const [category, setCategory] = useState<Category | ''>(receipt.category ?? '');
   const [date, setDate] = useState(receipt.date ?? '');
@@ -100,4 +102,9 @@ export function ReceiptEditor({ receipt, onSaved }: EditorProps): React.JSX.Elem
       {error && <p role="alert">{error}</p>}
     </section>
   );
+}
+
+/** 凭证编辑框：按凭证所在的区选用店内或公账的编辑框，页面不用关心区。 */
+export function ReceiptEditor(props: EditorProps): React.JSX.Element {
+  return ledgerOf(props.receipt) === 'company' ? <CompanyReceiptEditor {...props} /> : <StoreReceiptEditor {...props} />;
 }

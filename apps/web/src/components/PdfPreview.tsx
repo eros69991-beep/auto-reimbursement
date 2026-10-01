@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import type { PDFPageProxy } from 'pdfjs-dist/legacy/build/pdf.mjs';
+import type { Ledger } from '@auto-reimbursement/contracts';
 
 import { authHeaders } from '../api';
+import { sayFor, type Say } from '../wording';
 
 // 预览请求被服务器拒绝时，再取一次看它返回的说明；取不到就返回 null，由调用方按状态码给通用说明。
 // 第二次请求如果成功了（说明上一次只是偶发故障），马上取消，不去下载整份 PDF。
@@ -90,10 +92,11 @@ async function explainFailure(cause: unknown, url: string, progress: { loaded: n
   return { message: `预览加载失败：${reason}`, detail };
 }
 
-// 完整 PDF 里夹着每张报销单的凭证附件页（页眉写「第 N 张报销单 · … 原始凭证/退款凭证」）。对账区左边只看报销单，
-// 凭证图在另一边单独看，所以附件页不画——老批次的预览只能拿到整份 PDF 时，这样既省内存也不会满屏凭证。
+// 完整 PDF 里夹着每张报销单的凭证附件页（页眉写「第 N 张报销单 · … 原始凭证/退款凭证」，公账区是「第 N 张付款单」）。
+// 对账区左边只看报销单，凭证图在另一边单独看，所以附件页不画——老批次的预览只能拿到整份 PDF 时，
+// 这样既省内存也不会满屏凭证。
 function isAttachmentPage(text: string): boolean {
-  return !text.includes('单据及附件共') && text.includes('张报销单') && /原始凭证|退款凭证/.test(text);
+  return !text.includes('单据及附件共') && /张(?:报销|付款)单/.test(text) && /原始凭证|退款凭证/.test(text);
 }
 
 /**
@@ -127,16 +130,16 @@ type Status =
   | { kind: 'done' }
   | { kind: 'error'; failure: Failure };
 
-function statusLine(status: Status): string | null {
+function statusLine(status: Status, say: Say): string | null {
   if (status.kind === 'loading') {
-    if (status.stalled) return '网络很慢，还在加载报销单……可以点「重试」。';
-    if (status.loaded <= 0) return '正在加载报销单…';
+    if (status.stalled) return say('网络很慢，还在加载报销单……可以点「重试」。');
+    if (status.loaded <= 0) return say('正在加载报销单…');
     if (status.total > 0) {
-      return `正在加载报销单… ${Math.min(100, Math.floor((status.loaded / status.total) * 100))}%（${formatBytes(status.loaded)} / ${formatBytes(status.total)}）`;
+      return `${say('正在加载报销单…')} ${Math.min(100, Math.floor((status.loaded / status.total) * 100))}%（${formatBytes(status.loaded)} / ${formatBytes(status.total)}）`;
     }
-    return `正在加载报销单… 已收到 ${formatBytes(status.loaded)}`;
+    return `${say('正在加载报销单…')} 已收到 ${formatBytes(status.loaded)}`;
   }
-  if (status.kind === 'drawing') return `正在画报销单… 第 ${status.page}/${status.pages} 页`;
+  if (status.kind === 'drawing') return `${say('正在画报销单…')} 第 ${status.page}/${status.pages} 页`;
   return null;
 }
 
@@ -158,11 +161,15 @@ export function PdfPreview({
   url,
   minWidth = 0,
   onSheetDrawn,
+  ledger = 'store',
 }: {
   url: string;
   minWidth?: number;
   onSheetDrawn?: (sheetIndex: number, canvas: HTMLCanvasElement) => void;
+  /** 公账批次的单据叫付款单，提示文字跟着换；不给就是店内 */
+  ledger?: Ledger;
 }): React.JSX.Element {
+  const say = sayFor(ledger);
   const containerRef = useRef<HTMLDivElement>(null);
   const onSheetDrawnRef = useRef(onSheetDrawn);
   useEffect(() => {
@@ -255,7 +262,7 @@ export function PdfPreview({
         window.clearInterval(stallTimer);
         if (cancelled) return;
         const failure = await explainFailure(cause, requestUrl, progress, startedAt);
-        if (!cancelled) setStatus({ kind: 'error', failure });
+        if (!cancelled) setStatus({ kind: 'error', failure: { ...failure, message: say(failure.message) } });
       }
     })();
     return () => {
@@ -263,11 +270,11 @@ export function PdfPreview({
       window.clearInterval(stallTimer);
       void loadingTask?.destroy().catch(() => undefined);
     };
-  }, [url, attempt, minWidth]);
+  }, [url, attempt, minWidth, say]);
 
-  const line = statusLine(status);
+  const line = statusLine(status, say);
   return (
-    <div className="pdf-preview-stack" role="document" aria-label="完整报销 PDF 预览" aria-busy={status.kind === 'loading' || status.kind === 'drawing'}>
+    <div className="pdf-preview-stack" role="document" aria-label={say('完整报销 PDF 预览')} aria-busy={status.kind === 'loading' || status.kind === 'drawing'}>
       {line !== null && (
         <p className="pdf-preview-status" role="status">
           {line}

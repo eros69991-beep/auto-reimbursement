@@ -4,11 +4,14 @@ import type {
   BackupResult,
   Category,
   FormOptions,
+  Ledger,
   Progress,
   HistoryMonth,
   MaintenanceResult,
   Note,
+  Payee,
   Receipt,
+  ReceiptLine,
   Rule,
   Settings,
   Totals,
@@ -64,6 +67,15 @@ export function authHeaders(): Record<string, string> {
 
 function notifyUnauthorized(): void {
   window.dispatchEvent(new Event(UNAUTHORIZED_EVENT));
+}
+
+/**
+ * 地址后面带上区域：公账付款是 ?ledger=company，店内是 ledger=store。不给区域（undefined）就什么都不带，
+ * 服务器按店内处理——店内这边的老调用写法一个字都没变。
+ */
+export function withLedger(path: string, ledger: Ledger | undefined): string {
+  if (ledger === undefined) return path;
+  return `${path}${path.includes('?') ? '&' : '?'}ledger=${ledger}`;
 }
 
 // 网络层失败（断网、服务器不可达）时 fetch 抛 TypeError('Failed to fetch')，
@@ -152,10 +164,12 @@ export async function openAuthed(path: string, filename?: string): Promise<void>
 function upload(
   files: File[],
   onProgress?: (loaded: number, total: number) => void,
+  ledger?: Ledger,
 ): Promise<UploadResult> {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
-    xhr.open('POST', apiUrl('/api/receipts/upload'));
+    // 上传请求不能带表单字段，区域放在地址的查询参数里
+    xhr.open('POST', apiUrl(withLedger('/api/receipts/upload', ledger)));
     xhr.responseType = 'json';
     const auth = authHeaders();
     if (auth.Authorization !== undefined) {
@@ -196,12 +210,14 @@ function receiptOriginalUrl(id: string): string {
   return apiUrl(`/api/receipts/${encodeURIComponent(id)}/original-image`);
 }
 
-function receipts(view: 'pool' | 'pending' | 'excluded' | 'deleted'): Promise<Receipt[]> {
-  return requestJson<Receipt[]>(`/api/receipts?view=${view}`);
+export type ReceiptView = 'pool' | 'pending' | 'excluded' | 'deleted';
+
+function receipts(view: ReceiptView, ledger?: Ledger): Promise<Receipt[]> {
+  return requestJson<Receipt[]>(withLedger(`/api/receipts?view=${view}`, ledger));
 }
 
-function totals(): Promise<Totals> {
-  return requestJson<Totals>('/api/pool/totals');
+function totals(ledger?: Ledger): Promise<Totals> {
+  return requestJson<Totals>(withLedger('/api/pool/totals', ledger));
 }
 
 // P-11：商户与日期也可修正（商户打印在报销单摘要栏，日期参与查重与对账）
@@ -210,6 +226,12 @@ export interface ReceiptPatch {
   category?: Category;
   merchant?: string;
   date?: string;
+  /** 公账区：多项明细（至少 2 项）。给了明细，金额由各项之和决定，分类取第一项；null 表示合回单项 */
+  lines?: ReceiptLine[] | null;
+  /** 公账区：单项凭证的费用月份（YYYY-MM）；null 表示去掉。有明细时月份写在各项里，不能再给 */
+  period?: string | null;
+  /** 公账区：收款方（户名、开户银行、银行账号）；null 表示去掉 */
+  payee?: Payee | null;
 }
 
 function updateReceipt(id: string, patch: ReceiptPatch): Promise<Receipt> {
@@ -304,37 +326,43 @@ function createBatch(ids: string[], options: FormOptions): Promise<Batch> {
 }
 
 function batch(id: string): Promise<Batch> { return requestJson(`/api/batches/${encodeURIComponent(id)}`); }
-function moveGroup(id: string, category: Category, direction: -1 | 1): Promise<Batch> { return requestJson(`/api/batches/${encodeURIComponent(id)}/move`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ category, direction }) }); }
+// 公账区同一分类可以按月份分成几行（电费 7 月、电费 8 月），移动时要带上是哪个月份的那一行
+function moveGroup(id: string, category: Category, direction: -1 | 1, period?: string): Promise<Batch> { return requestJson(`/api/batches/${encodeURIComponent(id)}/move`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(period === undefined ? { category, direction } : { category, direction, period }) }); }
 function saveBatchOptions(id: string, options: FormOptions, noteBySheet: Record<string, string | null>): Promise<Batch> { return requestJson(`/api/batches/${encodeURIComponent(id)}/options`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ options, noteBySheet }) }); }
 function createBatchNote(id: string, input: { name: string; content: string }): Promise<Batch> { return requestJson(`/api/batches/${encodeURIComponent(id)}/notes`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) }); }
 function updateBatchNote(id: string, noteId: string, input: { content: string; name?: string }): Promise<Batch> { return requestJson(`/api/batches/${encodeURIComponent(id)}/notes/${encodeURIComponent(noteId)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) }); }
 function exportBatch(id: string): Promise<Batch> { return requestJson(`/api/batches/${encodeURIComponent(id)}/export`, { method: 'POST' }); }
 function cancelBatch(id: string): Promise<Batch> { return requestJson(`/api/batches/${encodeURIComponent(id)}/cancel`, { method: 'POST' }); }
-function history(): Promise<HistoryMonth[]> { return requestJson('/api/history'); }
+function history(ledger?: Ledger): Promise<HistoryMonth[]> { return requestJson(withLedger('/api/history', ledger)); }
 function saveSettings(settings: Settings): Promise<Settings> { return requestJson('/api/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(settings) }); }
 async function saveSignature(file: File): Promise<Settings> { const data = new FormData(); data.append('file', file); return requestJson('/api/settings/signature', { method: 'POST', body: data }); }
 function notes(): Promise<Note[]> { return requestJson('/api/notes'); }
 function saveNote(note: Note): Promise<Note> { return requestJson(`/api/notes/${encodeURIComponent(note.id)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(note) }); }
 function deleteNote(id: string): Promise<void> { return requestJson(`/api/notes/${encodeURIComponent(id)}`, { method: 'DELETE' }); }
-function rules(): Promise<Rule[]> { return requestJson('/api/rules'); }
+// 不给区域返回全部规则；设置页两个区各传自己的，只看自己区的
+function rules(ledger?: Ledger): Promise<Rule[]> { return requestJson(withLedger('/api/rules', ledger)); }
 function saveRule(rule: Rule): Promise<Rule> { return requestJson(`/api/rules/${encodeURIComponent(rule.id)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(rule) }); }
 function deleteRule(id: string): Promise<void> { return requestJson(`/api/rules/${encodeURIComponent(id)}`, { method: 'DELETE' }); }
-// 规则改动后对待处理凭证重新套用（不调用 AI），返回有变化的张数
-function reapplyRules(): Promise<MaintenanceResult> { return requestJson('/api/rules/reapply', { method: 'POST' }); }
+// 规则改动后对待处理凭证重新套用（不调用 AI），返回有变化的张数；给了区域就只处理那个区的
+function reapplyRules(ledger?: Ledger): Promise<MaintenanceResult> { return requestJson(withLedger('/api/rules/reapply', ledger), { method: 'POST' }); }
 function apiStatus(): Promise<import('@auto-reimbursement/contracts').ApiStatus> { return requestJson('/api/ai/status'); }
-function archive(month: string): Promise<MaintenanceResult> { return requestJson(`/api/archive/${encodeURIComponent(month)}`, { method: 'POST' }); }
-function unarchive(month: string): Promise<MaintenanceResult> { return requestJson(`/api/unarchive/${encodeURIComponent(month)}`, { method: 'POST' }); }
-function cleanup(month: string, confirmation: string): Promise<MaintenanceResult> { return requestJson(`/api/cleanup/${encodeURIComponent(month)}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ confirmation }) }); }
+function archive(month: string, ledger?: Ledger): Promise<MaintenanceResult> { return requestJson(withLedger(`/api/archive/${encodeURIComponent(month)}`, ledger), { method: 'POST' }); }
+function unarchive(month: string, ledger?: Ledger): Promise<MaintenanceResult> { return requestJson(withLedger(`/api/unarchive/${encodeURIComponent(month)}`, ledger), { method: 'POST' }); }
+function cleanup(month: string, confirmation: string, ledger?: Ledger): Promise<MaintenanceResult> { return requestJson(withLedger(`/api/cleanup/${encodeURIComponent(month)}`, ledger), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ confirmation }) }); }
 function backup(): Promise<BackupResult> { return requestJson('/api/backup', { method: 'POST' }); }
 
-export function formOptionsFromSettings(settings: Settings, now: Date): FormOptions {
+/**
+ * 生成付款单/报销单时的选项。公账区的「付款单位」是设置里单独的 companyDepartment（没填就是空），
+ * 店内的「部门」不会被带过去；日期、签名人两个区共用同一套设置。
+ */
+export function formOptionsFromSettings(settings: Settings, now: Date, ledger: Ledger = 'store'): FormOptions {
   const date = [
     now.getFullYear(),
     String(now.getMonth() + 1).padStart(2, '0'),
     String(now.getDate()).padStart(2, '0'),
   ].join('-');
   return {
-    department: settings.department,
+    department: ledger === 'company' ? (settings.companyDepartment ?? '') : settings.department,
     date: settings.dateMode === 'blank'
       ? null
       : settings.dateMode === 'custom'

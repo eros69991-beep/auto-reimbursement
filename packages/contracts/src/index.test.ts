@@ -15,6 +15,7 @@ import {
   isLedger,
   isPeriod,
   ledgerOf,
+  linesCaption,
   linesTotalFen,
   netFen,
   parseFen,
@@ -114,7 +115,9 @@ describe('form group labels', () => {
       groupKey({ category: '水费', period: '2026-07' }),
     ]);
     expect(keys.size).toBe(4);
-    expect(groupKey({ category: '电费', period: '2026-07', part: 2 })).toBe(groupKey({ category: '电费', period: '2026-07' }));
+    // 被拆到第二张上的那一部分（带 part）还是同一行
+    const secondPart = { category: '电费' as const, period: '2026-07', part: 2 };
+    expect(groupKey(secondPart)).toBe(groupKey({ category: '电费', period: '2026-07' }));
   });
 });
 
@@ -254,6 +257,52 @@ function half(order: number, overrides: Partial<Receipt> = {}): Receipt {
     ...overrides,
   });
 }
+
+describe('caption of a receipt with several items', () => {
+  const row = (category: '店面租金' | '物业费' | '水费' | '电费' | '空调能源费', period: string, fen: number, position = 1, count = 1) => ({
+    group: { category, period, totalFen: fen },
+    position,
+    count,
+    fen,
+  });
+  const notice = { lines: [1, 2, 3, 4, 5], netFen: 3956163 };
+  const allRows = [
+    row('店面租金', '2026-09', 2281410),
+    row('物业费', '2026-09', 506980),
+    row('水费', '2026-07', 4886),
+    row('电费', '2026-07', 1146687),
+    row('空调能源费', '2026-07', 16200),
+  ];
+
+  it('writes the total and how many items on the first line, then the items three to a line', () => {
+    expect(linesCaption(1, notice, allRows)).toBe([
+      '第 1 张付款单 · 本张凭证 39561.63，含 5 项',
+      '店面租金（2026年9月） 22814.10 · 物业费（2026年9月） 5069.80 · 水费（2026年7月） 48.86',
+      '电费（2026年7月） 11466.87 · 空调能源费（2026年7月） 162.00',
+    ].join('\n'));
+  });
+
+  it('says how many of the items are on this sheet when only some of them are', () => {
+    const headline = linesCaption(2, notice, allRows.slice(0, 2)).split('\n')[0];
+    expect(headline).toBe('第 2 张付款单 · 本张凭证 39561.63，含 5 项（本张单据上 2 项）');
+  });
+
+  it('counts the rows themselves when the receipt does not carry its list of items', () => {
+    expect(linesCaption(1, { netFen: 100 }, [row('电费', '2026-07', 100)]).split('\n')[0])
+      .toBe('第 1 张付款单 · 本张凭证 1.00，含 1 项');
+  });
+
+  it('calls the form by the name of its ledger, and a company form when none is given', () => {
+    expect(linesCaption(1, notice, allRows, 'store').split('\n')[0]).toContain('第 1 张报销单');
+    expect(linesCaption(1, notice, allRows, 'company').split('\n')[0]).toContain('第 1 张付款单');
+    expect(linesCaption(1, notice, allRows).split('\n')[0]).toContain('第 1 张付款单');
+  });
+
+  it('names a continued row as the form does', () => {
+    const continued = { group: { category: '电费' as const, period: '2026-07', part: 2, totalFen: 300 }, position: 1, count: 1, fen: 100 };
+    expect(linesCaption(1, { lines: [1, 2], netFen: 100 }, [continued]).split('\n')[1]).toBe('电费（2026年7月）（续） 1.00');
+  });
+});
 
 describe('canMergeReceipt', () => {
   it('allows receipts that are pending or ready and not yet used anywhere', () => {

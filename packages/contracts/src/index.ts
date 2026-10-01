@@ -392,6 +392,40 @@ export function receiptCaption(input: {
   ].join(' · ');
 }
 
+/** 一张凭证在一张单据上占的一行：哪一行、在这一行里排第几、这一行里一共几张、这一行里的金额 */
+export interface SheetRow {
+  group: Pick<FormGroup, 'category' | 'part' | 'period' | 'totalFen'>;
+  position: number;
+  count: number;
+  fen: number;
+}
+
+/** 一行里写几项：「分类（月份）金额」三项一行。 */
+const ROW_ITEMS_PER_LINE = 3;
+
+/**
+ * 公账区的多项凭证（收费通知单）在一张单据上的对账说明：第一行写第几张单据、这张凭证的合计和一共几项
+ * （只有一部分项目排在这张单上时写明本单几项），后面几行列出排在这张单上的各项（分类、月份、金额）。
+ * 单据的叫法随区：店内「报销单」，公账「付款单」（多项凭证只有公账区有，不给区时按公账写）。
+ * PDF 附件页页眉和网页对账区共用这一个写法；行与行之间用换行隔开。
+ */
+export function linesCaption(
+  sheetNumber: number,
+  item: { lines?: ReadonlyArray<unknown>; netFen: number },
+  rows: SheetRow[],
+  ledger: Ledger = 'company',
+): string {
+  const total = item.lines?.length ?? rows.length;
+  const onThisSheet = rows.length < total ? `（本张单据上 ${rows.length} 项）` : '';
+  const headline = `第 ${sheetNumber} 张${formNameOf(ledger)} · 本张凭证 ${formatFen(item.netFen)}，含 ${total} 项${onThisSheet}`;
+  const items = rows.map((row) => `${formGroupLabel(row.group)} ${formatFen(row.fen)}`);
+  const lines: string[] = [];
+  for (let start = 0; start < items.length; start += ROW_ITEMS_PER_LINE) {
+    lines.push(items.slice(start, start + ROW_ITEMS_PER_LINE).join(' · '));
+  }
+  return [headline, ...lines].join('\n');
+}
+
 export interface FormSheet {
   id: string;
   groups: FormGroup[];

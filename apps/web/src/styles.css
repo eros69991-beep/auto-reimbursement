@@ -71,6 +71,15 @@ fieldset { margin: 1rem 0; }
 /* P-14：当前页高亮 */
 .app-header nav button[aria-current="page"] { border-color: #2563eb; background: #e8effd; font-weight: 600; }
 
+/* 区域切换：店内报销 / 公账付款。公账区整套换成青绿色，一眼看出现在在哪个区 */
+.ledger-switch { display: inline-flex; border: 1px solid #c7d0de; border-radius: .6rem; overflow: hidden; }
+.ledger-switch button { padding: .25rem 1rem; border: 0; border-radius: 0; background: #fff; white-space: nowrap; cursor: pointer; }
+.ledger-switch button + button { border-left: 1px solid #c7d0de; }
+.ledger-switch button[aria-pressed="true"] { background: #2563eb; color: #fff; font-weight: 600; }
+.app-header[data-ledger="company"] { border-top: .3rem solid #0f766e; }
+.app-header[data-ledger="company"] .ledger-switch button[aria-pressed="true"] { background: #0f766e; }
+.app-header[data-ledger="company"] nav button[aria-current="page"] { border-color: #0f766e; background: #e0f2f1; }
+
 .page-content { width: min(100% - 2rem, 56rem); margin: 2rem auto; }
 
 .upload-panel, .progress-panel, .upload-results {
@@ -124,6 +133,24 @@ fieldset { margin: 1rem 0; }
 .receipt-editor label { display: grid; gap: .25rem; }
 .field-hint { font-size: .85rem; color: #5b6472; }
 .refund-note { margin: .25rem 0; font-size: .9rem; color: #5b6472; }
+/* 公账：通知单拆成的各项、收款方 */
+.receipt-lines { margin: .25rem 0; padding-left: 1.2rem; font-size: .95rem; font-variant-numeric: tabular-nums; }
+.receipt-payee { display: grid; gap: .1rem; margin: .25rem 0; font-size: .9rem; }
+.receipt-payee > div { display: flex; flex-wrap: wrap; gap: .1rem .5rem; }
+.receipt-payee dt { margin: 0; color: #5b6472; }
+.receipt-payee dd { margin: 0; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; word-break: break-all; }
+/* 公账凭证编辑框：拆成多项、收款方。fieldset 不当 grid 用，旧一点的浏览器也一样排 */
+.company-editor fieldset { min-width: 0; margin: .25rem 0; padding: .4rem .75rem .6rem; border: 1px solid #c9d6d4; border-radius: .6rem; }
+.company-editor legend { padding: 0 .4rem; font-size: .9rem; color: #0f5f58; }
+.company-editor fieldset label { margin: .4rem 0; }
+.line-row { display: grid; grid-template-columns: minmax(0, 1fr); gap: .25rem; padding: .25rem 0 .6rem; border-bottom: 1px dashed #c9d6d4; }
+.line-row label { margin: .25rem 0; }
+.line-row button { justify-self: start; }
+.lines-total { margin: .6rem 0 .25rem; font-weight: 600; font-variant-numeric: tabular-nums; }
+@media (min-width: 640px) {
+  .line-row { grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) minmax(0, 1fr) auto; align-items: end; gap: .5rem; }
+  .line-row button { justify-self: stretch; }
+}
 /* P-13：危险按钮与普通操作拉开距离，删除本身已有二次确认 */
 .danger-button { margin-top: 1rem; color: #8a2c0d; }
 .reason-list { margin: 1rem 0 .5rem; padding-left: 1.2rem; color: #8a2c0d; }
@@ -191,6 +218,17 @@ fieldset { margin: 1rem 0; }
 .attachment-viewer { display: flex; flex-direction: column; gap: .5rem; min-height: 0; flex: 1; }
 /* 说明里的「食材合计 588.00」不要从字中间断行：只在空格处换行，实在放不下再强制断 */
 .attachment-title { margin: 0; font-weight: 600; word-break: keep-all; overflow-wrap: anywhere; }
+/* 公账的收费通知单：说明里一行写合计，后面几行逐项列出，换行要保留（店内的说明没有换行，不受影响） */
+.attachment-title, .voucher-fullscreen-caption { white-space: pre-line; }
+/* 收款方（公账）：放在凭证图旁边，对着图核对户名、开户银行、银行账号 */
+.attachment-payee { margin: 0; padding: .5rem .75rem; background: #f0fdfa; border: 1px solid #99d6cf; border-radius: .6rem; }
+.attachment-payee-title { margin: 0 0 .25rem; font-size: .85rem; color: #0f5f58; }
+.attachment-payee dl { display: grid; gap: .15rem; margin: 0; }
+.attachment-payee dl > div { display: flex; flex-wrap: wrap; gap: .1rem .5rem; }
+.attachment-payee dt { margin: 0; color: #5b6472; flex: 0 0 auto; }
+.attachment-payee dd { margin: 0; font-weight: 600; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; word-break: break-all; }
+.attachment-payee-compact { flex: 0 0 auto; margin: 0 .6rem; padding: .25rem .6rem; background: #0b3b38; border-color: #2f6f69; font-size: .85rem; color: #fff; }
+.attachment-payee-compact dt { color: #b6dcd8; }
 .attachment-note { margin: 0; font-size: .9rem; color: #5b6472; }
 .attachment-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; }
 .attachment-position { min-width: 4rem; text-align: center; font-variant-numeric: tabular-nums; }

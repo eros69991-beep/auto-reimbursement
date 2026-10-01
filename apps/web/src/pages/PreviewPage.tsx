@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
-import { CATEGORIES, type Batch, type FormOptions } from '@auto-reimbursement/contracts';
+import { CATEGORIES, formGroupLabel, groupKey, ledgerOf, type Batch, type Category, type FormOptions, type Ledger } from '@auto-reimbursement/contracts';
 import { api, apiUrl, openAuthed } from '../api';
 import { friendlyError } from '../errors';
 import { NoteEditor } from '../components/NoteEditor';
 import { ReconcileWorkspace } from '../components/ReconcileWorkspace';
+import { parseRoute, routeHash } from '../routes';
+import { sayFor } from '../wording';
 
 interface SavedSnapshot {
   options: FormOptions;
@@ -18,8 +20,39 @@ function snapshotOf(batch: Batch): SavedSnapshot {
   return { options: batch.options, noteBySheet: noteBySheetOf(batch) };
 }
 
-export function PreviewPage({ batchId, onCancelled }: { batchId: string | null; onCancelled?: () => void }): React.JSX.Element {
+/** 「分类顺序」里的一行：店内是一个分类，公账是「分类 + 月份」（电费 7 月、电费 8 月是两行）。pages 是它出现在第几页（从 0 起）。 */
+interface OrderEntry {
+  category: Category;
+  period?: string;
+  pages: number[];
+}
+
+// 公账的行没有固定顺序，按它们在单据上出现的先后列出（同一行被拆到几页上只列一次）
+function companyRows(batch: Batch): Array<Pick<OrderEntry, 'category' | 'period'>> {
+  const rows = new Map<string, Pick<OrderEntry, 'category' | 'period'>>();
+  for (const group of batch.sheets.flatMap((sheet) => sheet.groups)) {
+    if (!rows.has(groupKey(group))) rows.set(groupKey(group), { category: group.category, period: group.period });
+  }
+  return [...rows.values()];
+}
+
+// 店内按固定的分类顺序列出
+function orderEntries(batch: Batch, ledger: Ledger): OrderEntry[] {
+  const rows = ledger === 'company' ? companyRows(batch) : CATEGORIES.map((category) => ({ category }));
+  return rows
+    .map((row) => ({
+      ...row,
+      // 这一行在第几页上（从 0 起）；凭证多到一张放不下的行会分在好几页上
+      pages: batch.sheets.flatMap((sheet, index) => sheet.groups.some((group) => groupKey(group) === groupKey(row)) ? [index] : []),
+    }))
+    .filter(({ pages }) => pages.length > 0);
+}
+
+export function PreviewPage({ batchId, onCancelled, ledger: routeLedger = 'store' }: { batchId: string | null; onCancelled?: () => void; ledger?: Ledger }): React.JSX.Element {
   const [batch, setBatch] = useState<Batch | null>(null);
+  // 以批次自己的区为准（付款单还是报销单、能用哪些分类）；批次还没加载出来时用地址里的区
+  const ledger = batch === null ? routeLedger : ledgerOf(batch);
+  const say = sayFor(ledger);
   const [revision, setRevision] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -63,6 +96,8 @@ export function PreviewPage({ batchId, onCancelled }: { batchId: string | null; 
   // 会在 effect 运行前漏掉守卫（e2e 曾复现）。监听器改为挂载一次、经 ref 读最新值。
   const dirtyRef = useRef(dirty);
   dirtyRef.current = dirty;
+  const ledgerRef = useRef(ledger);
+  ledgerRef.current = ledger;
 
   // P-05：有未保存修改时，关闭/刷新页面与站内跳转都要提示
   useEffect(() => {
@@ -73,8 +108,9 @@ export function PreviewPage({ batchId, onCancelled }: { batchId: string | null; 
     };
     const onHashChange = (event: HashChangeEvent) => {
       if (!dirtyRef.current) return;
-      const target = new URL(event.newURL).hash;
-      const leaving = !target.startsWith('#preview') && !/^#batches\/[^/]+\/preview$/.test(target);
+      // 留在本区的预览页（#preview、#batches/xx/preview，公账是 #company/…）不算离开；换到别的页或另一个区才算
+      const next = parseRoute(new URL(event.newURL).hash);
+      const leaving = next.page !== 'preview' || next.ledger !== ledgerRef.current;
       if (leaving && !window.confirm('有未保存的修改，确定离开吗？')) {
         window.location.hash = new URL(event.oldURL).hash;
       }
@@ -111,11 +147,14 @@ export function PreviewPage({ batchId, onCancelled }: { batchId: string | null; 
     }
   }
 
-  async function move(category: (typeof CATEGORIES)[number], direction: -1 | 1): Promise<void> {
+  async function move(category: Category, direction: -1 | 1, period?: string): Promise<void> {
     if (!batch) return;
     setBusy(true);
     try {
-      const moved = await api.moveGroup(batch.id, category, direction);
+      // 公账的行要带上是哪个月份的那一行；店内没有月份，调用写法不变
+      const moved = period === undefined
+        ? await api.moveGroup(batch.id, category, direction)
+        : await api.moveGroup(batch.id, category, direction, period);
       // P-05：服务器返回的是旧快照，必须合并回本地未保存的选项与备注选择
       setBatch({
         ...moved,
@@ -156,11 +195,12 @@ export function PreviewPage({ batchId, onCancelled }: { batchId: string | null; 
     }
     // P-05：导出即定稿，点击前二次确认将锁定的内容
     const { department, signerName, date } = batch.options;
-    if (
-      !window.confirm(
-        `生成后将锁定：部门 ${department || '（空）'}、报销人 ${signerName || '（空）'}、日期 ${date || '（空）'}。确定生成 PDF 吗？`,
-      )
-    ) {
+    const locked = [
+      `${say('部门')} ${department || '（空）'}`,
+      `${say('报销人')} ${signerName || '（空）'}`,
+      `日期 ${date || '（空）'}`,
+    ].join('、');
+    if (!window.confirm(`生成后将锁定：${locked}。确定生成 PDF 吗？`)) {
       return;
     }
     setBusy(true);
@@ -178,13 +218,13 @@ export function PreviewPage({ batchId, onCancelled }: { batchId: string | null; 
 
   async function cancelAndRecreate(): Promise<void> {
     if (!batch) return;
-    if (!window.confirm('撤销后票据将退回本次报销池，可修正后重新生成报销单；已生成的 PDF 将保留为作废件。确定撤销吗？')) return;
+    if (!window.confirm(say('撤销后票据将退回本次报销池，可修正后重新生成报销单；已生成的 PDF 将保留为作废件。确定撤销吗？'))) return;
     setBusy(true);
     try {
       await api.cancelBatch(batch.id);
       // P-28：撤销后清空 App 侧记忆的选中批次，避免「生成预览」再次打开已撤销批次
       onCancelled?.();
-      window.location.hash = '#pool';
+      window.location.hash = routeHash(ledger, 'pool');
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : '撤销失败');
       setBusy(false);
@@ -243,15 +283,15 @@ export function PreviewPage({ batchId, onCancelled }: { batchId: string | null; 
   if (batchId === null) {
     return (
       <main className="page-content">
-        <h2>生成预览</h2>
-        <p>请先在报销池生成报销单，或从历史报销单中选择一个批次。</p>
+        <h2>{say('生成预览')}</h2>
+        <p>{say('请先在报销池生成报销单，或从历史报销单中选择一个批次。')}</p>
       </main>
     );
   }
   if (batch === null) {
     return (
       <main className="page-content">
-        <h2>生成预览</h2>
+        <h2>{say('生成预览')}</h2>
         {error ? <p role="alert">{error}</p> : <p>正在加载预览…</p>}
       </main>
     );
@@ -267,7 +307,7 @@ export function PreviewPage({ batchId, onCancelled }: { batchId: string | null; 
 
   return (
     <main className="page-content reconcile-page">
-      <h2>生成预览</h2>
+      <h2>{say('生成预览')}</h2>
       {error && <p role="alert">{error}</p>}
       <ReconcileWorkspace batch={batch} previewUrl={`${previewUrl}?revision=${revision}`} />
       <p>
@@ -279,18 +319,18 @@ export function PreviewPage({ batchId, onCancelled }: { batchId: string | null; 
             const path = batch.pdfPath === null
               ? `/api/batches/${encodeURIComponent(batch.id)}/preview.pdf?attachments=1`
               : `/api/batches/${encodeURIComponent(batch.id)}/pdf`;
-            void openAuthed(path, `报销单-${batch.month}-${batch.id.slice(0, 8)}.pdf`).catch((reason: unknown) =>
+            void openAuthed(path, `${say('报销单')}-${batch.month}-${batch.id.slice(0, 8)}.pdf`).catch((reason: unknown) =>
               setError(errorText(reason, '打开 PDF 失败')),
             );
           }}
         >
-          {batch.pdfPath === null ? '预览完整 PDF（未定稿，含凭证页）' : '打开或下载 PDF'}
+          {batch.pdfPath === null ? say('预览完整 PDF（未定稿，含凭证页）') : '打开或下载 PDF'}
         </a>
       </p>
       <fieldset disabled={readonly || busy}>
-        <legend>报销单选项</legend>
+        <legend>{say('报销单选项')}</legend>
         <label>
-          部门
+          {say('部门')}
           <input
             value={batch.options.department}
             onChange={(e) => {
@@ -311,7 +351,7 @@ export function PreviewPage({ batchId, onCancelled }: { batchId: string | null; 
           />
         </label>
         <label>
-          签名人
+          {say('签名人')}
           <input
             value={batch.options.signerName}
             onChange={(e) => {
@@ -373,30 +413,26 @@ export function PreviewPage({ batchId, onCancelled }: { batchId: string | null; 
       </fieldset>
       <section>
         <h3>分类顺序</h3>
-        {CATEGORIES.map((category) => ({
-          category,
-          // 这个分类在第几页上（从 0 起）；凭证多到一张放不下的分类会分在好几页上
-          pages: batch.sheets.flatMap((sheet, index) =>
-            sheet.groups.some((group) => group.category === category) ? [index] : [],
-          ),
-        })).filter(({ pages }) => pages.length > 0).map(({ category, pages }) => {
+        {orderEntries(batch, ledger).map((entry) => {
+          const { category, period, pages } = entry;
           const split = pages.length > 1;
+          const label = formGroupLabel(entry);
           return (
-            <p key={category}>
-              {category}{' '}
+            <p key={groupKey(entry)}>
+              {label}{' '}
               <button
                 type="button"
                 disabled={readonly || busy || split || pages[0] === 0}
-                onClick={() => void move(category, -1)}
+                onClick={() => void move(category, -1, period)}
               >
                 上一页
               </button>{' '}
-              <button type="button" disabled={readonly || busy || split} onClick={() => void move(category, 1)}>
+              <button type="button" disabled={readonly || busy || split} onClick={() => void move(category, 1, period)}>
                 下一页
               </button>
               {split && (
                 <span className="category-split-note">
-                  {' '}（凭证较多，分在第 {pages.map((page) => page + 1).join('、')} 页上，不能单独移动）
+                  {' '}（{say('凭证')}较多，分在第 {pages.map((page) => page + 1).join('、')} 页上，不能单独移动）
                 </span>
               )}
             </p>
@@ -408,10 +444,10 @@ export function PreviewPage({ batchId, onCancelled }: { batchId: string | null; 
       </button>
       {readonly && (
         <section className="finalized-notice" aria-label="已定稿提示">
-          <p>已生成 PDF，报销单已定稿，部门、日期、签名人与备注不可直接修改。</p>
-          <p>如需修改，请先撤销本单：票据将退回本次报销池，可修正后重新生成；原 PDF 保留为作废件备查。</p>
+          <p>{say('已生成 PDF，报销单已定稿，部门、日期、签名人与备注不可直接修改。')}</p>
+          <p>{say('如需修改，请先撤销本单：票据将退回本次报销池，可修正后重新生成；原 PDF 保留为作废件备查。')}</p>
           <button type="button" disabled={busy} onClick={() => void cancelAndRecreate()}>
-            撤销并退回报销池
+            {say('撤销并退回报销池')}
           </button>
         </section>
       )}

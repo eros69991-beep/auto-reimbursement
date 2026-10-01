@@ -1,6 +1,10 @@
 import './styles.css';
 import { useEffect, useState } from 'react';
-import { api, UNAUTHORIZED_EVENT } from './api';
+import { LEDGERS, type Ledger } from '@auto-reimbursement/contracts';
+import { UNAUTHORIZED_EVENT } from './api';
+import { apiFor } from './ledgerApi';
+import { NAV_PAGES, parseRoute, routeHash, switchLedgerHash, type PageKey } from './routes';
+import { LEDGER_NAMES, sayFor } from './wording';
 import { AccessGate } from './components/AccessGate';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { PendingPage } from './pages/PendingPage';
@@ -10,16 +14,27 @@ import { PreviewPage } from './pages/PreviewPage';
 import { HistoryPage } from './pages/HistoryPage';
 import { SettingsPage } from './pages/SettingsPage';
 
-type NavKey = 'home' | 'upload' | 'pool' | 'pending' | 'preview' | 'history' | 'settings';
+// 导航栏上的字用店内的说法写，公账区由 sayFor 换成付款、回单（「生成预览」在公账区叫「付款单预览」）
+const NAV_LABELS: Record<PageKey, string> = {
+  home: '首页',
+  upload: '上传凭证',
+  pool: '本期报销池',
+  pending: '待处理',
+  preview: '生成预览',
+  history: '历史报销单',
+  settings: '设置',
+};
 
 // P-28：直接进入 #preview（刷新后内存中没有选中批次）时，
 // 自动跳到最近一个未撤销、未归档、尚未生成 PDF 的草稿批次；没有草稿才显示引导。
 // 注意：正常批次没有 cancelledAt 字段（只有撤销时才写入），不能用 === null 判断。
-function LatestDraftPreview({ onResolve }: { onResolve: (id: string) => void }): React.JSX.Element {
+// 两个区各找各的草稿：公账区的预览不会落到店内的草稿上。
+function LatestDraftPreview({ ledger, onResolve }: { ledger: Ledger; onResolve: (id: string) => void }): React.JSX.Element {
   const [state, setState] = useState<'loading' | 'empty'>('loading');
+  const say = sayFor(ledger);
   useEffect(() => {
     let active = true;
-    void api.history().then((months) => {
+    void apiFor(ledger).history().then((months) => {
       const draft = months
         .flatMap((month) => month.batches)
         .filter((batch) => !batch.cancelledAt && !batch.archivedAt && batch.pdfPath === null)
@@ -41,33 +56,23 @@ function LatestDraftPreview({ onResolve }: { onResolve: (id: string) => void }):
   if (state === 'loading') {
     return (
       <main className="page-content">
-        <h2>生成预览</h2>
-        <p>正在查找进行中的报销单…</p>
+        <h2>{say('生成预览')}</h2>
+        <p>{say('正在查找进行中的报销单…')}</p>
       </main>
     );
   }
   return (
     <main className="page-content">
-      <h2>生成预览</h2>
-      <p>请先在报销池生成报销单，或从历史报销单中选择一个批次。</p>
+      <h2>{say('生成预览')}</h2>
+      <p>{say('请先在报销池生成报销单，或从历史报销单中选择一个批次。')}</p>
     </main>
   );
 }
 
-// P-14：导航当前页高亮
-function activeNav(route: string): NavKey {
-  if (route === '#pool') return 'pool';
-  if (route === '#pending') return 'pending';
-  if (route === '#preview' || /^#batches\/[^/]+\/preview$/.test(route)) return 'preview';
-  if (route === '#history') return 'history';
-  if (route === '#settings') return 'settings';
-  if (route === '#upload') return 'upload';
-  return 'home';
-}
-
 export default function App() {
   const [route, setRoute] = useState(window.location.hash);
-  const [selectedBatch, setSelectedBatch] = useState<string | null>(null);
+  // 两个区各记各的当前批次，切换区时不会把一个区的批次拿到另一个区去预览
+  const [selectedBatch, setSelectedBatch] = useState<Record<Ledger, string | null>>({ store: null, company: null });
   const [accessRequired, setAccessRequired] = useState(false);
 
   useEffect(() => {
@@ -88,44 +93,65 @@ export default function App() {
     return () => window.removeEventListener(UNAUTHORIZED_EVENT, handleUnauthorized);
   }, []);
 
-  const previewId = /^#batches\/([^/]+)\/preview$/.exec(route)?.[1] ?? selectedBatch;
-  const content = route === '#pool'
-    ? <PoolPage onBatch={(id) => { setSelectedBatch(id); window.location.hash = `#batches/${id}/preview`; }} />
-    : route === '#pending'
-      ? <PendingPage />
-      : (route === '#preview' || /^#batches\/[^/]+\/preview$/.test(route))
+  const current = parseRoute(route);
+  const { ledger } = current;
+  const say = sayFor(ledger);
+  const go = (page: PageKey, batchId?: string): void => { window.location.hash = routeHash(ledger, page, batchId); };
+  const selectBatch = (id: string | null): void => setSelectedBatch((previous) => ({ ...previous, [ledger]: id }));
+  const openPreview = (id: string): void => { selectBatch(id); go('preview', id); };
+
+  const previewId = current.batchId ?? selectedBatch[ledger];
+  const content = current.page === 'pool'
+    ? <PoolPage ledger={ledger} onBatch={openPreview} />
+    : current.page === 'pending'
+      ? <PendingPage ledger={ledger} />
+      : current.page === 'preview'
         ? previewId === null
           // P-28：没有选中批次时自动落到最近一个未撤销、未归档的草稿
-          ? <LatestDraftPreview onResolve={(id) => { setSelectedBatch(id); window.location.hash = `#batches/${id}/preview`; }} />
-          : <PreviewPage batchId={previewId} onCancelled={() => setSelectedBatch(null)} />
-        : route === '#history'
-          ? <HistoryPage onPreview={(id) => { setSelectedBatch(id); window.location.hash = `#batches/${id}/preview`; }} />
-          : route === '#settings'
-            ? <SettingsPage />
-            : <UploadPage />;
+          ? <LatestDraftPreview ledger={ledger} onResolve={openPreview} />
+          : <PreviewPage ledger={ledger} batchId={previewId} onCancelled={() => selectBatch(null)} />
+        : current.page === 'history'
+          ? <HistoryPage ledger={ledger} onPreview={openPreview} />
+          : current.page === 'settings'
+            ? <SettingsPage ledger={ledger} />
+            : <UploadPage ledger={ledger} />;
 
   if (accessRequired) {
     return <AccessGate onPassed={() => window.location.reload()} />;
   }
 
-  const nav = activeNav(route);
-  const current = (key: NavKey): 'page' | undefined => (nav === key ? 'page' : undefined);
-
   return (
     <>
-      <header className="app-header">
+      <header className="app-header" data-ledger={ledger}>
         <h1>自动报销助手</h1>
+        {/* 店内报销和公账付款是两个互相隔离的区：凭证、池、待处理、历史、规则各用各的，在这里切换 */}
+        <div className="ledger-switch" role="group" aria-label="切换区域">
+          {LEDGERS.map((target) => (
+            <button
+              type="button"
+              key={target}
+              aria-pressed={target === ledger}
+              onClick={() => { if (target !== ledger) window.location.hash = switchLedgerHash(current, target); }}
+            >
+              {LEDGER_NAMES[target]}
+            </button>
+          ))}
+        </div>
         <nav aria-label="主导航">
-          <button type="button" aria-current={current('home')} onClick={() => { window.location.hash = '#home'; }}>首页</button>
-          <button type="button" aria-current={current('upload')} onClick={() => { window.location.hash = '#upload'; }}>上传凭证</button>
-          <button type="button" aria-current={current('pool')} onClick={() => { window.location.hash = '#pool'; }}>本期报销池</button>
-          <button type="button" aria-current={current('pending')} onClick={() => { window.location.hash = '#pending'; }}>待处理</button>
-          <button type="button" aria-current={current('preview')} onClick={() => { window.location.hash = '#preview'; }}>生成预览</button>
-          <button type="button" aria-current={current('history')} onClick={() => { window.location.hash = '#history'; }}>历史报销单</button>
-          <button type="button" aria-current={current('settings')} onClick={() => { window.location.hash = '#settings'; }}>设置</button>
+          {NAV_PAGES[ledger].map((page) => (
+            <button
+              type="button"
+              key={page}
+              aria-current={current.page === page ? 'page' : undefined}
+              onClick={() => go(page)}
+            >
+              {say(NAV_LABELS[page])}
+            </button>
+          ))}
         </nav>
       </header>
-      <ErrorBoundary>{content}</ErrorBoundary>
+      {/* 换区时整页重新挂载：上一个区的列表、输入、弹窗都不能留到另一个区 */}
+      <ErrorBoundary key={ledger}>{content}</ErrorBoundary>
     </>
   );
 }

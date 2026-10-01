@@ -1,8 +1,11 @@
 import { useEffect, useState } from 'react';
-import type { Progress, UploadResult } from '@auto-reimbursement/contracts';
+import type { Ledger, Progress, UploadResult } from '@auto-reimbursement/contracts';
 import { api } from '../api';
 import { compressForUpload } from '../compress';
+import { apiFor } from '../ledgerApi';
 import { receiptLabel } from '../receiptLabel';
+import { routeHash } from '../routes';
+import { LEDGER_NAMES, sayFor } from '../wording';
 
 type UploadClient = Pick<typeof api, 'upload' | 'progress' | 'imageUrl' | 'receiptOriginalUrl'>;
 
@@ -57,7 +60,10 @@ async function runPool<T>(
   await Promise.all(runners);
 }
 
-export function UploadPage({ client = api }: { client?: UploadClient }): React.JSX.Element {
+export function UploadPage({ ledger = 'store', client: givenClient }: { ledger?: Ledger; client?: UploadClient }): React.JSX.Element {
+  // 公账区上传、查进度都带上区域；店内就是 api 本身。测试可以直接传入假的 client
+  const client: UploadClient = givenClient ?? apiFor(ledger);
+  const say = sayFor(ledger);
   const [progress, setProgress] = useState<Progress>(EMPTY_PROGRESS);
   const [error, setError] = useState<string | null>(null);
   const [pollError, setPollError] = useState<string | null>(null);
@@ -78,7 +84,7 @@ export function UploadPage({ client = api }: { client?: UploadClient }): React.J
     setError(null);
     try {
       const restored = await api.restoreReceipt(receiptId);
-      setNotice(`已从回收站恢复 ${receiptLabel(restored)}，请到「本期报销池」查看。`);
+      setNotice(`${say('已从回收站恢复')} ${receiptLabel(restored)}${say('，请到「本期报销池」查看。')}`);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : '恢复失败');
     }
@@ -258,15 +264,18 @@ export function UploadPage({ client = api }: { client?: UploadClient }): React.J
   return (
     <main className="page-content">
       <section aria-labelledby="upload-heading" className="upload-panel">
-        <h2 id="upload-heading">上传凭证</h2>
+        <h2 id="upload-heading">{say('上传凭证')}</h2>
         {aiMissing && (
           <p role="status" className="banner-warning">
-            AI 识别未配置：上传的凭证将全部转为人工录入。可在<a href="#settings">设置</a>中配置识别服务。
+            {say('AI 识别未配置：上传的凭证将全部转为人工录入。可在')}<a href={routeHash(ledger, 'settings')}>设置</a>中配置识别服务。
           </p>
         )}
         <p>一次可上传最多 50 张 JPEG、PNG 或 WebP 图片，单张不超过 20 MB；大图会自动压缩后分批上传。</p>
+        {ledger === 'company' && (
+          <p>银行电子回单、收费通知单（租金、物业费、水电费、空调能源费等）都可以直接传。一张收费通知单会按项目拆成几行，付款单上每个项目单独一行并写明费用月份；回单上的收款户名、开户银行、银行账号会写进付款单的备注栏。</p>
+        )}
         <label
-          aria-label="拖放凭证图片"
+          aria-label={say('拖放凭证图片')}
           className="drop-target"
           onDragOver={(event) => event.preventDefault()}
           onDrop={(event) => {
@@ -278,7 +287,7 @@ export function UploadPage({ client = api }: { client?: UploadClient }): React.J
             ? `正在上传 ${uploadDone}/${batchFiles.length} 张（${formatMb(uploadBytes.loaded)}/${formatMb(uploadBytes.total)} MB）…`
             : '拖放图片到这里，或点击选择文件'}</strong>
           <input
-            aria-label="选择凭证图片"
+            aria-label={say('选择凭证图片')}
             type="file"
             multiple
             accept="image/jpeg,image/png,image/webp"
@@ -321,9 +330,9 @@ export function UploadPage({ client = api }: { client?: UploadClient }): React.J
             <ul aria-label="被拒绝文件">
               {rejected.map((item) => (
                 <li key={`${item.index}-${item.code}`}>
-                  {item.code === 'DELETED_DUPLICATE' ? '重复文件（在回收站）' : item.code === 'MERGED_DUPLICATE' ? '重复文件（已合并进某一单）' : item.duplicateId ? '重复文件' : '未接收文件'}：{item.name}
+                  {item.code === 'DELETED_DUPLICATE' ? '重复文件（在回收站）' : item.code === 'MERGED_DUPLICATE' ? '重复文件（已合并进某一单）' : item.duplicateId ? (item.duplicateLedger === undefined ? '重复文件' : `重复文件（已在「${LEDGER_NAMES[item.duplicateLedger]}」里）`) : '未接收文件'}：{item.name}
                   {!item.duplicateId && `（${rejectionReason(item.code)}）`}
-                  {item.duplicateId && item.code !== 'DELETED_DUPLICATE' && <>（<a href={client.receiptOriginalUrl(item.duplicateId)} onClick={(event) => { event.preventDefault(); void api.openAuthed(`/api/receipts/${encodeURIComponent(item.duplicateId!)}/original-image`); }}>{item.code === 'MERGED_DUPLICATE' ? '查看合并后的凭证' : '查看重复凭证'}</a>）</>}
+                  {item.duplicateId && item.code !== 'DELETED_DUPLICATE' && <>（<a href={client.receiptOriginalUrl(item.duplicateId)} onClick={(event) => { event.preventDefault(); void api.openAuthed(`/api/receipts/${encodeURIComponent(item.duplicateId!)}/original-image`); }}>{say(item.code === 'MERGED_DUPLICATE' ? '查看合并后的凭证' : '查看重复凭证')}</a>）</>}
                   {item.code === 'DELETED_DUPLICATE' && item.duplicateId && (
                     <>（<button type="button" onClick={() => void restoreDeleted(item.duplicateId!)}>从回收站恢复</button>）</>
                   )}

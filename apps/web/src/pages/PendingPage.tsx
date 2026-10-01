@@ -4,17 +4,19 @@ import {
   MERGE_MAX,
   MERGE_MIN,
   suggestMerges,
+  type Ledger,
   type MergeSuggestion,
   type Reason,
   type Receipt,
 } from '@auto-reimbursement/contracts';
-import { api } from '../api';
 import { friendlyError } from '../errors';
+import { apiFor } from '../ledgerApi';
 import { AuthedImage } from '../components/AuthedImage';
 import { ReceiptCard } from '../components/ReceiptCard';
 import { ReceiptEditor } from '../components/ReceiptEditor';
 import { receiptLabel } from '../receiptLabel';
 import { useRecognitionWatch } from '../useRecognitionWatch';
+import { sayFor } from '../wording';
 
 const labels: Record<Reason, string> = {
   amount_uncertain: '金额无法确定',
@@ -46,7 +48,10 @@ function suggestionKey(suggestion: MergeSuggestion): string {
   return suggestion.receiptIds.join('+');
 }
 
-export function PendingPage(): React.JSX.Element {
+export function PendingPage({ ledger = 'store' }: { ledger?: Ledger }): React.JSX.Element {
+  // 公账区只看公账的待处理回单（和付款池里的对比「疑似同一单」也只在公账里比）；店内 client 就是 api 本身
+  const client = apiFor(ledger);
+  const say = sayFor(ledger);
   const [rows, setRows] = useState<Receipt[]>([]);
   // 报销池里的凭证只用来和待处理的比对「疑似同一单」
   const [pool, setPool] = useState<Receipt[]>([]);
@@ -59,9 +64,9 @@ export function PendingPage(): React.JSX.Element {
 
   const load = useCallback(async (): Promise<Receipt[]> => {
     const [pending, ready] = await Promise.all([
-      api.receipts('pending'),
+      client.receipts('pending'),
       // 取不到报销池只是少了「疑似同一单」的提示，不算错
-      api.receipts('pool').catch(() => [] as Receipt[]),
+      client.receipts('pool').catch(() => [] as Receipt[]),
     ]);
     // P-10：显示所有 pending；reasons 为空的（旧版两步确认留下的）标记为「修改待确认」
     const waiting = pending.filter((receipt) => receipt.status === 'pending');
@@ -69,11 +74,11 @@ export function PendingPage(): React.JSX.Element {
     setPool(ready);
     setSelected((current) => current.filter((id) => waiting.some((receipt) => receipt.id === id)));
     return waiting;
-  }, []);
+  }, [client]);
 
   useEffect(() => {
     void load().catch(
-      (reason: unknown) => setError(reason instanceof Error ? reason.message : '获取待处理凭证失败'),
+      (reason: unknown) => setError(reason instanceof Error ? reason.message : say('获取待处理凭证失败')),
     );
   }, [load]);
 
@@ -84,14 +89,14 @@ export function PendingPage(): React.JSX.Element {
         if (outcome === 'error') {
           setError(friendlyError(reason, '获取识别进度失败'));
         } else if (outcome === 'timeout') {
-          setNotice('合并后的凭证还在识别中，稍后刷新本页就能看到结果。');
+          setNotice(say('合并后的凭证还在识别中，稍后刷新本页就能看到结果。'));
         } else {
           setNotice(waiting.some((receipt) => receipt.id === mergedId.current)
             ? '合并完成，重新识别后这张还需要你确认，见下面的卡片。'
-            : '合并完成，重新识别通过，已进入报销池。');
+            : say('合并完成，重新识别通过，已进入报销池。'));
         }
       } catch (loadReason) {
-        setError(friendlyError(loadReason, '获取待处理凭证失败'));
+        setError(friendlyError(loadReason, say('获取待处理凭证失败')));
       }
     })();
   });
@@ -109,7 +114,7 @@ export function PendingPage(): React.JSX.Element {
   async function confirmDistinct(id: string): Promise<void> {
     setError(null);
     try {
-      replaceOrRemove(await api.confirmDistinct(id));
+      replaceOrRemove(await client.confirmDistinct(id));
     } catch (reason) {
       setError(friendlyError(reason, '请求失败'));
     }
@@ -118,7 +123,7 @@ export function PendingPage(): React.JSX.Element {
   async function retry(id: string): Promise<void> {
     setError(null);
     try {
-      replaceOrRemove(await api.retryReceipt(id));
+      replaceOrRemove(await client.retryReceipt(id));
     } catch (reason) {
       setError(friendlyError(reason, '请求失败'));
     }
@@ -133,7 +138,7 @@ export function PendingPage(): React.JSX.Element {
     setRetryAllBusy(true);
     try {
       const targets = rows.filter((receipt) => receipt.pendingReasons.includes('api_failed'));
-      const results = await Promise.allSettled(targets.map((receipt) => api.retryReceipt(receipt.id)));
+      const results = await Promise.allSettled(targets.map((receipt) => client.retryReceipt(receipt.id)));
       let failed = 0;
       for (const result of results) {
         if (result.status === 'fulfilled') {
@@ -156,7 +161,7 @@ export function PendingPage(): React.JSX.Element {
     setNotice(null);
     setMergeBusy(true);
     try {
-      const merged = await api.mergeReceipts(ids);
+      const merged = await client.mergeReceipts(ids);
       mergedId.current = merged.id;
       setRows((current) => current.filter((receipt) => !ids.includes(receipt.id)));
       setPool((current) => current.filter((receipt) => !ids.includes(receipt.id)));
@@ -173,12 +178,12 @@ export function PendingPage(): React.JSX.Element {
   }
 
   async function split(receipt: Receipt): Promise<void> {
-    if (!window.confirm('拆开后，这张合并凭证的识别结果和修改会丢掉，截图恢复成合并前的几张。确定拆开吗？')) return;
+    if (!window.confirm(say('拆开后，这张合并凭证的识别结果和修改会丢掉，截图恢复成合并前的几张。确定拆开吗？'))) return;
     setError(null);
     setNotice(null);
     setMergeBusy(true);
     try {
-      const restored = await api.splitReceipt(receipt.id);
+      const restored = await client.splitReceipt(receipt.id);
       await load();
       setNotice(`已拆开，恢复成 ${restored.length} 张截图。`);
     } catch (reason) {
@@ -226,11 +231,11 @@ export function PendingPage(): React.JSX.Element {
                       <a
                         key={member.id}
                         className="receipt-thumbnail"
-                        href={api.imageUrl(member.original.id)}
+                        href={client.imageUrl(member.original.id)}
                         aria-label={`查看第 ${index + 1} 张截图`}
                         onClick={(event) => {
                           event.preventDefault();
-                          void api.openAuthed(`/api/images/${encodeURIComponent(member.original.id)}`);
+                          void client.openAuthed(`/api/images/${encodeURIComponent(member.original.id)}`);
                         }}
                       >
                         <AuthedImage
@@ -272,13 +277,13 @@ export function PendingPage(): React.JSX.Element {
       {mergeableCount >= MERGE_MIN && (
         <p className="field-hint">同一单被截成几张？勾选这几张（最多 {MERGE_MAX} 张），点「合并为一单」，会左右拼成一张重新识别。</p>
       )}
-      {rows.length === 0 ? <p>暂无待处理凭证</p> : <div className="receipt-list">
+      {rows.length === 0 ? <p>{say('暂无待处理凭证')}</p> : <div className="receipt-list">
         {rows.map((receipt) => <ReceiptCard key={receipt.id} receipt={receipt}>
           <ul className="reason-list" aria-label="待处理原因">{receipt.pendingReasons.length === 0
             ? <li>修改待确认</li>
             : receipt.pendingReasons.map((reason) => <li key={reason}>{reasonLabel(receipt, reason)}</li>)}</ul>
           {receipt.pendingReasons.includes('suspected_duplicate') && <>
-            {receipt.duplicateIds.map((id) => <a key={id} href={api.receiptOriginalUrl(id)} onClick={(event) => { event.preventDefault(); void api.openAuthed(`/api/receipts/${encodeURIComponent(id)}/original-image`); }}>查看历史凭证</a>)}
+            {receipt.duplicateIds.map((id) => <a key={id} href={client.receiptOriginalUrl(id)} onClick={(event) => { event.preventDefault(); void client.openAuthed(`/api/receipts/${encodeURIComponent(id)}/original-image`); }}>{say('查看历史凭证')}</a>)}
             <button type="button" onClick={() => void confirmDistinct(receipt.id)}>确认不是重复，继续加入</button>
           </>}
           {receipt.pendingReasons.includes('api_failed') && <button type="button" onClick={() => void retry(receipt.id)}>重试识别</button>}
