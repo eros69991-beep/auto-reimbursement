@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import type { Progress, UploadResult } from '@auto-reimbursement/contracts';
 import { api } from '../api';
 import { compressForUpload } from '../compress';
+import { receiptLabel } from '../receiptLabel';
 
 type UploadClient = Pick<typeof api, 'upload' | 'progress' | 'imageUrl' | 'receiptOriginalUrl'>;
 
@@ -77,7 +78,7 @@ export function UploadPage({ client = api }: { client?: UploadClient }): React.J
     setError(null);
     try {
       const restored = await api.restoreReceipt(receiptId);
-      setNotice(`已从回收站恢复 ${restored.merchant ?? '原凭证'}，请到「本期报销池」查看。`);
+      setNotice(`已从回收站恢复 ${receiptLabel(restored)}，请到「本期报销池」查看。`);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : '恢复失败');
     }

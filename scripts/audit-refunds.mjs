@@ -34,6 +34,6 @@ if (dirty.length === 0) {
       `- ${receipt.id} ${receipt.merchant ?? '(无商户)'} 实付 ${(receipt.paidFen / 100).toFixed(2)} 退款 ${(receipt.refundFen / 100).toFixed(2)} 状态 ${receipt.status}`,
     );
   }
-  console.log('请在界面中把这些凭证的退款调整到不超过实付金额。');
+  console.log('请在界面里打开这些凭证的编辑框，重新填写金额（填实际花的钱，已登记的退款系统会自动算进去），再点「确认可报销」。');
 }
 database.close();

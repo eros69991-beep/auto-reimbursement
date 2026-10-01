@@ -27,7 +27,7 @@ function clientWith(result: UploadResult) {
 // P-32：删除后重新上传同一张图，应提示「在回收站」并可直接恢复
 describe('deleted duplicate restore (P-32)', () => {
   it('offers a recycle-bin restore for DELETED_DUPLICATE rejections', async () => {
-    restoreReceipt.mockResolvedValue(receipt({ id: 'r1', merchant: '沃尔玛' }));
+    restoreReceipt.mockResolvedValue(receipt({ id: 'r1', merchant: '沃尔玛', category: '食材', paidFen: 12000 }));
     const client = clientWith({
       accepted: [],
       rejected: [{ index: 0, code: 'DELETED_DUPLICATE', duplicateId: 'r1' }],
@@ -43,7 +43,10 @@ describe('deleted duplicate restore (P-32)', () => {
     fireEvent.click(restore);
 
     expect(restoreReceipt).toHaveBeenCalledWith('r1');
-    expect(await screen.findByRole('status')).toHaveTextContent('已从回收站恢复 沃尔玛');
+    // 提示里写「分类 · 金额」，不用商户名
+    const notice = await screen.findByRole('status');
+    expect(notice).toHaveTextContent('已从回收站恢复 食材 · 120.00');
+    expect(notice).not.toHaveTextContent('沃尔玛');
   });
 
   it('keeps the original-image link for normal duplicates', async () => {

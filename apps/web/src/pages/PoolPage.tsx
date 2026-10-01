@@ -3,6 +3,7 @@ import { CATEGORIES, formatFen, netFenOrNull, type Receipt, type Settings, type 
 import { api, formOptionsFromSettings } from '../api';
 import { ReceiptCard } from '../components/ReceiptCard';
 import { ReceiptEditor } from '../components/ReceiptEditor';
+import { receiptLabel } from '../receiptLabel';
 
 function eligible(receipt: Receipt): boolean {
   const net = receipt.paidFen === null ? null : netFenOrNull(receipt);
@@ -107,7 +108,7 @@ export function PoolPage({ onBatch }: { onBatch: (id: string) => void }): React.
         await api.setPoolMembership(row.id, true);
       }
       setBinRows((current) => current.filter((receipt) => receipt.id !== row.id));
-      setMessage(`已恢复 ${row.merchant ?? row.id}`);
+      setMessage(`已恢复 ${receiptLabel(row)}`);
       // P-31：恢复后立即刷新报销池列表，不能只更新回收站和汇总
       void api.receipts('pool').then(
         (received) => setRows(received),
@@ -215,7 +216,7 @@ function PoolRow({
     <label className="receipt-select">
       <input
         type="checkbox"
-        aria-label={`选择 ${receipt.merchant ?? receipt.id}`}
+        aria-label={`选择 ${receiptLabel(receipt)}`}
         checked={checked}
         disabled={!selectable || busy}
         onChange={(event) => onToggle(receipt.id, event.target.checked)}

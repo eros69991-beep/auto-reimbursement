@@ -36,7 +36,7 @@ test.describe('unsaved preview edits (P-05)', () => {
       await expect(page.getByText('识别中：0', { exact: true })).toBeVisible();
 
       await page.getByRole('button', { name: '本期报销池', exact: true }).click();
-      await page.getByLabel('选择 微信生鲜').check();
+      await page.getByLabel('选择 食材 · 120.00').check();
       await page.getByRole('button', { name: '生成报销单' }).click();
       await expect(page.getByRole('heading', { name: '生成预览' })).toBeVisible();
 
@@ -71,7 +71,7 @@ test.describe('unsaved preview edits (P-05)', () => {
       await expect(page.getByRole('heading', { name: '上传结果' })).toBeVisible();
       await expect(page.getByText('识别中：0', { exact: true })).toBeVisible();
       await page.getByRole('button', { name: '本期报销池', exact: true }).click();
-      await page.getByLabel('选择 微信生鲜').check();
+      await page.getByLabel('选择 食材 · 120.00').check();
       await page.getByRole('button', { name: '生成报销单' }).click();
       await expect(page.getByRole('heading', { name: '生成预览' })).toBeVisible();
 

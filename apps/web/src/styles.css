@@ -112,12 +112,13 @@ fieldset { margin: 1rem 0; }
 .receipt-card-heading { display: flex; align-items: center; justify-content: space-between; gap: .75rem; }
 .receipt-card-heading h3 { margin: 0; }
 .status-badge { padding: .2rem .5rem; background: #eef6ff; border-radius: 99rem; color: #174a7e; }
-.receipt-amounts, .analysis-details { display: flex; flex-wrap: wrap; gap: .75rem 1.5rem; }
-.receipt-amounts div, .analysis-details div { display: flex; gap: .2rem; }
-.receipt-amounts dt, .receipt-amounts dd, .analysis-details dt, .analysis-details dd { margin: 0; }
+.analysis-details { display: flex; flex-wrap: wrap; gap: .75rem 1.5rem; }
+.analysis-details div { display: flex; gap: .2rem; }
+.analysis-details dt, .analysis-details dd { margin: 0; }
 .receipt-editor { display: grid; gap: .6rem; margin-top: 1rem; padding-top: 1rem; border-top: 1px solid #d9e0ea; }
 .receipt-editor label { display: grid; gap: .25rem; }
-.refund-editor { display: grid; gap: .6rem; }
+.field-hint { font-size: .85rem; color: #5b6472; }
+.refund-note { margin: .25rem 0; font-size: .9rem; color: #5b6472; }
 /* P-13：危险按钮与普通操作拉开距离，删除本身已有二次确认 */
 .danger-button { margin-top: 1rem; color: #8a2c0d; }
 .reason-list { margin: 1rem 0 .5rem; padding-left: 1.2rem; color: #8a2c0d; }

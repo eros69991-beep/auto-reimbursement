@@ -15,14 +15,14 @@ it('removes a pool receipt, reloads totals and recovers a soft-deleted receipt',
   const restore = vi.spyOn(api, 'restoreReceipt').mockResolvedValue(receipt());
   render(<PoolPage onBatch={() => {}} />);
   fireEvent.click(await screen.findByRole('button', { name: '移出本次报销池' }));
-  await waitFor(() => expect(screen.queryByRole('checkbox', { name: /示例商户/ })).not.toBeInTheDocument());
+  await waitFor(() => expect(screen.queryByRole('checkbox', { name: '选择 耗材 · 36.33' })).not.toBeInTheDocument());
   expect(membership).toHaveBeenCalledWith('a', false);
   fireEvent.click(screen.getByRole('button', { name: '查看已移出 / 回收站' }));
   fireEvent.click(await screen.findByRole('button', { name: '恢复凭证' }));
   await waitFor(() => expect(restore).toHaveBeenCalledWith('a'));
-  expect(await screen.findByText(/已恢复/)).toBeInTheDocument();
+  expect(await screen.findByText('已恢复 耗材 · 36.33')).toBeInTheDocument();
   // P-31：恢复后报销池列表立即刷新，不用手动重进页面
-  expect(await screen.findByRole('checkbox', { name: /示例商户/ })).toBeInTheDocument();
+  expect(await screen.findByRole('checkbox', { name: '选择 耗材 · 36.33' })).toBeInTheDocument();
 });
 it('requires confirmation, cancels a batch and labels preserved historical PDFs as void', async () => {
   const batch = { id: 'batch', month: '2026-09', createdAt: '', totalFen: 3633, items: [], sheets: [], notes: [], options: { department: '', date: null, signerMode: 'text' as const, signerName: '', signature: null }, pdfPath: 'file.pdf', archivedAt: null };

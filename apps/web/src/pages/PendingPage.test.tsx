@@ -13,8 +13,6 @@ vi.mock('../api', () => ({
     confirmReceipt: vi.fn(),
     confirmDistinct: vi.fn(),
     retryReceipt: vi.fn(),
-    setRefund: vi.fn(),
-    addRefundImage: vi.fn(),
     deleteReceipt: vi.fn(),
   },
 }));
@@ -51,8 +49,6 @@ describe('PendingPage', () => {
     mockedApi.confirmReceipt.mockResolvedValue(receipt({ id: 'a' }));
     mockedApi.confirmDistinct.mockResolvedValue(receipt({ id: 'duplicate' }));
     mockedApi.retryReceipt.mockResolvedValue(receipt({ id: 'failed', status: 'recognizing' }));
-    mockedApi.setRefund.mockResolvedValue(receipt());
-    mockedApi.addRefundImage.mockResolvedValue(receipt());
     mockedApi.deleteReceipt.mockResolvedValue(undefined);
   });
 
@@ -66,7 +62,10 @@ describe('PendingPage', () => {
     expect(categories[0]).toHaveValue('');
     expect(categories[0]).toHaveTextContent('请选择分类');
     expect(categories[0]?.querySelectorAll('option')).toHaveLength(11);
-    expect(screen.getAllByRole('button', { name: '全额退款' })[0]).toBeDisabled();
+    // 商户与退款不再出现在编辑框里：有退款就直接把金额改成实际花的钱
+    expect(screen.queryByLabelText('商户')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('退款金额')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /退款/ })).not.toBeInTheDocument();
     expect(screen.getAllByRole('link', { name: /查看原图/ })[0]).toHaveAttribute(
       'href',
       '/api/images/image-a',
@@ -76,16 +75,26 @@ describe('PendingPage', () => {
     fireEvent.click(screen.getAllByRole('button', { name: '确认可报销' })[0]!);
 
     // P-10：修改与确认合并为一次原子请求，不再先 PATCH 再 confirm
-    // P-11：商户与日期随确认一起提交
+    // 日期随确认一起提交；商户不再由用户填，不会随请求发送
     await waitFor(() => expect(mockedApi.confirmReceipt).toHaveBeenCalledWith('a', {
       paidFen: 3633,
       category: '耗材',
-      merchant: '示例商户',
       date: '2026-09-02',
     }));
     expect(mockedApi.updateReceipt).not.toHaveBeenCalled();
     await waitFor(() => expect(screen.queryByText('金额无法确定')).not.toBeInTheDocument());
     expect(screen.queryByText('ready')).not.toBeInTheDocument();
+  });
+
+  it('titles each exception with 分类 · 金额 rather than the merchant name or internal id', async () => {
+    render(<PendingPage />);
+    await screen.findByText('金额无法确定');
+
+    // a：分类和金额都没识别出来；duplicate / failed：耗材 36.33
+    expect(screen.getByRole('heading', { name: '分类待确认 · 金额待确认' })).toBeInTheDocument();
+    expect(screen.getAllByRole('heading', { name: '耗材 · 36.33' })).toHaveLength(2);
+    expect(screen.queryByText(/示例商户/)).not.toBeInTheDocument();
+    for (const id of ['a', 'duplicate', 'failed']) expect(screen.queryByText(id)).not.toBeInTheDocument();
   });
 
   it('shows only exception records with duplicate evidence and retry actions', async () => {
@@ -130,7 +139,7 @@ describe('PendingPage', () => {
 
     fireEvent.click(screen.getAllByRole('button', { name: '确认可报销' })[0]!);
     await waitFor(() => expect(mockedApi.confirmReceipt).toHaveBeenCalledTimes(2));
-    expect(mockedApi.confirmReceipt).toHaveBeenLastCalledWith('a', { paidFen: 3633, category: '耗材', merchant: '示例商户', date: '2026-09-02' });
+    expect(mockedApi.confirmReceipt).toHaveBeenLastCalledWith('a', { paidFen: 3633, category: '耗材', date: '2026-09-02' });
     expect(mockedApi.updateReceipt).not.toHaveBeenCalled();
   });
 
