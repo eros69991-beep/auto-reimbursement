@@ -7,6 +7,7 @@ import sharp from 'sharp';
 import { assertActiveBatch, getBatch } from '../batches.js';
 import type { Config } from '../config.js';
 import type { Store } from '../db.js';
+import { logger } from '../logger.js';
 import { readVerifiedFile, storeExportPdf } from '../storage.js';
 import { drawAttachment, orderedAttachments, type Attachment } from './attachments.js';
 import { createFormDocument, drawForm } from './form.js';
@@ -57,13 +58,20 @@ export async function exportBatchPdf(
   }
 
   const bytes = await renderBatchPdf(store, config, existing);
+  // 对账页预览只需要报销单页：顺手多存一份几十 KB 的小文件，免得手机/慢网下为了看报销单去下整份几 MB 的 PDF。
+  // 它只是加速用的副本：渲染或保存失败不能挡住导出，预览会退回整份 PDF。
+  const formBytes = await renderFormCopy(store, config, existing);
   const fileId = randomUUID();
-  let createdPath: string | null = null;
+  const formFileId = `${fileId}-form`;
+  const createdPaths: string[] = [];
   try {
     const saved = await storeExportPdf(config, existing.month, fileId, bytes);
     const finalRelativePath = saved.path;
-    const finalPath = saved.absolutePath;
-    createdPath = finalPath;
+    createdPaths.push(saved.absolutePath);
+    const savedForm = formBytes === null ? null : await storeFormCopy(config, existing.month, formFileId, formBytes);
+    if (savedForm !== null) {
+      createdPaths.push(savedForm.absolutePath);
+    }
 
     const exported = store.transact(() => {
       const current = getBatch(store, id);
@@ -81,22 +89,80 @@ export async function exportBatchPdf(
       };
       const updated = { ...current, pdfPath: finalRelativePath };
       store.put('files', entry);
+      if (savedForm !== null && formBytes !== null) {
+        store.put('files', {
+          id: formFileId,
+          ownerId: current.id,
+          kind: 'pdf-form',
+          path: savedForm.path,
+          sha256: createHash('sha256').update(formBytes).digest('hex'),
+          deletedAt: null,
+        });
+      }
       store.put('batches', updated);
       return updated;
     });
     if (exported.pdfPath !== finalRelativePath) {
-      await unlink(finalPath);
+      // 别的请求先一步定稿了：这次多写的文件都不要
+      for (const path of createdPaths) {
+        await unlink(path);
+      }
     }
     return exported;
   } catch (error) {
-    if (createdPath !== null) {
+    for (const path of createdPaths) {
       try {
-        await unlink(createdPath);
+        await unlink(path);
       } catch {
-        // Keep the export failure; this path was created only for this export.
+        // Keep the export failure; these paths were created only for this export.
       }
     }
     throw error;
+  }
+}
+
+async function renderFormCopy(store: Store, config: Config, batch: Batch): Promise<Buffer | null> {
+  try {
+    return await renderBatchPdf(store, config, batch, { attachments: false });
+  } catch (error) {
+    logger.warn({ err: error, batchId: batch.id }, '导出时没能生成「仅报销单页」预览副本，预览将使用整份 PDF');
+    return null;
+  }
+}
+
+async function storeFormCopy(
+  config: Config,
+  month: string,
+  id: string,
+  bytes: Buffer,
+): Promise<{ path: string; absolutePath: string } | null> {
+  try {
+    return await storeExportPdf(config, month, id, bytes);
+  } catch (error) {
+    logger.warn({ err: error, id }, '导出时没能保存「仅报销单页」预览副本，预览将使用整份 PDF');
+    return null;
+  }
+}
+
+/** 定稿批次导出时存下的「仅报销单页」副本（索引项）；老批次导出时还没有这份，返回 null。 */
+export function findSavedFormPdf(store: Store, batch: Batch): FileIndexEntry | null {
+  if (batch.pdfPath === null) {
+    return null;
+  }
+  const entries = store.list('files').filter((entry) => (
+    entry.ownerId === batch.id &&
+    entry.kind === 'pdf-form' &&
+    entry.deletedAt === null
+  ));
+  return entries.length === 1 ? entries[0]! : null;
+}
+
+/** 读副本并核对哈希；文件丢了或被换过返回 null（调用方退回整份 PDF）。 */
+export async function readSavedFormPdf(config: Config, entry: FileIndexEntry): Promise<Buffer | null> {
+  try {
+    return await readVerifiedFile(config, entry);
+  } catch {
+    return null;
   }
 }
 

@@ -1,15 +1,15 @@
 import { createHash } from 'node:crypto';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 
 import type { Batch, FileIndexEntry, ImageRef } from '@auto-reimbursement/contracts';
 import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import sharp from 'sharp';
 import request from 'supertest';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { createBatch } from '../src/batches.js';
+import { createBatch, getBatch } from '../src/batches.js';
 import { createApp } from '../src/app.js';
 import { loadConfig, type Config } from '../src/config.js';
 import { openStore, type Store } from '../src/db.js';
@@ -18,6 +18,19 @@ import { exportBatchPdf, renderBatchPdf } from '../src/render/pdf.js';
 import { safePath } from '../src/storage.js';
 import { resolveOptions, getSettings } from '../src/settings.js';
 import { sampleReceipt } from './support.js';
+
+// 只在测试要求时让「仅报销单页」副本（文件名以 -form 结尾）写不进去，其余照常写盘
+const failures = vi.hoisted(() => ({ formCopy: false }));
+vi.mock('../src/storage.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../src/storage.js')>();
+  return {
+    ...actual,
+    storeExportPdf: (config: Config, month: string, id: string, bytes: Buffer) => {
+      if (failures.formCopy && id.endsWith('-form')) return Promise.reject(new Error('DISK_FULL'));
+      return actual.storeExportPdf(config, month, id, bytes);
+    },
+  };
+});
 
 describe('full reimbursement PDFs', () => {
   let store: Store;
@@ -32,6 +45,8 @@ describe('full reimbursement PDFs', () => {
   });
 
   afterEach(async () => {
+    failures.formCopy = false;
+    vi.restoreAllMocks();
     store.close();
     await rm(temp, { recursive: true, force: true });
   });
@@ -140,21 +155,119 @@ describe('full reimbursement PDFs', () => {
       kind: 'pdf',
       path: exported.pdfPath,
     }));
+    // 导出时顺手存了「仅报销单页」的小副本（2 张报销单 → 2 页），对账页预览用它，不用下整份
+    const formEntry = store.list('files').find((entry) => entry.ownerId === batch.id && entry.kind === 'pdf-form');
+    expect(formEntry).toBeDefined();
+    expect(formEntry!.path).toMatch(/^2026-09\/exports\/.+-form\.pdf$/);
+    const formFile = await readFile(safePath(temp, formEntry!.path));
+    expect(await pageText(formFile)).toHaveLength(2);
+
     expect((await request(application).post(`/api/batches/${batch.id}/export`)).body).toEqual(exported);
+    expect(store.list('files').filter((entry) => entry.kind === 'pdf-form')).toHaveLength(1);
     const saved = await request(application).get(`/api/batches/${batch.id}/pdf`);
     expect(saved.status).toBe(200);
     expect(saved.body).toEqual(await readFile(safePath(temp, exported.pdfPath!)));
-    expect((await request(application).get(`/api/batches/${batch.id}/preview.pdf`)).body).toEqual(saved.body);
+    // 下载的仍是整份（5 页）；定稿后的预览是报销单页小副本（2 页），内容不可变所以长缓存，带 ETag 可 304
+    expect(await pageText(saved.body)).toHaveLength(5);
+    const finalPreview = await request(application).get(`/api/batches/${batch.id}/preview.pdf`);
+    expect(finalPreview.status).toBe(200);
+    expect(finalPreview.body).toEqual(formFile);
+    expect(finalPreview.body.length).toBeLessThan(saved.body.length);
+    expect(finalPreview.headers['cache-control']).toContain('immutable');
+    const formEtag = finalPreview.headers['etag'] as string;
+    expect(formEtag).toMatch(/^"saved-form-[0-9a-f]{24}"$/);
+    expect((await request(application).get(`/api/batches/${batch.id}/preview.pdf`).set('If-None-Match', formEtag)).status).toBe(304);
 
+    // 整份 PDF 被换掉：下载报错，预览走小副本不受影响；小副本也被换掉才整体 404
     await writeFile(safePath(temp, exported.pdfPath!), Buffer.from('%PDF-1.7 replaced'));
     expect((await request(application).get(`/api/batches/${batch.id}/pdf`)).status).toBe(404);
+    expect((await request(application).get(`/api/batches/${batch.id}/preview.pdf`)).body).toEqual(formFile);
+    await writeFile(safePath(temp, formEntry!.path), Buffer.from('%PDF-1.7 replaced'));
     expect((await request(application).get(`/api/batches/${batch.id}/preview.pdf`)).status).toBe(404);
 
+    // 整份恢复后，小副本仍是坏的：预览退回整份
     await writeFile(safePath(temp, exported.pdfPath!), saved.body);
+    const fallback = await request(application).get(`/api/batches/${batch.id}/preview.pdf`);
+    expect(fallback.status).toBe(200);
+    expect(fallback.body).toEqual(saved.body);
+    expect(fallback.headers['etag']).toMatch(/^"saved-[0-9a-f]{24}"$/);
+    await writeFile(safePath(temp, formEntry!.path), formFile);
     const exportedFile = store.list('files').find((entry) => entry.path === exported.pdfPath);
     expect(exportedFile).toBeDefined();
     store.remove('files', exportedFile!.id);
     expect((await request(application).get(`/api/batches/${batch.id}/pdf`)).status).toBe(404);
+  });
+
+  it('previews a finalized batch from the whole saved PDF when it has no form-only copy (exported before the copy existed)', async () => {
+    const original = await indexedImage('old-final-original', '#245c77');
+    await writeImage(original);
+    indexImage('old-final', 'original', original);
+    const batch = createIndexedBatch('old-final', original);
+    const exported = await exportBatchPdf(store, config, batch.id);
+    for (const entry of store.list('files').filter((file) => file.kind === 'pdf-form')) {
+      store.remove('files', entry.id);
+    }
+
+    const preview = await request(createApp({ store, config })).get(`/api/batches/${batch.id}/preview.pdf`);
+    expect(preview.status).toBe(200);
+    expect(preview.body).toEqual(await readFile(safePath(temp, exported.pdfPath!)));
+    expect(preview.headers['etag']).toMatch(/^"saved-[0-9a-f]{24}"$/);
+    // 一张报销单 + 一页凭证
+    expect(await pageText(preview.body)).toHaveLength(2);
+  });
+
+  it('keeps no form-only copy for a draft and never serves one as an image', async () => {
+    const original = await indexedImage('copy-original', '#245c77');
+    await writeImage(original);
+    indexImage('copy', 'original', original);
+    const batch = createIndexedBatch('copy', original);
+    expect(store.list('files').filter((entry) => entry.kind === 'pdf-form')).toEqual([]);
+
+    await exportBatchPdf(store, config, batch.id);
+    const copy = store.list('files').find((entry) => entry.kind === 'pdf-form');
+    expect(copy).toBeDefined();
+    const response = await request(createApp({ store, config })).get(`/api/images/${copy!.id}`);
+    expect(response.status).toBe(404);
+    expect(response.body.code).toBe('IMAGE_NOT_FOUND');
+  });
+
+  it('exports anyway when the form-only copy cannot be saved, and previews from the whole PDF', async () => {
+    const original = await indexedImage('nocopy-original', '#245c77');
+    await writeImage(original);
+    indexImage('nocopy', 'original', original);
+    const batch = createIndexedBatch('nocopy', original);
+    failures.formCopy = true;
+
+    const exported = await exportBatchPdf(store, config, batch.id);
+
+    expect(exported.pdfPath).toMatch(/^2026-09\/exports\/.+\.pdf$/);
+    expect(store.list('files').filter((entry) => entry.kind === 'pdf-form')).toEqual([]);
+    // 没有留下写了一半的临时文件
+    expect(await readdir(join(temp, '2026-09', 'exports'))).toEqual([basename(exported.pdfPath!)]);
+    const preview = await request(createApp({ store, config })).get(`/api/batches/${batch.id}/preview.pdf`);
+    expect(preview.status).toBe(200);
+    expect(preview.body).toEqual(await readFile(safePath(temp, exported.pdfPath!)));
+  });
+
+  it('removes both files it wrote when another request finalized the batch first', async () => {
+    const original = await indexedImage('race-original', '#245c77');
+    await writeImage(original);
+    indexImage('race', 'original', original);
+    const batch = createIndexedBatch('race', original);
+    const winnerPath = '2026-09/exports/winner.pdf';
+    const realTransact = store.transact.bind(store);
+    vi.spyOn(store, 'transact').mockImplementation((work) => {
+      // 渲染、写文件期间，另一个请求已经把这张报销单定稿了
+      store.put('batches', { ...getBatch(store, batch.id), pdfPath: winnerPath });
+      return realTransact(work);
+    });
+
+    const exported = await exportBatchPdf(store, config, batch.id);
+
+    expect(exported.pdfPath).toBe(winnerPath);
+    // 这次多写的两份文件（整份 PDF 和报销单页副本）都清掉了，索引里也没有它们
+    expect(store.list('files').filter((entry) => entry.kind === 'pdf' || entry.kind === 'pdf-form')).toEqual([]);
+    expect(await readdir(join(temp, '2026-09', 'exports'))).toEqual([]);
   });
 
   it('renders a category split across sheets as consecutive forms, each followed by its own receipts', { timeout: 30000 }, async () => {

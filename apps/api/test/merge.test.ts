@@ -184,6 +184,97 @@ describe('stitchImages', () => {
       stitchImages([Buffer.from('not an image'), await solid(10, 10, RED)]),
     ).rejects.toThrow();
   });
+
+  describe('panels', () => {
+    it('reports where each screenshot sits so a viewer can show them one at a time', async () => {
+      const stitched = await stitchImages([
+        await solid(100, 200, RED),
+        await solid(150, 100, BLUE),
+      ]);
+
+      // 红 100 宽；蓝 150x100 放大到 200 高后 300 宽，起点在 100 + 6（分隔线）
+      expect(stitched.panels).toEqual([
+        { left: 0, width: 100 },
+        { left: 106, width: 300 },
+      ]);
+      // 位置和实际像素对得上：每张的两端都是自己的颜色，缝是灰色，不属于任何一张
+      expect(await pixel(stitched.bytes, 0, 0)).toEqual([255, 0, 0]);
+      expect(await pixel(stitched.bytes, 99, 0)).toEqual([255, 0, 0]);
+      expect(await pixel(stitched.bytes, 100, 0)).toEqual(GAP);
+      expect(await pixel(stitched.bytes, 105, 0)).toEqual(GAP);
+      expect(await pixel(stitched.bytes, 106, 0)).toEqual([0, 0, 255]);
+      expect(await pixel(stitched.bytes, 405, 0)).toEqual([0, 0, 255]);
+    });
+
+    it('keeps three screenshots in the order they were given', async () => {
+      const stitched = await stitchImages([
+        await solid(100, 100, RED),
+        await solid(100, 100, GREEN),
+        await solid(100, 100, BLUE),
+      ]);
+
+      expect(stitched.panels).toEqual([
+        { left: 0, width: 100 },
+        { left: 106, width: 100 },
+        { left: 212, width: 100 },
+      ]);
+    });
+
+    it('measures a rotated (EXIF) photo by how it is displayed', async () => {
+      const sideways = await sharp(await solid(200, 100, RED, 'jpeg'))
+        .withMetadata({ orientation: 6 })
+        .jpeg()
+        .toBuffer();
+
+      const stitched = await stitchImages([sideways, await solid(100, 200, BLUE)]);
+
+      expect(stitched.panels).toEqual([
+        { left: 0, width: 100 },
+        { left: 106, width: 100 },
+      ]);
+    });
+
+    it('still lines up with the pixels after a very wide result is shrunk', async () => {
+      const stitched = await stitchImages([
+        await solid(4000, 1000, RED),
+        await solid(4000, 1000, GREEN),
+        await solid(4000, 1000, BLUE),
+      ]);
+
+      const { data, info } = await sharp(stitched.bytes)
+        .removeAlpha()
+        .raw()
+        .toBuffer({ resolveWithObject: true });
+      const at = (x: number): number[] => {
+        const offset = (Math.floor(info.height / 2) * info.width + x) * info.channels;
+        return [data[offset]!, data[offset + 1]!, data[offset + 2]!];
+      };
+      const [first, second, third] = stitched.panels;
+      // 最后一张正好到图的右边缘：没有多出来的空白，也没有溢出
+      expect(third!.left + third!.width).toBe(info.width);
+      expect(at(first!.left)).toEqual([255, 0, 0]);
+      expect(at(first!.left + first!.width - 1)).toEqual([255, 0, 0]);
+      expect(at(first!.left + first!.width)).toEqual(GAP);
+      expect(at(second!.left - 1)).toEqual(GAP);
+      expect(at(second!.left)).toEqual([0, 160, 0]);
+      expect(at(second!.left + second!.width - 1)).toEqual([0, 160, 0]);
+      expect(at(third!.left)).toEqual([0, 0, 255]);
+      expect(at(third!.left + third!.width - 1)).toEqual([0, 0, 255]);
+    });
+
+    it('also reports the panels when the result falls back to JPEG', async () => {
+      const stitched = await stitchImages([
+        await solid(100, 100, RED, 'jpeg'),
+        await solid(100, 100, BLUE),
+      ]);
+
+      expect(stitched.mime).toBe('image/jpeg');
+      expect(stitched.panels).toEqual([
+        { left: 0, width: 100 },
+        { left: 106, width: 100 },
+      ]);
+    });
+  });
 });
 
 describe('merging and splitting receipts', () => {
@@ -290,6 +381,21 @@ describe('merging and splitting receipts', () => {
       expect(await pixel(bytes, 150, 300)).toEqual([255, 0, 0]);
       expect(await pixel(bytes, 303, 300)).toEqual(GAP);
       expect(await pixel(bytes, 500, 300)).toEqual([0, 0, 255]);
+    });
+
+    it('records where each screenshot sits in the stitched image, and keeps that when stored', async () => {
+      const { left, right } = await pair();
+
+      const merged = await mergeReceipts(store, config, [left.id, right.id], now);
+
+      // 左 300 宽；右 300x400 放大到 600 高后 450 宽，起点 300 + 6。对账时据此一张一张看
+      expect(merged.original.panels).toEqual([
+        { left: 0, width: 300 },
+        { left: 306, width: 450 },
+      ]);
+      expect(store.get('receipts', merged.id)?.original.panels).toEqual(merged.original.panels);
+      // 来源截图本身是单张图，没有分屏信息
+      expect(store.get('receipts', 'left')?.original.panels).toBeUndefined();
     });
 
     it('hides the sources without touching their data, files or other receipts', async () => {

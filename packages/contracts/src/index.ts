@@ -72,6 +72,11 @@ export interface ImageRef {
   bytes: number;
   width: number;
   height: number;
+  /**
+   * 这张图是几张截图左右拼成的（合并凭证）时才有：每张截图在拼图里的位置（像素，从左起，按拼接顺序），
+   * 中间的分隔线不算在任何一张里。对账时据此一张一张看。旧数据和单张图没有此字段。
+   */
+  panels?: Array<{ left: number; width: number }>;
   deletedAt: string | null;
 }
 
@@ -248,7 +253,11 @@ export interface Batch {
 export interface FileIndexEntry {
   id: string;
   ownerId: string;
-  kind: 'original' | 'refund' | 'signature' | 'pdf';
+  /**
+   * pdf 是导出的完整报销 PDF（含全部凭证页）；pdf-form 是同一次导出时顺手存的「只有报销单页」小文件，
+   * 只给对账页预览用，不用来下载、归档或备份。
+   */
+  kind: 'original' | 'refund' | 'signature' | 'pdf' | 'pdf-form';
   path: string;
   sha256: string;
   deletedAt: string | null;

@@ -13,22 +13,31 @@ function revoke(url: string): void {
   }
 }
 
-export function useAuthedUrl(path: string | null): { url: string | null; failed: boolean } {
+/**
+ * path 变了或组件卸载时，还没下完的请求会被取消：手机在慢网下连点「下一张」时，
+ * 不会让好几张大图同时抢带宽，只下当前看的这一张。
+ * error 是失败的原因（例如「无法连接服务器」「加载失败」），拿不到原因时为空字符串。
+ */
+export function useAuthedUrl(path: string | null): { url: string | null; failed: boolean; error: string } {
   const [url, setUrl] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
+  const [error, setError] = useState('');
 
   useEffect(() => {
     if (path === null) {
       setUrl(null);
       setFailed(false);
+      setError('');
       return;
     }
     let active = true;
     let objectUrl: string | null = null;
+    const controller = new AbortController();
     setUrl(null);
     setFailed(false);
+    setError('');
     Promise.resolve()
-      .then(() => fetchBlobUrl(path))
+      .then(() => fetchBlobUrl(path, controller.signal))
       .then((created) => {
         if (!active) {
           revoke(created);
@@ -37,16 +46,19 @@ export function useAuthedUrl(path: string | null): { url: string | null; failed:
         objectUrl = created;
         setUrl(created);
       })
-      .catch(() => {
-        if (active) setFailed(true);
+      .catch((cause: unknown) => {
+        if (!active) return;
+        setFailed(true);
+        setError(cause instanceof Error ? cause.message : '');
       });
     return () => {
       active = false;
+      controller.abort();
       if (objectUrl !== null) revoke(objectUrl);
     };
   }, [path]);
 
-  return { url, failed };
+  return { url, failed, error };
 }
 
 export function AuthedImage({

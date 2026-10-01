@@ -6,6 +6,7 @@ import {
   MERGE_MAX,
   MERGE_MIN,
   type FileIndexEntry,
+  type ImageRef,
   type Receipt,
 } from '@auto-reimbursement/contracts';
 import sharp from 'sharp';
@@ -29,6 +30,8 @@ const PNG_LIMIT_BYTES = 12 * 1024 * 1024;
 export interface StitchedImage {
   bytes: Buffer;
   mime: 'image/png' | 'image/jpeg';
+  /** 每张来源截图在拼图里的位置（像素，从左起，按拼接顺序）；中间的分隔线不算在任何一张里。 */
+  panels: Array<{ left: number; width: number }>;
 }
 
 /**
@@ -63,7 +66,12 @@ export async function stitchImages(inputs: Buffer[]): Promise<StitchedImage> {
     total = widths.reduce((sum, width) => sum + width, 0) + gaps;
   }
 
-  let left = 0;
+  let cursor = 0;
+  const panels = widths.map((width) => {
+    const panel = { left: cursor, width };
+    cursor += width + GAP_PX;
+    return panel;
+  });
   const pieces = await Promise.all(sources.map(async (source, index) => {
     const { data, info } = await sharp(source.bytes, { limitInputPixels: MAX_INPUT_PIXELS })
       .rotate()
@@ -74,26 +82,22 @@ export async function stitchImages(inputs: Buffer[]): Promise<StitchedImage> {
       .toBuffer({ resolveWithObject: true });
     return { data, info };
   }));
-  const composites = pieces.map(({ data, info }, index) => {
-    const piece = {
-      input: data,
-      raw: { width: info.width, height: info.height, channels: info.channels },
-      left,
-      top: 0,
-    };
-    left += widths[index]! + GAP_PX;
-    return piece;
-  });
+  const composites = pieces.map(({ data, info }, index) => ({
+    input: data,
+    raw: { width: info.width, height: info.height, channels: info.channels },
+    left: panels[index]!.left,
+    top: 0,
+  }));
 
   const canvas = sharp({
     create: { width: total, height, channels: 3, background: GAP_COLOR },
   }).composite(composites);
   if (sources.every((source) => source.format === 'png')) {
     const png = await canvas.png().toBuffer();
-    if (png.length <= PNG_LIMIT_BYTES) return { bytes: png, mime: 'image/png' };
-    return { bytes: await sharp(png).jpeg({ quality: 92 }).toBuffer(), mime: 'image/jpeg' };
+    if (png.length <= PNG_LIMIT_BYTES) return { bytes: png, mime: 'image/png', panels };
+    return { bytes: await sharp(png).jpeg({ quality: 92 }).toBuffer(), mime: 'image/jpeg', panels };
   }
-  return { bytes: await canvas.jpeg({ quality: 92 }).toBuffer(), mime: 'image/jpeg' };
+  return { bytes: await canvas.jpeg({ quality: 92 }).toBuffer(), mime: 'image/jpeg', panels };
 }
 
 function assertMergeIds(receiptIds: string[]): void {
@@ -169,11 +173,13 @@ export async function mergeReceipts(
   const first = sources.reduce((earliest, source) =>
     source.uploadOrder < earliest.uploadOrder ? source : earliest);
   const extension = stitched.mime === 'image/png' ? 'png' : 'jpg';
-  const image = await storeImage(config, first.month, 'originals', {
+  const stored = await storeImage(config, first.month, 'originals', {
     name: `merged.${extension}`,
     mime: stitched.mime,
     bytes: stitched.bytes,
   });
+  // 记下每张截图在拼图里的位置：对账时（尤其手机上）可以一张一张看，不用对着缩得很小的整张拼图
+  const image: ImageRef = { ...stored, panels: stitched.panels };
 
   try {
     return store.transact(() => {

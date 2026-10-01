@@ -147,6 +147,26 @@ describe('manual batches', () => {
     store.close();
   });
 
+  it('keeps the panel positions of a merged receipt in the batch snapshot', () => {
+    const store = openStore(':memory:');
+    const base = sampleReceipt({ id: 'merged' });
+    const panels = [{ left: 0, width: 300 }, { left: 306, width: 450 }];
+    store.put('receipts', { ...base, original: { ...base.original, panels } });
+    store.put('receipts', sampleReceipt({ id: 'plain', uploadOrder: 2 }));
+
+    const batch = createBatch(
+      store,
+      ['merged', 'plain'],
+      resolveOptions(getSettings(store), new Date()),
+      new Date(),
+    );
+
+    expect(batch.items.find((item) => item.receiptId === 'merged')?.original.panels).toEqual(panels);
+    expect(batch.items.find((item) => item.receiptId === 'plain')?.original.panels).toBeUndefined();
+    expect(getBatch(store, batch.id)).toEqual(batch);
+    store.close();
+  });
+
   it('uses indexed signature data and clears a text-mode client signature', () => {
     const store = openStore(':memory:');
     const signature: ImageRef = {

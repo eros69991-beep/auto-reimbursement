@@ -72,6 +72,26 @@ describe('authenticated file downloads', () => {
 
     await expect(fetchBlobUrl('/api/batches/b1/pdf')).rejects.toThrow('加载失败');
   });
+
+  it('can be cancelled, and a cancelled download is not mistaken for a network failure', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation((_input, init) => new Promise((_resolve, reject) => {
+      init?.signal?.addEventListener('abort', () => reject(init.signal!.reason));
+    }));
+    const controller = new AbortController();
+
+    const download = fetchBlobUrl('/api/receipts/r1/original-image?size=view', controller.signal);
+    controller.abort();
+
+    // 取消是调用方自己要的，保持原样的 AbortError，不翻成「无法连接服务器」
+    await expect(download).rejects.toMatchObject({ name: 'AbortError' });
+    expect(fetchMock.mock.calls[0]![1]?.signal).toBe(controller.signal);
+  });
+
+  it('still says the server cannot be reached when the network is down', async () => {
+    vi.spyOn(globalThis, 'fetch').mockRejectedValue(new TypeError('Failed to fetch'));
+
+    await expect(fetchBlobUrl('/api/images/a')).rejects.toThrow('无法连接服务器，请检查网络后重试');
+  });
 });
 
 describe('merging screenshots of one order', () => {

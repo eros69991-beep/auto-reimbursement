@@ -103,8 +103,8 @@ export async function requestJson<T>(
 }
 
 /** 带鉴权下载二进制内容，返回 object URL（调用方负责 revoke）。 */
-export async function fetchBlobUrl(path: string): Promise<string> {
-  const response = await fetchWithFriendlyError(apiUrl(path), { headers: authHeaders() });
+export async function fetchBlobUrl(path: string, signal?: AbortSignal): Promise<string> {
+  const response = await fetchWithFriendlyError(apiUrl(path), { headers: authHeaders(), signal });
   if (!response.ok) {
     if (response.status === 401) {
       notifyUnauthorized();

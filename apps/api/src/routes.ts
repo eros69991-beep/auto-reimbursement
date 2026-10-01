@@ -37,7 +37,13 @@ import { confirmDistinct } from './duplicates.js';
 import { deleteRule, listRules, saveRule } from './learning.js';
 import { mergeReceipts, splitReceipt } from './merge.js';
 import { getProgress, type RecognitionQueue } from './queue.js';
-import { exportBatchPdf, readSavedBatchPdf, renderBatchPdf } from './render/pdf.js';
+import {
+  exportBatchPdf,
+  findSavedFormPdf,
+  readSavedBatchPdf,
+  readSavedFormPdf,
+  renderBatchPdf,
+} from './render/pdf.js';
 import {
   confirmReceipt,
   deleteReceipt,
@@ -58,7 +64,7 @@ import {
   saveSignature,
 } from './settings.js';
 import { safePath } from './storage.js';
-import { thumbnailWebp } from './thumbs.js';
+import { thumbnailWebp, viewJpeg } from './thumbs.js';
 
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
 // P-12：凭证上传的 multer 上限放宽到 25MB，让 20–25MB 的文件进入按文件拒绝流程
@@ -305,6 +311,26 @@ export function createRouter(
       const batch = getBatch(store, request.params.id);
       assertActiveBatch(batch);
       if (batch.pdfPath !== null) {
+        // 定稿后的预览只需要报销单页：导出时存了「仅报销单页」的小文件（几十 KB），优先给它，
+        // 手机和慢网下就不必为了看报销单去下整份含全部凭证页的 PDF。老批次导出时还没有这份，退回整份。
+        const formEntry = findSavedFormPdf(store, batch);
+        if (formEntry !== null) {
+          const formEtag = `"saved-form-${formEntry.sha256.slice(0, 24)}"`;
+          if (request.get('if-none-match') === formEtag) {
+            response.status(304).end();
+            return;
+          }
+          const form = await readSavedFormPdf(config, formEntry);
+          if (form !== null) {
+            response
+              .set('Cache-Control', 'private, max-age=31536000, immutable')
+              .set('ETag', formEtag)
+              .type('application/pdf')
+              .send(form);
+            return;
+          }
+          // 副本丢了或被换过：退回整份
+        }
         // 定稿 PDF 内容不可变，可以长缓存
         const etag = `"saved-${createHash('sha256').update(batch.pdfPath).digest('hex').slice(0, 24)}"`;
         if (request.get('if-none-match') === etag) {
@@ -443,7 +469,7 @@ export function createRouter(
   router.get('/images/:id', async (request, response, next) => {
     try {
       const entry = store.get('files', request.params.id);
-      if (entry === null || entry.kind === 'pdf') {
+      if (entry === null || entry.kind === 'pdf' || entry.kind === 'pdf-form') {
         throw new HttpError(404, 'IMAGE_NOT_FOUND', '图片不存在');
       }
       if (entry.deletedAt !== null) {
@@ -506,7 +532,16 @@ export function createRouter(
       if (entry.deletedAt !== null) {
         throw new HttpError(410, 'IMAGE_DELETED', '图片已删除');
       }
-      response.type(extname(entry.path)).send(await readFile(safePath(config.dataDir, entry.path)));
+      const sourcePath = safePath(config.dataDir, entry.path);
+      // 对账页用 ?size=view：大图给缩小版（手机和慢网下少等几 MB），小图原样返回
+      if (request.query.size === 'view') {
+        const view = await viewJpeg(config.dataDir, entry.sha256, sourcePath);
+        if (view !== null) {
+          response.type('jpeg').send(view);
+          return;
+        }
+      }
+      response.type(extname(entry.path)).send(await readFile(sourcePath));
     } catch (error) {
       if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
         next(new HttpError(404, 'IMAGE_NOT_FOUND', '图片不存在'));
