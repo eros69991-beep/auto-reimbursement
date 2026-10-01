@@ -386,7 +386,9 @@ P-20 统一错误表：
 
 ## 试点反馈 Task 6 — 报销单预览加载失败、对账图太大（Claude，2026-09-30，接在 Task 5 之后，基于 273c83c）
 
-现象：手机上对账页的「报销单」预览加载失败，电脑端左边的报销单预览也加载失败，界面只写一句「加载失败」，看不出原因。这里复现不了用户手机上的具体网络和浏览器，所以没有只修一个点：把最可能出问题的几处一起收紧（少下载、少占内存、失败了说清原因、能重试），后端、前端都动了。
+现象：手机上对账页的「报销单」预览加载失败，电脑端左边的报销单预览也加载失败，界面只写一句「加载失败」，看不出原因。当时复现不了用户手机上的具体网络和浏览器，所以没有只修一个点：把最可能出问题的几处一起收紧（少下载、少占内存、失败了说清原因、能重试），后端、前端都动了。
+
+> **更正（2026-10-01）**：上面「网络、文件大小」的判断不完整。推上去之后用户的截图（iPhone 和 Mac 的 Safari）显示，真正的原因是 Safari 不支持 pdf.js 读页面文字用的写法，和网络、文件大小无关，见文末「Task 6 补丁」。下面 6a–6c 的改动本身仍然有效，也正是 6b 的错误提示让真正的错误显示了出来。
 
 **6a 定稿后的预览只下载报销单页（后端）**
 - 原来：已定稿的批次，`GET /api/batches/:id/preview.pdf` 返回导出时存的整份 PDF——报销单页后面还跟着每张报销单的全部凭证附件页，凭证多、照片大时有几 MB 甚至更大；而对账页只看报销单页（凭证图在另一边单独看）。慢网、跨境网络下这份下载最容易中断。
@@ -459,3 +461,34 @@ P-20 统一错误表：
 - 报销单页在手机上要左右滑动看（字才是能读的大小）；整张一眼看全做不到，需要时在电脑上看。
 - 记位置之前合并的老凭证没有 `panels`，只能看整图；还没进报销单的话，拆开再合并一次就有了。
 - 浏览器自带的滚动条会让「全屏查看」右边留出约 15px 的页面条（桌面浏览器窗口很窄时才看得到，手机是浮动滚动条，没有）。
+
+## 试点反馈 Task 6 补丁 — 报销单预览在 Safari 上全部加载失败（Claude，2026-10-01，接在 Task 7 之后，基于 c273a78）
+
+现象：Task 6/7 推上线后，用户在 iPhone（iOS 18.6、Safari 18.6）和 Mac（Safari 26.5）上，对账页的报销单预览都显示「预览加载失败：浏览器没能显示这份 PDF」，技术细节是 `TypeError: undefined is not a function (near '...i of e...')`，同一屏还写着「已下载 17 KB / 17 KB」。只改前端。
+
+**真正的原因（之前说的网络、文件太大都不对）**
+- 文件早已完整下载（17 KB / 17 KB），出错在浏览器里读页面文字这一步。`PdfPreview` 为了认出凭证附件页和报销单页，对每一页调用了 pdf.js 的 `page.getTextContent()`（第二轮评审时加的，commit 58bb347）；pdf.js 6 里这个函数内部是 `for await (const chunk of readableStream)`。Safari 到 26.x（iPhone 上的 18.x 也一样）的 `ReadableStream` 不支持 for await，Safari 27 才加，所以一调用就抛 TypeError。其他主流浏览器的新版本支持，这条路在它们上一直正常。
+- 为什么一直没测出来：web 单元测试把 pdf.js 整个换成了假的；e2e 只跑 Chromium，而 Chromium 支持这个写法。Task 6 当时「复现不了」，转而收紧下载、报错、重试的那几处改动本身是对的（也正是它们让真实错误显示了出来），但没有碰到真正的原因。
+
+**怎么确认的**
+- 在云端装了真正的 WebKit 引擎（WebKitGTK 2.52 + WebKitWebDriver，和 Safari 同一个内核的移植）。它比 Safari 26.5 新，已经支持 ReadableStream 的 for await，所以旧代码在它上面本来跑得通；把页面里 `ReadableStream.prototype` 的 `Symbol.asyncIterator` 和 `values` 删掉来模拟 Safari 26 之后，旧代码的生产构建出现和用户截图一模一样的失败：「浏览器没能显示这份 PDF」，细节 `TypeError: undefined is not a function (near '...i of e...')`。手机尺寸（点开「报销单」标签）和电脑尺寸都一样。
+- 外部资料也对得上：caniuse 上 ReadableStream 的 `[Symbol.asyncIterator]`，Safari 桌面版和 iOS 版都是 27 起支持；也有别的项目在 Safari 26 上因为 pdf.js 6 的 `getTextContent()` 出同一个错，改成直接读 `streamTextContent()` 修好。
+
+**修改（`PdfPreview.tsx`）**
+- 不再调用 `getTextContent()`，改成 `pageText(page)`：对 `page.streamTextContent()` 用 `reader.read()` 一块块读，读完放掉读取器。所有浏览器行为一致。
+- 读不出某一页的文字（例如 worker 已被销毁）不再让整份预览失败：这一页照样画出来，只是不标第几张报销单、也认不出附件页，并在控制台记一条警告。
+- 失败时的「技术细节」多带堆栈前 4 行（去掉域名；V8 的堆栈第一行和错误名重复，不再列）。下次再出现看不懂的失败，能看出是哪一行代码抛的。
+
+**测试**
+- web `PdfPreview.test.tsx`（12 → 16 例）：假页面的 `getTextContent()` 照 Safari 的样子直接抛错，文字只能从 `streamTextContent()` 的读取器里读（分成两块，中间夹一个没有 str 的标记项，关键词可以被拆在两块之间）。新增：用读取器读文字并放掉读取器、读不出文字时仍画出整页但不标序号、堆栈行进技术细节（V8 和 JavaScriptCore 两种格式）。
+- e2e：新增 `e2e/safari.ts` 的 `pretendToBeSafari(page)`（页面里删掉 `ReadableStream.prototype` 的 asyncIterator 和 values，模拟 Safari 26 的缺口；pdf.js 的 worker 是另一个运行环境，不受影响），`reconcile-phone.spec.ts` 的每条用例都先调用它；另加一条「替身自检」确认页面里 for await 确实会抛 TypeError（4 条，原来 3 条）。**以后凡是要在页面里真跑 pdf.js 的 e2e 都应先调用它。**
+- 故意改坏都会被抓到：改回 `getTextContent()`（web 3 例失败；e2e 手机、手机重试、电脑三条都在等报销单画出来时超时）；去掉读不出文字时的兜底、不放读取器、不带堆栈、堆栈带域名、重复错误行、不截断堆栈各 1 条，共 7 处，每处都有测试失败。
+
+**验证**
+- `pnpm typecheck` 通过；contracts 51 + api 376 + web 193 全过；e2e 20/20（关闭重试）。
+- 真 WebKit（WebKitGTK 2.52，页面里删掉 ReadableStream 的 asyncIterator）：旧代码在手机和电脑尺寸都复现用户的失败；新代码在手机尺寸（点开「报销单」标签）画出一张 960px 宽的报销单，电脑尺寸画出报销单并标了序号。
+
+**留意**
+- 云端用真 WebKit 复现的做法（只在这次手工做的，脚本没有放进仓库）：`apt-get install webkit2gtk-driver libwebkit2gtk-4.1-0 xvfb`，起 `Xvfb :99` 和 `WebKitWebDriver --port=4444`，用 WebDriver 新建会话（`browserName: MiniBrowser`，`webkitgtk:browserOptions.binary` 指向 `/usr/lib/x86_64-linux-gnu/webkit2gtk-4.1/MiniBrowser`、参数 `--automation`），打开用 `vite build` 构建的页面。因为 WebKitGTK 比当时的 Safari 新，要先在页面里删掉 `ReadableStream.prototype` 的 `Symbol.asyncIterator` 和 `values` 才像 Safari 26。
+- 真 Safari 里的其他不兼容只能靠用户在真机上试；修复推上去后请再用 iPhone 和 Mac 的 Safari 各看一次预览。万一还有别的报错，「技术细节」里现在有堆栈，截图发来就能定位。
+- Safari 27 起支持 for await，但这里的写法在所有版本都能用，不需要再改回去。

@@ -4,6 +4,7 @@ import type { Batch } from '@auto-reimbursement/contracts';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 
 import { createFixtureRuntime, type FixtureRuntime } from './fixture-runtime.ts';
+import { pretendToBeSafari } from './safari.ts';
 
 // 试点反馈 Task 6/7：手机上对账看不全、报销单预览加载失败。
 // 这里用真实接口造一份报销单（含一张由两张截图合并的凭证），在真实浏览器里按手机和电脑两种尺寸走一遍对账页。
@@ -111,6 +112,26 @@ test.describe('对账页（试点反馈 Task 6/7）', () => {
 
   test.afterAll(async () => {
     await runtime.close();
+  });
+
+  // 用户的手机和 Mac 用的都是 Safari，而 Safari（到 26）的 ReadableStream 不能 for await：
+  // 报销单预览曾因此在 Safari 上全部加载失败，Chromium 里却一切正常。这里让页面也缺这项功能。
+  test.beforeEach(async ({ page }) => {
+    await pretendToBeSafari(page);
+  });
+
+  test('替身自检：页面里的 ReadableStream 确实不能 for await，和 Safari 26 一样', async ({ page }) => {
+    await page.goto('/');
+    const outcome = await page.evaluate(async () => {
+      const stream = new ReadableStream({ start: (controller) => controller.close() });
+      try {
+        for await (const chunk of stream as unknown as AsyncIterable<unknown>) void chunk;
+        return 'iterated';
+      } catch (error) {
+        return error instanceof Error ? error.name : 'other';
+      }
+    });
+    expect(outcome).toBe('TypeError');
   });
 
   test('手机：凭证占满剩下的屏幕，标签一次只显示一块，合并凭证逐张截图对准，可全屏', async ({ page }) => {

@@ -25,13 +25,42 @@ function failing(error: Error) {
   return { promise: Promise.reject(error), destroy: vi.fn().mockResolvedValue(undefined) };
 }
 
-/** 一份只有若干页文字的假 PDF：页内容由 texts 给出，画布用假上下文。 */
-function fakeDocument(texts: string[]) {
+// Safari 26 及更早版本（iPhone 上的 18.x 也是）的 ReadableStream 不支持 for await（Safari 27 才有），
+// pdf.js 的 page.getTextContent() 内部正是 for await，在那里一调用就抛这个错。jsdom/Chromium 里不会，所以要在这里替它抛。
+const SAFARI_ERROR = "undefined is not a function (near '...i of e...')";
+const getTextContent = vi.fn();
+const releaseLock = vi.fn();
+
+/** pdf.js 把一页的文字分块吐出来：这里拆成两块，中间夹一个没有 str 的标记项；关键词可能被拆在两块之间。 */
+function textStream(text: string) {
+  const middle = Math.floor(text.length / 2);
+  const chunks = [
+    { items: [{ type: 'beginMarkedContent' }, { str: text.slice(0, middle) }] },
+    { items: [{ str: text.slice(middle) }] },
+  ];
+  let next = 0;
+  return {
+    getReader: () => ({
+      read: async () => (next < chunks.length ? { done: false, value: chunks[next++] } : { done: true, value: undefined }),
+      releaseLock,
+    }),
+  };
+}
+
+/**
+ * 一份只有若干页文字的假 PDF：页内容由 texts 给出，画布用假上下文。
+ * 页面文字只能用 streamTextContent() 读；getTextContent() 照 Safari 上的样子直接抛错。textFails：连文字流也读不出来。
+ */
+function fakeDocument(texts: string[], { textFails = false }: { textFails?: boolean } = {}) {
   return {
     numPages: texts.length,
     getPage: async (number: number) => ({
       getViewport: ({ scale }: { scale: number }) => ({ width: 200 * scale, height: 280 * scale }),
-      getTextContent: async () => ({ items: [{ str: texts[number - 1] }] }),
+      getTextContent,
+      streamTextContent: () => {
+        if (textFails) throw new Error('Worker was terminated');
+        return textStream(texts[number - 1]!);
+      },
       render: () => ({ promise: Promise.resolve() }),
     }),
   };
@@ -44,6 +73,9 @@ describe('PDF preview', () => {
   beforeEach(() => {
     vi.spyOn(console, 'error').mockImplementation(() => undefined);
     vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({} as unknown as CanvasRenderingContext2D);
+    getTextContent.mockReset();
+    getTextContent.mockRejectedValue(new TypeError(SAFARI_ERROR));
+    releaseLock.mockReset();
   });
   afterEach(() => {
     cleanup();
@@ -125,6 +157,43 @@ describe('PDF preview', () => {
       expect(fetchSpy).not.toHaveBeenCalled();
     });
 
+    it('puts the first stack lines into the technical details, without the host name and without repeating the error line', async () => {
+      const error = Object.assign(new TypeError(SAFARI_ERROR), {
+        stack: [
+          `TypeError: ${SAFARI_ERROR}`,
+          '    at i (https://app.test/assets/pdf-abc.js:12:3456)',
+          '    at getTextContent (https://app.test/assets/pdf-abc.js:12:3000)',
+          '    at a (https://app.test/assets/index-xyz.js:1:1)',
+          '    at b (https://app.test/assets/index-xyz.js:2:1)',
+          '    at lineSix (https://app.test/assets/index-xyz.js:6:1)',
+        ].join('\n'),
+      });
+      getDocument.mockReturnValue(failing(error));
+
+      render(<PdfPreview url={URL} />);
+
+      const details = (await screen.findByRole('alert')).querySelector('pre')!.textContent!;
+      expect(details).toContain('at i (/assets/pdf-abc.js:12:3456)');
+      expect(details).toContain('at getTextContent (/assets/pdf-abc.js:12:3000)');
+      expect(details).not.toContain('app.test');
+      // 错误名只出现一次（堆栈第一行和上面重复，不再列），也不把整个堆栈都倒出来
+      expect(details.match(/TypeError:/g)).toHaveLength(1);
+      expect(details).not.toContain('lineSix');
+    });
+
+    it('also reads a JavaScriptCore stack, which has no error line of its own', async () => {
+      const error = Object.assign(new TypeError(SAFARI_ERROR), {
+        stack: 'i@https://app.test/assets/pdf-abc.js:12:3456\ngetTextContent@https://app.test/assets/pdf-abc.js:12:3000',
+      });
+      getDocument.mockReturnValue(failing(error));
+
+      render(<PdfPreview url={URL} />);
+
+      const details = (await screen.findByRole('alert')).querySelector('pre')!.textContent!;
+      expect(details).toContain('i@/assets/pdf-abc.js:12:3456');
+      expect(details).toContain('getTextContent@/assets/pdf-abc.js:12:3000');
+    });
+
     it('tells a browser-side drawing failure apart from a network one', async () => {
       getDocument.mockReturnValue({
         promise: Promise.resolve(fakeDocument([FORM_PAGE])),
@@ -188,6 +257,43 @@ describe('PDF preview', () => {
       expect(canvases.map((canvas) => canvas.dataset.sheetIndex)).toEqual(['0', undefined, '1']);
       await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument());
       expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    });
+
+    it('reads page text with the stream reader, because getTextContent needs for-await and Safari before 27 cannot do that', async () => {
+      getDocument.mockReturnValue({
+        promise: Promise.resolve(fakeDocument([FORM_PAGE, ATTACHMENT_PAGE])),
+        destroy: vi.fn().mockResolvedValue(undefined),
+      });
+
+      const { container } = render(<PdfPreview url={URL} />);
+
+      await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument());
+      // 报销单页认出来了（关键词被拆在两块文字之间也行），附件页被跳过，整份没有报错
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+      const canvases = [...container.querySelectorAll('canvas')];
+      expect(canvases.map((canvas) => canvas.dataset.sheetIndex)).toEqual(['0']);
+      expect(getTextContent).not.toHaveBeenCalled();
+      // 每页读完都放掉读取器
+      expect(releaseLock).toHaveBeenCalledTimes(2);
+    });
+
+    it('still draws a page whose text cannot be read, just without a sheet number, instead of failing the whole preview', async () => {
+      getDocument.mockReturnValue({
+        promise: Promise.resolve(fakeDocument([FORM_PAGE, ATTACHMENT_PAGE], { textFails: true })),
+        destroy: vi.fn().mockResolvedValue(undefined),
+      });
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      const onSheetDrawn = vi.fn();
+
+      const { container } = render(<PdfPreview url={URL} onSheetDrawn={onSheetDrawn} />);
+
+      await waitFor(() => expect(container.querySelectorAll('canvas')).toHaveLength(2));
+      await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument());
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+      // 认不出页面类型：都画出来，但不标第几张报销单，也就不通知调用方
+      expect([...container.querySelectorAll('canvas')].map((canvas) => canvas.dataset.sheetIndex)).toEqual([undefined, undefined]);
+      expect(onSheetDrawn).not.toHaveBeenCalled();
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('读不出第 1 页'), expect.any(Error));
     });
 
     it('tells the caller each time a form sheet is on screen, and only for form sheets', async () => {

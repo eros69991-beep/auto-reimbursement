@@ -202,7 +202,7 @@
 
 来源：Task 1–5 上线后再跑一遍（基于 273c83c）。
 - 手机上对账页显示不全。
-- 手机上报销单预览「加载失败」，电脑端左边的报销单预览也「加载失败」。
+- 手机上报销单预览「加载失败」，电脑端左边的报销单预览也「加载失败」。（后来查明：Mac 和 iPhone 的 Safari 上都会失败，原因是 Safari 不支持 pdf.js 读页面文字用的写法，和网络无关——见下面「Task 6 补丁」。）
 - 问能不能直接部署到国内的服务器上。
 
 ## Task 6 · 报销单预览加载失败、对账图太大｜中
@@ -222,6 +222,11 @@
 - 老批次（改动前定稿的）没有副本，仍要下整份 PDF；重新生成并定稿后才有。
 - 没解决的：服务器在境外、前端在 Netlify，国内手机访问慢且不稳——见 Task 8。
 
+**Task 6 补丁（2026-10-01 已完成，详见 `progress.md`「Task 6 补丁」）**
+- 上面「少下载、说原因、能重试」没有解决用户看到的失败。推上去后用户在 iPhone（Safari 18.6）和 Mac（Safari 26.5）上截图：下载已完整（17 KB / 17 KB），错误是 `TypeError: undefined is not a function (near '...i of e...')`。真正的原因：`PdfPreview` 为认出附件页调用了 pdf.js 的 `getTextContent()`，它内部用 `for await` 遍历 `ReadableStream`，Safari 到 26.x 不支持（Safari 27 才有）。
+- 改成直接读 `streamTextContent()` 的读取器；某页文字读不出时仍把这页画出来（不标序号）；「技术细节」多带堆栈前几行。
+- 新增 `e2e/safari.ts` 的 `pretendToBeSafari`（让页面缺这项功能），`reconcile-phone.spec.ts` 都先调用它；单元测试里假 pdf.js 的 `getTextContent()` 也照 Safari 的样子抛错。在云端真 WebKit 里先复现了和用户一样的错误，再验证修好。
+
 ## Task 7 · 手机对账重做｜中
 
 **改法（只改前端，≥900px 的电脑布局不变）**
@@ -234,7 +239,7 @@
 - `ReconcileWorkspace.tsx`（重写）、新增 `VoucherViewer.tsx`、`useMediaQuery.ts`、`styles.css` 的 `.reconcile*` / `.attachment*` / `.voucher-fullscreen*`
 
 **实际做法（2026-09-30 已完成，详见 `progress.md`「试点反馈 Task 7」）**
-- 如上；新增 `e2e/reconcile-phone.spec.ts`（手机、手机加载失败重试、电脑各一条），在真实 Chromium 里验证布局、对位、全屏、失败重试。
+- 如上；新增 `e2e/reconcile-phone.spec.ts`（手机、手机加载失败重试、电脑各一条，外加 Task 6 补丁里的 Safari 替身自检一条），在真实 Chromium 里验证布局、对位、全屏、失败重试。
 - 顺手修了「放大」在真实浏览器里没有效果的老问题（全局 `img { max-width: 100% }`）。
 
 ## Task 8 · 国内 / 香港部署｜未开始（等用户确认三件事）
@@ -280,5 +285,6 @@
 - [x] Task 4 对账（2026-09-30，见 `progress.md`「试点反馈 Task 4」）
 - [x] Task 5 截图合并（2026-09-30，见 `progress.md`「试点反馈 Task 5」）
 - [x] Task 6 报销单预览加载失败、对账图太大（2026-09-30，见 `progress.md`「试点反馈 Task 6」）
+- [x] Task 6 补丁 Safari 上报销单预览全部加载失败（2026-10-01，见 `progress.md`「Task 6 补丁」）
 - [x] Task 7 手机对账重做（2026-09-30，见 `progress.md`「试点反馈 Task 7」）
 - [ ] Task 8 国内 / 香港部署（未开始，等用户确认门店所在地、预算、备案主体）

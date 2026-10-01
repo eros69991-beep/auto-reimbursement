@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import type { PDFPageProxy } from 'pdfjs-dist/legacy/build/pdf.mjs';
 
 import { authHeaders } from '../api';
 
@@ -38,8 +39,20 @@ function messageForStatus(status: number): string {
 interface Failure {
   /** 给用户看的一句话原因 */
   message: string;
-  /** 给开发者看的细节（错误名、状态码、用时、浏览器），用户截图发过来即可 */
+  /** 给开发者看的细节（错误名、堆栈前几行、状态码、用时、浏览器），用户截图发过来即可 */
   detail: string;
+}
+
+// 错误堆栈的前几行（去掉域名）：遇到看不懂的失败时，能直接看出是哪一段代码抛的，不用再靠猜。
+// V8 的堆栈第一行是「名字: 说明」（上面已经列过），JavaScriptCore（Safari）的没有，所以和它相同的行不重复显示。
+function stackLines(cause: unknown, firstLine: string): string[] {
+  const stack = typeof cause === 'object' && cause !== null && 'stack' in cause && typeof cause.stack === 'string' ? cause.stack : '';
+  return stack
+    .split('\n')
+    .map((line) => line.trim().replace(/https?:\/\/[^/\s)]+/g, ''))
+    .filter((line) => line !== '' && line !== firstLine)
+    .slice(0, 4)
+    .map((line) => `  ${line}`);
 }
 
 /**
@@ -53,6 +66,7 @@ async function explainFailure(cause: unknown, url: string, progress: { loaded: n
   const status = typeof info.status === 'number' ? info.status : null;
   const detail = [
     `${name}: ${text}`,
+    ...stackLines(cause, `${name}: ${text}`),
     status === null ? null : `状态码 ${status}`,
     `已下载 ${formatBytes(progress.loaded)}${progress.total > 0 ? ` / ${formatBytes(progress.total)}` : ''}`,
     `用时 ${((Date.now() - startedAt) / 1000).toFixed(1)} 秒`,
@@ -80,6 +94,31 @@ async function explainFailure(cause: unknown, url: string, progress: { loaded: n
 // 凭证图在另一边单独看，所以附件页不画——老批次的预览只能拿到整份 PDF 时，这样既省内存也不会满屏凭证。
 function isAttachmentPage(text: string): boolean {
   return !text.includes('单据及附件共') && text.includes('张报销单') && /原始凭证|退款凭证/.test(text);
+}
+
+/**
+ * 读出一页上的全部文字，用来认这页是报销单还是凭证附件页。
+ *
+ * 不能用 page.getTextContent()：pdf.js 6 里它是 `for await (const chunk of stream)` 实现的，而 Safari 到 26.x
+ * （iPhone 上的 18.x 也一样）的 ReadableStream 还不支持 for await（Safari 27 才补上），一调用就抛
+ * TypeError「undefined is not a function (near '...i of e...')」，整张预览都会加载失败。
+ * 所以直接对 streamTextContent() 用 reader.read() 一块块读，所有浏览器都能跑。
+ */
+async function pageText(page: PDFPageProxy): Promise<string> {
+  const reader = (page.streamTextContent() as ReadableStream<{ items: Array<{ str?: unknown }> }>).getReader();
+  let text = '';
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      for (const item of value.items) {
+        if (typeof item.str === 'string') text += item.str;
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  return text;
 }
 
 type Status =
@@ -173,8 +212,14 @@ export function PdfPreview({
           const page = await document_.getPage(pageNumber);
           // 先看这页写了什么：附件页不画；报销单页（含「单据及附件共」「会计主管」）标出第几张，供对账区按报销单跳转。
           // 备注续页夹在报销单之间，不能用页码推算。
-          const content = await page.getTextContent();
-          const text = content.items.map((item) => ('str' in item ? item.str : '')).join('');
+          let text = '';
+          try {
+            text = await pageText(page);
+          } catch (cause) {
+            // 读不出文字只是认不出页面类型，不是预览失败：照样把这页画出来，只是不标「第几张报销单」、也没法跳过附件页
+            if (cancelled) return;
+            console.warn(`[PdfPreview] 读不出第 ${pageNumber} 页的文字，按普通页直接画出`, cause);
+          }
           if (isAttachmentPage(text)) continue;
           const base = page.getViewport({ scale: 1 });
           const viewport = page.getViewport({ scale: (width / base.width) * pixelRatio });
