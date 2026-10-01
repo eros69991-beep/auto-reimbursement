@@ -4,6 +4,7 @@ import { unlink } from 'node:fs/promises';
 import {
   type FileIndexEntry,
   type FormOptions,
+  type Ledger,
   type Note,
   type Settings,
 } from '@auto-reimbursement/contracts';
@@ -26,6 +27,9 @@ const SETTINGS_KEYS = [
   'amountThreshold',
   'categoryThreshold',
 ];
+// 后加的可选项：老数据和老版本网页提交的设置里没有它也合法；带了就必须是字符串。
+const OPTIONAL_SETTINGS_KEYS = ['companyDepartment'];
+const MAX_DEPARTMENT_LENGTH = 100;
 
 const DEFAULT_SETTINGS: Settings = {
   id: 'default',
@@ -103,11 +107,12 @@ export function createNote(store: Store, input: Omit<Note, 'id'>): Note {
   return saveNote(store, { id: randomUUID(), ...input });
 }
 
-export function resolveOptions(settings: Settings, now: Date): FormOptions {
+export function resolveOptions(settings: Settings, now: Date, ledger: Ledger = 'store'): FormOptions {
   // P-23：与归月逻辑保持一致，默认日期也按上海时区计算
   const today = businessDate(now);
   return {
-    department: settings.department,
+    // 公账付款单的「付款单位」单独设置；没设置就留空（打印后手写）
+    department: ledger === 'company' ? (settings.companyDepartment ?? '') : settings.department,
     date:
       settings.dateMode === 'blank'
         ? null
@@ -124,10 +129,13 @@ function validateSettings(store: Store, value: Settings): void {
   if (
     value === null ||
     typeof value !== 'object' ||
-    !hasExactKeys(value, SETTINGS_KEYS) ||
+    !hasExactKeys(value, settingsKeysOf(value)) ||
     value.id !== 'default' ||
     typeof value.department !== 'string' ||
-    value.department.length > 100 ||
+    value.department.length > MAX_DEPARTMENT_LENGTH ||
+    (value.companyDepartment !== undefined &&
+      (typeof value.companyDepartment !== 'string' ||
+        value.companyDepartment.length > MAX_DEPARTMENT_LENGTH)) ||
     (value.dateMode !== 'today' &&
       value.dateMode !== 'blank' &&
       value.dateMode !== 'custom') ||
@@ -234,6 +242,11 @@ function isImageReference(value: unknown): value is NonNullable<Settings['signat
     Number.isSafeInteger(reference.height) &&
     (reference.deletedAt === null || typeof reference.deletedAt === 'string')
   );
+}
+
+// 必须有的键，加上这份设置里带了的可选键：别的键一概不收
+function settingsKeysOf(value: object): string[] {
+  return [...SETTINGS_KEYS, ...OPTIONAL_SETTINGS_KEYS.filter((key) => Object.hasOwn(value, key))];
 }
 
 function hasExactKeys(value: object, expected: string[]): boolean {

@@ -1,11 +1,14 @@
 import {
   formGroupLabel,
+  formNameOf,
   formatFen,
+  ledgerOf,
   receiptCaption,
   type Batch,
   type FormGroup,
   type FormSheet,
   type ImageRef,
+  type Ledger,
   type Snapshot,
 } from '@auto-reimbursement/contracts';
 import PDFDocument from 'pdfkit';
@@ -38,11 +41,17 @@ const ROW_ITEMS_PER_LINE = 3;
 /**
  * 公账区的多项凭证（收费通知单）在一张单据上的对账说明：第一行写第几张单据、这张凭证的合计和一共几项
  * （只有一部分项目排在这张单上时写明本单几项），后面几行列出排在这张单上的各项（分类、月份、金额）。
+ * 单据的叫法随区：店内「报销单」，公账「付款单」（多项凭证只有公账区有，不给区时按公账写）。
  */
-export function linesCaption(sheetNumber: number, item: Pick<Snapshot, 'lines' | 'netFen'>, rows: SheetRow[]): string {
+export function linesCaption(
+  sheetNumber: number,
+  item: Pick<Snapshot, 'lines' | 'netFen'>,
+  rows: SheetRow[],
+  ledger: Ledger = 'company',
+): string {
   const total = item.lines?.length ?? rows.length;
   const onThisSheet = rows.length < total ? `（本张单据上 ${rows.length} 项）` : '';
-  const headline = `第 ${sheetNumber} 张报销单 · 本张凭证 ${formatFen(item.netFen)}，含 ${total} 项${onThisSheet}`;
+  const headline = `第 ${sheetNumber} 张${formNameOf(ledger)} · 本张凭证 ${formatFen(item.netFen)}，含 ${total} 项${onThisSheet}`;
   const items = rows.map((row) => `${formGroupLabel(row.group)} ${formatFen(row.fen)}`);
   const lines: string[] = [];
   for (let start = 0; start < items.length; start += ROW_ITEMS_PER_LINE) {
@@ -60,6 +69,7 @@ export function orderedAttachments(batch: Batch, sheet: FormSheet): Attachment[]
   if (sheetIndex < 0) {
     throw new Error('INVALID_BATCH');
   }
+  const ledger = ledgerOf(batch);
   const rowsByReceipt = new Map<string, SheetRow[]>();
   for (const group of sheet.groups) {
     group.receiptIds.forEach((receiptId, index) => {
@@ -81,8 +91,9 @@ export function orderedAttachments(batch: Batch, sheet: FormSheet): Attachment[]
         position: first.position,
         count: first.count,
         netFen: item.netFen,
+        ledger,
       })
-      : linesCaption(sheetIndex + 1, item, rows);
+      : linesCaption(sheetIndex + 1, item, rows, ledger);
     const refundNote = item.refundFen > 0
       ? ` · 原实付 ${formatFen(item.paidFen)} / 退款 ${formatFen(item.refundFen)} / 实报 ${formatFen(item.netFen)}`
       : '';

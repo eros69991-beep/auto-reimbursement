@@ -60,6 +60,11 @@ export function categoryLedger(category: Category): Ledger {
   return (COMPANY_CATEGORIES as readonly string[]).includes(category) ? 'company' : 'store';
 }
 
+/** 一张单据的叫法：店内是「报销单」，公账区是「付款单」。PDF 附件页页眉和网页对账区的说明都用它。 */
+export function formNameOf(ledger: Ledger | undefined): '报销单' | '付款单' {
+  return ledger === 'company' ? '付款单' : '报销单';
+}
+
 // ---- 公账区：费用所属月份、收款方 ----
 
 /** 费用所属月份：「YYYY-MM」，例如 2026-07。通知单上每个收费项目的「期间」，回单用途里写的月份。 */
@@ -279,6 +284,11 @@ export interface Note {
 export interface Settings {
   id: 'default';
   department: string;
+  /**
+   * 公账付款单上「付款单位」写什么（一般是公司全称）。老数据没有这一项，不给就留空，付款单上手写。
+   * 店内报销单的「报销部门」仍然用 department。
+   */
+  companyDepartment?: string;
   dateMode: 'today' | 'blank' | 'custom';
   customDate: string | null;
   signerMode: 'text' | 'image';
@@ -370,10 +380,12 @@ export function receiptCaption(input: {
   count: number;
   /** 本张在这一行里的金额：店内是实报金额（已扣退款），公账区的多项凭证是这一项的金额 */
   netFen: number;
+  /** 这张单据属于哪个区，决定叫「报销单」还是「付款单」；不给就是店内 */
+  ledger?: Ledger;
 }): string {
   const label = formGroupLabel(input.group);
   return [
-    `第 ${input.sheetNumber} 张报销单`,
+    `第 ${input.sheetNumber} 张${formNameOf(input.ledger)}`,
     `${label} 第 ${input.position}/${input.count} 张`,
     `本张 ${formatFen(input.netFen)}`,
     `${label}合计 ${formatFen(input.group.totalFen)}`,

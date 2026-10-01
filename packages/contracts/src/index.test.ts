@@ -8,6 +8,7 @@ import {
   categoriesFor,
   categoryLedger,
   formGroupLabel,
+  formNameOf,
   formatFen,
   formatPeriod,
   groupKey,
@@ -141,6 +142,24 @@ describe('receipt caption', () => {
       count: 3,
       netFen: 100,
     })).toBe('第 1 张报销单 · 电费（2026年7月）（续） 第 2/3 张 · 本张 1.00 · 电费（2026年7月）（续）合计 3.00');
+  });
+
+  it('calls the form a 付款单 in the company ledger and a 报销单 everywhere else', () => {
+    expect(formNameOf('company')).toBe('付款单');
+    expect(formNameOf('store')).toBe('报销单');
+    expect(formNameOf(undefined)).toBe('报销单');
+    const input = {
+      sheetNumber: 2,
+      group: { category: '肉款' as const, totalFen: 1290949 },
+      position: 1,
+      count: 1,
+      netFen: 1290949,
+    };
+    expect(receiptCaption(input)).toBe('第 2 张报销单 · 肉款 第 1/1 张 · 本张 12909.49 · 肉款合计 12909.49');
+    expect(receiptCaption({ ...input, ledger: 'store' })).toBe(receiptCaption(input));
+    expect(receiptCaption({ ...input, ledger: 'company' })).toBe(
+      '第 2 张付款单 · 肉款 第 1/1 张 · 本张 12909.49 · 肉款合计 12909.49',
+    );
   });
 
   it('says which form, which receipt of the category, its amount and the category total', () => {

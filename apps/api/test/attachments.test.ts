@@ -130,7 +130,7 @@ describe('attachment page header height', () => {
 
   it('moves the picture down to make room for a header with more lines', async () => {
     const label = [
-      '第 2 张报销单 · 本张凭证 39561.63，含 5 项',
+      '第 2 张付款单 · 本张凭证 39561.63，含 5 项',
       '店面租金（2026年9月） 22814.10 · 物业费（2026年9月） 5069.80 · 水费（2026年7月） 48.86',
       '电费（2026年7月） 11466.87 · 空调能源费（2026年7月） 162.00',
       '原始凭证',
@@ -146,7 +146,7 @@ describe('attachment page header height', () => {
 
   it('writes every line of a long header inside the page margins', async () => {
     const items = rows(await drawOnePage([
-      '第 2 张报销单 · 本张凭证 39561.63，含 5 项（本张单据上 5 项）',
+      '第 2 张付款单 · 本张凭证 39561.63，含 5 项（本张单据上 5 项）',
       '店面租金（2026年9月） 22814.10 · 空调能源费（2026年7月） 99999999.99 · 其他公账支出（2026年12月） 99999999.99',
       '原始凭证',
     ].join('\n')));

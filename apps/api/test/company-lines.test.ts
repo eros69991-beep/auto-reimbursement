@@ -625,7 +625,7 @@ describe('the pages behind a payment sheet', () => {
 
     const firstPages = orderedAttachments(batch, first);
     expect(firstPages.map((page) => [page.receiptId, page.kind])).toEqual([['meat', 'original'], ['brand', 'original']]);
-    expect(firstPages[0]!.label).toBe('第 1 张报销单 · 肉款 第 1/1 张 · 本张 12909.49 · 肉款合计 12909.49\n原始凭证');
+    expect(firstPages[0]!.label).toBe('第 1 张付款单 · 肉款 第 1/1 张 · 本张 12909.49 · 肉款合计 12909.49\n原始凭证');
 
     const secondPages = orderedAttachments(batch, second);
     expect(secondPages).toHaveLength(1);
@@ -633,7 +633,7 @@ describe('the pages behind a payment sheet', () => {
     expect(secondPages[0]!.kind).toBe('original');
     expect(secondPages[0]!.label).toBe(
       [
-        '第 2 张报销单 · 本张凭证 39561.63，含 5 项',
+        '第 2 张付款单 · 本张凭证 39561.63，含 5 项',
         '店面租金（2026年9月） 22814.10 · 物业费（2026年9月） 5069.80 · 水费（2026年7月） 48.86',
         '电费（2026年7月） 11466.87 · 空调能源费（2026年7月） 162.00',
         '原始凭证',
@@ -656,9 +656,9 @@ describe('the pages behind a payment sheet', () => {
     const [first, second] = split.sheets as [FormSheet, FormSheet];
     expect(orderedAttachments(split, first).map((page) => page.receiptId)).toEqual(['meat', 'brand', 'notice']);
     expect(orderedAttachments(split, second).map((page) => page.receiptId)).toEqual(['notice']);
-    expect(orderedAttachments(split, first)[2]!.label.split('\n')[0]).toBe('第 1 张报销单 · 本张凭证 39561.63，含 5 项（本张单据上 3 项）');
+    expect(orderedAttachments(split, first)[2]!.label.split('\n')[0]).toBe('第 1 张付款单 · 本张凭证 39561.63，含 5 项（本张单据上 3 项）');
     expect(orderedAttachments(split, second)[0]!.label.split('\n')).toEqual([
-      '第 2 张报销单 · 本张凭证 39561.63，含 5 项（本张单据上 2 项）',
+      '第 2 张付款单 · 本张凭证 39561.63，含 5 项（本张单据上 2 项）',
       '电费（2026年7月） 11466.87 · 空调能源费（2026年7月） 162.00',
       '原始凭证',
     ]);
