@@ -91,7 +91,14 @@ describe('full reimbursement PDFs', () => {
       ['a', 'refund'],
       ['b', 'original'],
     ]);
-    expect(ordered[0]!.label).toContain('原实付 ¥300.00 / 退款 ¥80.00 / 实报 ¥220.00');
+    // 页眉两行：第一行对账说明（写法同网页对账区），第二行是原始/退款凭证，带退款的写明原实付、退款、实报
+    expect(ordered.map((attachment) => attachment.label)).toEqual([
+      '第 1 张报销单 · 耗材 第 1/1 张 · 本张 220.00 · 耗材合计 220.00\n原始凭证 · 原实付 300.00 / 退款 80.00 / 实报 220.00',
+      '第 1 张报销单 · 耗材 第 1/1 张 · 本张 220.00 · 耗材合计 220.00\n退款凭证 · 原实付 300.00 / 退款 80.00 / 实报 220.00',
+    ]);
+    expect(orderedAttachments(batch, batch.sheets[1]!).map((attachment) => attachment.label)).toEqual([
+      '第 2 张报销单 · 食材 第 1/1 张 · 本张 41.00 · 食材合计 41.00\n原始凭证',
+    ]);
 
     const before = await readFile(safePath(temp, originalA.path));
     const rendered = await renderBatchPdf(store, config, batch);
@@ -104,6 +111,11 @@ describe('full reimbursement PDFs', () => {
     expect(pages[2]).toContain('退款凭证');
     expect(pages[3]!.replace(/\s+/g, '')).toContain('费用报销单');
     expect(pages[4]).toContain('原始凭证');
+    // 附件页页眉印在 PDF 里：先是对账说明，原始凭证页和退款凭证页各写各的
+    expect(pages[1]!.replace(/\s+/g, '')).toContain('第1张报销单·耗材第1/1张·本张220.00·耗材合计220.00');
+    expect(pages[1]!.replace(/\s+/g, '')).toContain('原始凭证·原实付300.00/退款80.00/实报220.00');
+    expect(pages[2]!.replace(/\s+/g, '')).toContain('第1张报销单·耗材第1/1张·本张220.00·耗材合计220.00退款凭证');
+    expect(pages[4]!.replace(/\s+/g, '')).toContain('第2张报销单·食材第1/1张·本张41.00·食材合计41.00原始凭证');
     expect(pages.join('\n')).not.toContain('2026-09/');
     expect(pages.join('\n')).not.toContain('qa-a');
 
@@ -166,6 +178,13 @@ describe('full reimbursement PDFs', () => {
     ]);
     expect(orderedAttachments(batch, batch.sheets[0]!).map((attachment) => attachment.receiptId)).toEqual(ids.slice(0, 30));
     expect(orderedAttachments(batch, batch.sheets[1]!).map((attachment) => attachment.receiptId)).toEqual(ids.slice(30));
+    // 拆开的分类：每一部分单独数「第 i/n 张」、单独合计，第二张报销单写「食材（续）」
+    const firstSheet = orderedAttachments(batch, batch.sheets[0]!);
+    const secondSheet = orderedAttachments(batch, batch.sheets[1]!);
+    expect(firstSheet[0]!.label).toBe('第 1 张报销单 · 食材 第 1/30 张 · 本张 100.00 · 食材合计 3004.35\n原始凭证');
+    expect(firstSheet.at(-1)!.label).toBe('第 1 张报销单 · 食材 第 30/30 张 · 本张 100.29 · 食材合计 3004.35\n原始凭证');
+    expect(secondSheet[0]!.label).toBe('第 2 张报销单 · 食材（续） 第 1/10 张 · 本张 100.30 · 食材（续）合计 1003.45\n原始凭证');
+    expect(secondSheet.at(-1)!.label).toBe('第 2 张报销单 · 食材（续） 第 10/10 张 · 本张 100.39 · 食材（续）合计 1003.45\n原始凭证');
 
     const formsOnly = await pageText(await renderBatchPdf(store, config, batch, { attachments: false }));
     expect(formsOnly).toHaveLength(2);
@@ -179,6 +198,8 @@ describe('full reimbursement PDFs', () => {
     expect(pages.slice(1, 31).every((page) => page.includes('原始凭证'))).toBe(true);
     expect(pages[31]!.replace(/\s+/g, '')).toContain('食材（续）');
     expect(pages.slice(32).every((page) => page.includes('原始凭证'))).toBe(true);
+    expect(pages[1]!.replace(/\s+/g, '')).toContain('第1张报销单·食材第1/30张·本张100.00·食材合计3004.35');
+    expect(pages[32]!.replace(/\s+/g, '')).toContain('第2张报销单·食材（续）第1/10张·本张100.30·食材（续）合计1003.45');
 
     const exported = await exportBatchPdf(store, config, batch.id);
     expect(exported.pdfPath).not.toBeNull();

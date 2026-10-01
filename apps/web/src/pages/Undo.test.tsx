@@ -34,7 +34,7 @@ it('requires confirmation, cancels a batch and labels preserved historical PDFs 
   await waitFor(() => expect(cancel).toHaveBeenCalledWith('batch'));
   expect(await screen.findByText(/已撤销，票据已退回/)).toBeInTheDocument();
   expect(screen.getByRole('link', { name: /作废 PDF/ }).getAttribute('href')).toContain('http');
-  expect(screen.queryByRole('button', { name: '查看预览' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: '对账 / 查看' })).not.toBeInTheDocument();
 });
 it('offers unarchive for an archived month even though active batches carry no cancelledAt field', async () => {
   // 真实接口返回的正常批次没有 cancelledAt 字段（只有撤销后才写入）
@@ -44,4 +44,13 @@ it('offers unarchive for an archived month even though active batches carry no c
   render(<HistoryPage onPreview={() => {}} />);
   fireEvent.click(await screen.findByRole('button', { name: '取消归档' }));
   await waitFor(() => expect(unarchive).toHaveBeenCalledWith('2026-08'));
+});
+it('offers 对账 / 查看 on an active batch and opens its reconcile view', async () => {
+  const batch = { id: 'batch-active', month: '2026-09', createdAt: '', totalFen: 3633, items: [], sheets: [], notes: [], options: { department: '', date: null, signerMode: 'text' as const, signerName: '', signature: null }, pdfPath: 'file.pdf', archivedAt: null };
+  vi.spyOn(api, 'history').mockResolvedValue([{ month: '2026-09', batches: [batch] }]);
+  const onPreview = vi.fn();
+  render(<HistoryPage onPreview={onPreview} />);
+  fireEvent.click(await screen.findByRole('button', { name: '对账 / 查看' }));
+  expect(onPreview).toHaveBeenCalledWith('batch-active');
+  expect(screen.queryByRole('button', { name: '查看预览' })).not.toBeInTheDocument();
 });

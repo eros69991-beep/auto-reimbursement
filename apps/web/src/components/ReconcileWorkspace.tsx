@@ -1,26 +1,37 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 
-import { formGroupLabel, formatFen, type Batch } from '@auto-reimbursement/contracts';
+import { formGroupLabel, formatFen, receiptCaption, type Batch, type FormGroup } from '@auto-reimbursement/contracts';
 
 import { useAuthedUrl } from './AuthedImage';
 import { PdfPreview } from './PdfPreview';
 
-interface ReconcileRow {
-  key: string;
-  sheetIndex: number;
-  category: string;
-  /** 报销单上写的分类名；被拆到多张上的分类，第 2 部分起带「（续）」 */
-  label: string;
-  totalFen: number;
-  receiptIds: string[];
+interface ChecklistReceipt {
+  receiptId: string;
+  netFen: number;
+  paidFen: number;
+  refundFen: number;
+  /** 在本分类（本部分）里排第几，从 1 起；顺序与报销单摘要里写的金额一致 */
+  position: number;
 }
 
-interface AttachmentItem {
-  receiptId: string;
-  rowKey: string;
-  category: string;
-  merchant: string | null;
-  netFen: number;
+interface ChecklistGroup {
+  key: string;
+  /** 报销单上写的分类名；被拆到多张上的分类，第 2 部分起带「（续）」 */
+  label: string;
+  group: Pick<FormGroup, 'category' | 'part' | 'totalFen'>;
+  receipts: ChecklistReceipt[];
+}
+
+interface ChecklistSheet {
+  id: string;
+  /** 第几张报销单，从 1 起 */
+  number: number;
+  groups: ChecklistGroup[];
+}
+
+interface AttachmentItem extends ChecklistReceipt {
+  sheetNumber: number;
+  group: ChecklistGroup;
 }
 
 const ZOOM_STEP = 1.25;
@@ -28,49 +39,53 @@ const ZOOM_MIN = 0.5;
 const ZOOM_MAX = 4;
 
 /**
- * 同屏对账工作区：左侧报销单（可点击报销行 + PDF 预览），右侧凭证附件查看器。
- * 关联基于 receiptId（不依赖数组下标）：点击行定位该行第一张凭证，
- * 手动切换附件时按反查结果高亮所属行。宽屏左右双栏、窄屏上下分区（样式负责）。
+ * 同屏对账工作区。
+ * 左边：「对账清单」——按报销单、分类列出每张凭证的实报金额（顺序同报销单摘要，大字可点），
+ * 下面是报销单原样的 PDF 预览；右边：当前凭证图。点一个金额，右边切到那张凭证，清单同步高亮。
+ * 窄屏（手机）上下分区：上半区默认是清单，按钮可切成报销单原样，下半区是凭证图，各自在区内滚动，
+ * 这样看凭证图时清单不会滚走；宽屏左右双栏，左边清单在上、报销单在下。
+ * 关联基于 receiptId（不依赖数组下标）。
  */
 export function ReconcileWorkspace({ batch, previewUrl }: { batch: Batch; previewUrl: string }): React.JSX.Element {
-  const rows = useMemo<ReconcileRow[]>(() => {
-    const uploadOrder = new Map(batch.items.map((item, index) => [item.receiptId, item.uploadOrder ?? index]));
-    return batch.sheets.flatMap((sheet, sheetIndex) =>
-      sheet.groups.map((group) => ({
-        key: `${sheet.id}:${group.category}`,
-        sheetIndex,
-        category: group.category,
+  const sheets = useMemo<ChecklistSheet[]>(() => {
+    const itemById = new Map(batch.items.map((item) => [item.receiptId, item]));
+    return batch.sheets.map((sheet, sheetIndex) => ({
+      id: sheet.id,
+      number: sheetIndex + 1,
+      // 顺序就用报销单上的分组顺序和组内顺序（与摘要里的金额、PDF 附件页一致），不再另排
+      groups: sheet.groups.map((group, groupIndex) => ({
+        key: `${sheet.id}:${groupIndex}`,
         label: formGroupLabel(group),
-        totalFen: group.totalFen,
-        receiptIds: group.receiptIds
-          .filter((receiptId) => uploadOrder.has(receiptId))
-          .sort((left, right) => (uploadOrder.get(left) ?? 0) - (uploadOrder.get(right) ?? 0)),
+        group,
+        receipts: group.receiptIds
+          .flatMap((receiptId) => {
+            const item = itemById.get(receiptId);
+            return item === undefined ? [] : [item];
+          })
+          .map((item, index) => ({
+            receiptId: item.receiptId,
+            netFen: item.netFen,
+            paidFen: item.paidFen,
+            refundFen: item.refundFen,
+            position: index + 1,
+          })),
       })),
-    );
+    }));
   }, [batch]);
 
-  const attachments = useMemo<AttachmentItem[]>(() => {
-    const itemById = new Map(batch.items.map((item) => [item.receiptId, item]));
-    return rows.flatMap((row) =>
-      row.receiptIds.flatMap((receiptId) => {
-        const item = itemById.get(receiptId);
-        if (item === undefined) return [];
-        return [{
-          receiptId,
-          rowKey: row.key,
-          category: row.category,
-          merchant: item.merchant ?? null,
-          netFen: item.netFen,
-        }];
-      }),
-    );
-  }, [batch, rows]);
+  const attachments = useMemo<AttachmentItem[]>(
+    () => sheets.flatMap((sheet) => sheet.groups.flatMap((group) =>
+      group.receipts.map((receipt) => ({ ...receipt, sheetNumber: sheet.number, group })))),
+    [sheets],
+  );
 
   const [selectedReceiptId, setSelectedReceiptId] = useState<string | null>(null);
+  const [showForm, setShowForm] = useState(false);
   const [zoom, setZoom] = useState(1);
   const [failedReceiptId, setFailedReceiptId] = useState<string | null>(null);
   const [retryCount, setRetryCount] = useState(0);
-  const formRef = useRef<HTMLElement>(null);
+  const listRef = useRef<HTMLElement>(null);
+  const pdfRef = useRef<HTMLElement>(null);
 
   const current = attachments.find((item) => item.receiptId === selectedReceiptId) ?? attachments[0] ?? null;
   const currentIndex = current === null ? -1 : attachments.indexOf(current);
@@ -82,51 +97,102 @@ export function ReconcileWorkspace({ batch, previewUrl }: { batch: Batch; previe
       : `/api/receipts/${encodeURIComponent(current.receiptId)}/original-image?r=${retryCount}`,
   );
 
-  // 切换附件时，左侧报销单跟随滚动到该凭证所属的报销页（多页报销单上下分屏时保持单据可见）。
+  // 切换凭证时，报销单原样跟随滚动到该凭证所属的那张报销单（多页报销单里夹着备注续页、凭证页，不能按页码推算）；
+  // 手机上从清单切到「报销单原样」时也定位一次。
   useEffect(() => {
     if (current === null) return;
-    const row = rows.find((item) => item.key === current.rowKey);
-    if (row === undefined) return;
-    const canvas = formRef.current?.querySelector(`canvas[data-sheet-index="${row.sheetIndex}"]`);
-    (canvas as HTMLElement | undefined)?.scrollIntoView?.({ block: 'nearest' });
-  }, [current, rows]);
+    const canvas = pdfRef.current?.querySelector(`canvas[data-sheet-index="${current.sheetNumber - 1}"]`);
+    (canvas as HTMLElement | null | undefined)?.scrollIntoView?.({ block: 'nearest' });
+  }, [current, showForm]);
+
+  // 用上一张 / 下一张切换时，清单里对应的金额也滚进可见范围（清单自己在半区内滚动）。
+  useEffect(() => {
+    if (current === null) return;
+    const chips = listRef.current?.querySelectorAll<HTMLElement>('[data-receipt-id]') ?? [];
+    for (const chip of chips) {
+      if (chip.dataset.receiptId === current.receiptId) {
+        chip.scrollIntoView?.({ block: 'nearest' });
+        break;
+      }
+    }
+  }, [current]);
 
   function select(receiptId: string): void {
     setSelectedReceiptId(receiptId);
     setFailedReceiptId(null);
   }
 
+  const caption = current === null
+    ? ''
+    : receiptCaption({
+      sheetNumber: current.sheetNumber,
+      group: current.group.group,
+      position: current.position,
+      count: current.group.receipts.length,
+      netFen: current.netFen,
+    });
+
   return (
-    <div className="reconcile">
-      <section className="reconcile-form" aria-label="报销单" ref={formRef}>
-        <ul className="reconcile-rows" aria-label="报销行">
-          {rows.map((row) => (
-            <li key={row.key}>
-              <button
-                type="button"
-                aria-current={current !== null && current.rowKey === row.key}
-                onClick={() => {
-                  const first = row.receiptIds[0];
-                  if (first !== undefined) select(first);
-                }}
-              >
-                {rows.some((item) => item.sheetIndex !== row.sheetIndex) ? `第 ${row.sheetIndex + 1} 页 · ` : ''}
-                {row.label}：合计 {formatFen(row.totalFen)}（{row.receiptIds.length} 张凭证）
-              </button>
-            </li>
-          ))}
-        </ul>
-        <PdfPreview url={previewUrl} />
-      </section>
+    <div className="reconcile" data-view={showForm ? 'form' : 'list'}>
+      <div className="reconcile-form">
+        {current !== null && (
+          <button
+            type="button"
+            className="reconcile-toggle"
+            aria-pressed={showForm}
+            onClick={() => setShowForm((value) => !value)}
+          >
+            {showForm ? '返回对账清单' : '查看报销单原样'}
+          </button>
+        )}
+        {current !== null && (
+          <section className="reconcile-list" aria-label="对账清单" ref={listRef}>
+            {sheets.map((sheet) => (
+              <div key={sheet.id} className="reconcile-sheet">
+                <h3 className="reconcile-sheet-title">第 {sheet.number} 张报销单</h3>
+                {sheet.groups.map((group) => (
+                  <div key={group.key} className="reconcile-group">
+                    <p className="reconcile-group-head">
+                      <strong>{group.label}</strong>
+                      <span>{group.receipts.length} 张 · 合计 {formatFen(group.group.totalFen)}</span>
+                    </p>
+                    <ul className="reconcile-amounts" aria-label={`${group.label}的凭证金额`}>
+                      {group.receipts.map((receipt) => (
+                        <li key={receipt.receiptId}>
+                          <button
+                            type="button"
+                            className="reconcile-amount"
+                            data-receipt-id={receipt.receiptId}
+                            aria-current={receipt.receiptId === current.receiptId}
+                            aria-label={`${formatFen(receipt.netFen)}（${group.label} 第 ${receipt.position}/${group.receipts.length} 张）`}
+                            onClick={() => select(receipt.receiptId)}
+                          >
+                            {formatFen(receipt.netFen)}
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ))}
+              </div>
+            ))}
+          </section>
+        )}
+        <section className="reconcile-pdf" aria-label="报销单原样" ref={pdfRef}>
+          <PdfPreview url={previewUrl} />
+        </section>
+      </div>
       <section className="reconcile-side" aria-label="凭证附件">
         {current === null ? (
           <p>本批次没有关联凭证。</p>
         ) : (
           <div className="attachment-viewer">
-            <p className="attachment-title">
-              第 {currentIndex + 1} / {attachments.length} 张 · {current.category} ·{' '}
-              {current.merchant ?? '未识别商家'} · 实付 {formatFen(current.netFen)}
-            </p>
+            <p className="attachment-title">{caption}</p>
+            {current.refundFen > 0 && (
+              <p className="attachment-note">
+                原实付 {formatFen(current.paidFen)} / 退款 {formatFen(current.refundFen)} / 实报 {formatFen(current.netFen)}
+              </p>
+            )}
             <div className="attachment-toolbar">
               <button
                 type="button"
@@ -135,6 +201,12 @@ export function ReconcileWorkspace({ batch, previewUrl }: { batch: Batch; previe
               >
                 上一张
               </button>
+              <span
+                className="attachment-position"
+                aria-label={`全部凭证中的第 ${currentIndex + 1} 张，共 ${attachments.length} 张`}
+              >
+                {currentIndex + 1} / {attachments.length}
+              </span>
               <button
                 type="button"
                 disabled={currentIndex < 0 || currentIndex >= attachments.length - 1}
@@ -180,7 +252,7 @@ export function ReconcileWorkspace({ batch, previewUrl }: { batch: Batch; previe
                 <img
                   key={`${current.receiptId}:${retryCount}`}
                   src={imageUrl}
-                  alt={`凭证 ${currentIndex + 1}：${current.category} ${current.merchant ?? ''}`}
+                  alt={`凭证 ${currentIndex + 1}：${current.group.label} ${formatFen(current.netFen)}`}
                   style={{ width: `${zoom * 100}%` }}
                   onError={() => setFailedReceiptId(current.receiptId)}
                 />

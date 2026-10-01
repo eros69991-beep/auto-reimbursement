@@ -450,15 +450,20 @@ async function pdfPageHasImage(bytes: Buffer, pageNumber: number): Promise<boole
 function attachmentLabels(pages: string[], batch: Batch): string[] {
   const labels: string[] = [];
   let pageIndex = 0;
-  for (const sheet of batch.sheets) {
+  for (const [sheetIndex, sheet] of batch.sheets.entries()) {
     pageIndex += 1;
     for (const group of sheet.groups) {
-      for (const receiptId of group.receiptIds) {
+      // 本用例的分类都没有被拆成「（续）」，分类名直接用 group.category
+      for (const [position, receiptId] of group.receiptIds.entries()) {
         const item = batch.items.find((candidate) => candidate.receiptId === receiptId)!;
         const original = pages[pageIndex++]!.replace(/\s+/g, '');
-        expect(original).toContain('原始凭证');
-        labels.push(`${group.category}:${(item.netFen / 100).toFixed(2)}`);
-        expect(original).toContain(`${group.category}·¥${(item.netFen / 100).toFixed(2)}·原始凭证`);
+        const net = (item.netFen / 100).toFixed(2);
+        labels.push(`${group.category}:${net}`);
+        // 附件页眉两行：「第 N 张报销单 · 分类 第 i/n 张 · 本张 X · 分类合计 Y」＋「原始凭证」
+        expect(original).toContain(
+          `第${sheetIndex + 1}张报销单·${group.category}第${position + 1}/${group.receiptIds.length}张`
+          + `·本张${net}·${group.category}合计${(group.totalFen / 100).toFixed(2)}原始凭证`,
+        );
         pageIndex += item.refundImages.length;
       }
     }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { formGroupLabel, formatFen, netFen, parseFen } from './index';
+import { formGroupLabel, formatFen, netFen, parseFen, receiptCaption } from './index';
 
 describe('exact money helpers', () => {
   it('calculates exact fen and rejects uncertain input', () => {
@@ -72,5 +72,34 @@ describe('form group labels', () => {
     expect(formGroupLabel({ category: '食材', part: 1 })).toBe('食材');
     expect(formGroupLabel({ category: '食材', part: 2 })).toBe('食材（续）');
     expect(formGroupLabel({ category: '百慕达食材', part: 3 })).toBe('百慕达食材（续）');
+  });
+});
+
+describe('receipt caption', () => {
+  it('says which form, which receipt of the category, its amount and the category total', () => {
+    expect(receiptCaption({
+      sheetNumber: 1,
+      group: { category: '食材', totalFen: 74148 },
+      position: 2,
+      count: 3,
+      netFen: 1988,
+    })).toBe('第 1 张报销单 · 食材 第 2/3 张 · 本张 19.88 · 食材合计 741.48');
+  });
+
+  it('counts and totals each part of a category that continues on the next form separately', () => {
+    expect(receiptCaption({
+      sheetNumber: 2,
+      group: { category: '食材', part: 2, totalFen: 100020 },
+      position: 10,
+      count: 10,
+      netFen: 10009,
+    })).toBe('第 2 张报销单 · 食材（续） 第 10/10 张 · 本张 100.09 · 食材（续）合计 1000.20');
+    expect(receiptCaption({
+      sheetNumber: 1,
+      group: { category: '食材', part: 1, totalFen: 300000 },
+      position: 1,
+      count: 30,
+      netFen: 10000,
+    })).toBe('第 1 张报销单 · 食材 第 1/30 张 · 本张 100.00 · 食材合计 3000.00');
   });
 });

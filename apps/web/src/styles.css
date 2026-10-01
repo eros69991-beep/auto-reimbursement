@@ -166,33 +166,60 @@ fieldset { margin: 1rem 0; }
 .rule-hint { margin: .4rem 0; font-size: .85rem; color: #5b6472; }
 .rule-note { margin: .25rem 0; font-size: .9rem; color: #174a7e; overflow-wrap: anywhere; }
 
-/* 同屏对账工作区：窄屏上下分区（Task 06 微调比例），宽屏左右双栏各自滚动 */
+/* 同屏对账工作区：左边是「对账清单」（每张凭证的实报金额，点一个，右边切到那张图）和报销单原样，右边是凭证图。
+   窄屏上下分区（上半区默认是清单，按钮可切成报销单原样），宽屏左右双栏。 */
 .reconcile { display: flex; flex-direction: column; gap: 1rem; }
-.reconcile-rows { display: flex; flex-wrap: wrap; gap: .5rem; margin: 0 0 .75rem; padding: 0; list-style: none; }
-.reconcile-rows button { padding: .4rem .75rem; border: 1px solid #d9e0ea; border-radius: .5rem; background: #fff; cursor: pointer; }
-.reconcile-rows button[aria-current="true"] { border-color: #2563eb; background: #e8effd; font-weight: 600; }
+.reconcile-form { display: flex; flex-direction: column; gap: .5rem; min-width: 0; min-height: 0; }
+.reconcile-toggle { display: none; align-self: flex-start; padding: .35rem .9rem; border: 1px solid #c7d0de; border-radius: .5rem; background: #fff; cursor: pointer; }
+.reconcile-list { min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+.reconcile-sheet-title { margin: .6rem 0 .3rem; font-size: .95rem; color: #5b6472; }
+.reconcile-sheet:first-child .reconcile-sheet-title { margin-top: 0; }
+.reconcile-group { margin: 0 0 .6rem; }
+.reconcile-group-head { margin: 0 0 .3rem; }
+.reconcile-group-head strong { font-size: 1.05rem; }
+.reconcile-group-head span { margin-left: .5rem; font-size: .9rem; color: #5b6472; }
+.reconcile-amounts { display: flex; flex-wrap: wrap; gap: .5rem; margin: 0; padding: 0; list-style: none; }
+/* 金额是对账时要读的东西：大字、触控区够大，当前这张用蓝框加粗标出 */
+.reconcile-amount { min-width: 5.5rem; min-height: 2.9rem; padding: .3rem .85rem; border: 1px solid #c7d0de; border-radius: .6rem; background: #fff; font-size: 1.2rem; font-variant-numeric: tabular-nums; cursor: pointer; }
+.reconcile-amount[aria-current="true"] { border-color: #2563eb; background: #e8effd; color: #12378a; font-weight: 700; box-shadow: 0 0 0 2px rgba(37, 99, 235, .3); }
+.reconcile-pdf { min-height: 0; }
 .attachment-viewer { display: flex; flex-direction: column; gap: .5rem; min-height: 0; flex: 1; }
-.attachment-title { margin: 0; font-weight: 600; }
-.attachment-toolbar { display: flex; flex-wrap: wrap; gap: .5rem; }
+.attachment-title { margin: 0; font-weight: 600; overflow-wrap: anywhere; }
+.attachment-note { margin: 0; font-size: .9rem; color: #5b6472; }
+.attachment-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; }
+.attachment-position { min-width: 4rem; text-align: center; font-variant-numeric: tabular-nums; }
 .attachment-image-scroll { flex: 1; min-height: 12rem; overflow: auto; border: 1px solid #d9e0ea; border-radius: .5rem; background: #f4f6fa; }
 .attachment-image-scroll img { display: block; height: auto; }
 
 @media (min-width: 900px) {
   .reconcile-page { width: calc(100% - 2rem); max-width: none; }
   .reconcile { flex-direction: row; align-items: stretch; height: calc(100dvh - 11rem); min-height: 28rem; }
-  .reconcile-form { flex: 1 1 55%; min-width: 0; overflow-y: auto; }
+  /* 左边：清单在上（最多占四成高、自己滚动），报销单原样在下（自己滚动），滚报销单时清单不会跟着滚走 */
+  .reconcile-form { flex: 1 1 55%; }
+  .reconcile-list { flex: 0 1 auto; max-height: 40%; }
+  .reconcile-pdf { flex: 1 1 0; overflow-y: auto; }
   .reconcile-side { flex: 1 1 45%; min-width: 0; display: flex; flex-direction: column; }
 }
 
-/* 窄屏（手机）上下分区：上约 40% 报销单、下约 60% 当前凭证，分区内部各自滚动 */
+/* 窄屏（手机）上下分区：上半区是对账清单（或切成报销单原样），下半区是当前凭证；
+   清单短的时候上半区只占它需要的高度，最多四成半；两个半区各自在内部滚动，看凭证图时清单不会滚走 */
 @media (max-width: 899px) {
-  .reconcile { height: calc(100dvh - 11rem); min-height: min(24rem, 55dvh); }
-  .reconcile-form { flex: 0 1 40%; min-height: 0; overflow-y: auto; }
-  .reconcile-side { flex: 1 1 60%; min-height: 0; display: flex; flex-direction: column; }
-  /* 分类行在窄屏改为单行横向滑动：分类多时不再把上半区挤满，报销单始终看得到 */
-  .reconcile-rows { position: sticky; top: 0; z-index: 1; padding: .25rem 0; background: #f5f7fb; flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; }
-  .reconcile-rows li { flex: 0 0 auto; }
-  .reconcile-rows button { white-space: nowrap; }
+  .reconcile { height: calc(100dvh - 12rem); min-height: min(24rem, 55dvh); }
+  .reconcile-form { flex: 0 1 auto; max-height: 45%; }
+  .reconcile[data-view="form"] .reconcile-form { max-height: 50%; }
+  .reconcile-toggle { display: block; flex: 0 0 auto; padding: .3rem .75rem; font-size: .9rem; }
+  .reconcile-list, .reconcile-pdf { flex: 1 1 auto; overflow-y: auto; }
+  .reconcile[data-view="list"] .reconcile-pdf { display: none; }
+  .reconcile[data-view="form"] .reconcile-list { display: none; }
+  /* 金额按钮略收一点，常见手机宽度一行放得下四张 */
+  .reconcile-amounts { gap: .4rem; }
+  .reconcile-amount { min-width: 5rem; min-height: 2.7rem; padding: .25rem .6rem; font-size: 1.15rem; }
+  .reconcile-side { flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; }
+  .attachment-title { font-size: .95rem; }
+  .attachment-toolbar { gap: .3rem; }
+  .attachment-toolbar button { padding: .3rem .35rem; font-size: .9rem; }
+  .attachment-position { min-width: 0; padding: 0 .2rem; font-size: .9rem; }
+  .attachment-image-scroll { min-height: 8rem; }
 }
 
 /* 窄屏横屏：头部更高，收紧对账区高度保证附件工具栏不被挤出视口 */

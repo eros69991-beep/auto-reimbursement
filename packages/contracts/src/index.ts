@@ -187,6 +187,31 @@ export function formGroupLabel(group: Pick<FormGroup, 'category' | 'part'>): str
   return group.part !== undefined && group.part > 1 ? `${group.category}（续）` : group.category;
 }
 
+/**
+ * 对账时对一张凭证的一句话说明：它在第几张报销单、在分类里排第几、本张金额、这个分类的合计。
+ * PDF 附件页页眉和网页对账区共用这一个写法，两边读起来一致。
+ * 口径与报销单上看得到的一样：被拆到多张上的分类，每一部分单独数「第 i/n 张」、单独合计，第 2 部分起写「（续）」。
+ */
+export function receiptCaption(input: {
+  /** 第几张报销单，从 1 起 */
+  sheetNumber: number;
+  group: Pick<FormGroup, 'category' | 'part' | 'totalFen'>;
+  /** 这张凭证在本分类（本部分）里排第几，从 1 起，顺序与报销单摘要里的金额一致 */
+  position: number;
+  /** 本分类（本部分）一共几张凭证 */
+  count: number;
+  /** 本张的实报金额（已扣退款） */
+  netFen: number;
+}): string {
+  const label = formGroupLabel(input.group);
+  return [
+    `第 ${input.sheetNumber} 张报销单`,
+    `${label} 第 ${input.position}/${input.count} 张`,
+    `本张 ${formatFen(input.netFen)}`,
+    `${label}合计 ${formatFen(input.group.totalFen)}`,
+  ].join(' · ');
+}
+
 export interface FormSheet {
   id: string;
   groups: FormGroup[];
