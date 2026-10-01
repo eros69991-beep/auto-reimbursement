@@ -206,6 +206,18 @@ describe('company receipt with one item', () => {
     expect(confirmReceipt).not.toHaveBeenCalled();
   });
 
+  // 习惯用逗号当小数点的人敲「114,66」：不替他猜（去掉逗号会差 100 倍），但要让他知道小数点用「.」
+  it('spells out that the decimal point is a dot when an amount with a decimal comma is turned down', () => {
+    render(<ReceiptEditor receipt={companyReceipt({ status: 'pending', paidFen: null })} onSaved={vi.fn()} />);
+
+    fireEvent.change(screen.getByLabelText('付款金额'), { target: { value: '114,66' } });
+    fireEvent.click(confirmButton());
+
+    expect(screen.getByRole('alert')).toHaveTextContent('请输入正确的金额：要大于 0、最多两位小数，小数点用「.」');
+    expect(screen.getByLabelText('付款金额')).toHaveValue('114,66');
+    expect(confirmReceipt).not.toHaveBeenCalled();
+  });
+
   it('tells the user when the server turns the confirmation down, and lets them try again', async () => {
     confirmReceipt.mockRejectedValueOnce(new Error('这张回单有疑似重复，请先处理'));
     const original = companyReceipt({ status: 'pending' });
@@ -221,6 +233,17 @@ describe('company receipt with one item', () => {
     fireEvent.click(confirmButton());
     await waitFor(() => expect(onSaved).toHaveBeenCalledTimes(1));
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('shows a refusal the server worded for the store (凭证, 报销) in company words', async () => {
+    confirmReceipt.mockRejectedValueOnce(new Error('凭证当前状态不可确认'));
+    render(<ReceiptEditor receipt={companyReceipt({ status: 'pending' })} onSaved={vi.fn()} />);
+
+    fireEvent.click(confirmButton());
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('确认可付款失败：回单当前状态不可确认');
+    expect(alert).not.toHaveTextContent('凭证');
   });
 
   it('locks the form while the request is on its way', async () => {
@@ -284,6 +307,19 @@ describe('company receipt with one item', () => {
     fireEvent.click(screen.getByRole('button', { name: '删除回单' }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent('已进入付款单，不能删除');
+    confirm.mockRestore();
+  });
+
+  it('shows a delete refusal the server worded for the store in company words', async () => {
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    deleteReceipt.mockRejectedValue(new Error('凭证已进入报销单，不能删除'));
+    render(<ReceiptEditor receipt={companyReceipt({ status: 'pending' })} onSaved={vi.fn()} />);
+
+    fireEvent.click(screen.getByRole('button', { name: '删除回单' }));
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('回单已进入付款单，不能删除');
+    expect(alert).not.toHaveTextContent(/凭证|报销/);
     confirm.mockRestore();
   });
 });
@@ -440,12 +476,22 @@ describe('splitting a notice into several items', () => {
 
     fireEvent.change(screen.getByLabelText('第 6 项分类'), { target: { value: '电费' } });
     fireEvent.click(confirmButton());
-    expect(screen.getByRole('alert')).toHaveTextContent('第 6 项请输入大于 0 的金额');
+    expect(screen.getByRole('alert')).toHaveTextContent('第 6 项的金额不对');
 
     fireEvent.change(screen.getByLabelText('第 6 项金额'), { target: { value: '5' } });
     fireEvent.change(screen.getByLabelText('第 6 项费用月份'), { target: { value: '2026-07' } });
     fireEvent.click(confirmButton());
     expect(screen.getByRole('alert')).toHaveTextContent('第 4 项和第 6 项的分类、月份都一样，请合并成一项');
+    expect(confirmReceipt).not.toHaveBeenCalled();
+  });
+
+  it('names the row and spells out the rule for an amount it cannot read, instead of only asking for "above 0"', () => {
+    render(<ReceiptEditor receipt={companyNotice({ status: 'pending' })} onSaved={vi.fn()} />);
+
+    fireEvent.change(screen.getByLabelText('第 4 项金额'), { target: { value: '50,69' } });
+    fireEvent.click(confirmButton());
+
+    expect(screen.getByRole('alert')).toHaveTextContent('第 4 项的金额不对：要大于 0、最多两位小数，小数点用「.」');
     expect(confirmReceipt).not.toHaveBeenCalled();
   });
 
@@ -455,7 +501,7 @@ describe('splitting a notice into several items', () => {
     fireEvent.change(screen.getByLabelText('银行账号'), { target: { value: '123' } });
     fireEvent.change(screen.getByLabelText('第 2 项金额'), { target: { value: '' } });
     fireEvent.click(confirmButton());
-    expect(screen.getByRole('alert')).toHaveTextContent('第 2 项请输入大于 0 的金额');
+    expect(screen.getByRole('alert')).toHaveTextContent('第 2 项的金额不对');
 
     fireEvent.change(screen.getByLabelText('第 2 项金额'), { target: { value: '5069.80' } });
     fireEvent.click(confirmButton());
@@ -547,6 +593,42 @@ describe('splitting a notice into several items', () => {
     expect(screen.getByLabelText('付款金额')).toHaveValue('');
   });
 
+  it('does not merge back while an item has an amount it cannot read, names the item, and merges once it is fixed', () => {
+    render(<ReceiptEditor receipt={companyNotice({ status: 'pending' })} onSaved={vi.fn()} />);
+
+    // 逗号当小数点：「48,86」不认，免得合回去的金额悄悄少一截或者多 100 倍
+    fireEvent.change(screen.getByLabelText('第 3 项金额'), { target: { value: '48,86' } });
+    fireEvent.click(screen.getByRole('button', { name: '合回一项' }));
+
+    expect(screen.getByRole('alert')).toHaveTextContent('第 3 项的金额不对，请先改好再合回一项');
+    expect(screen.getByLabelText('第 3 项金额')).toHaveValue('48,86');
+    expect(screen.queryByLabelText('付款金额')).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText('第 3 项金额'), { target: { value: '48.86' } });
+    fireEvent.click(screen.getByRole('button', { name: '合回一项' }));
+
+    expect(screen.getByLabelText('付款金额')).toHaveValue('39561.63');
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('shows "too large" instead of breaking the page when the items add up beyond what can be recorded, and refuses to merge or confirm it', () => {
+    render(<ReceiptEditor receipt={companyNotice({ status: 'pending' })} onSaved={vi.fn()} />);
+
+    fireEvent.change(screen.getByLabelText('第 1 项金额'), { target: { value: '9999999999.99' } });
+    fireEvent.change(screen.getByLabelText('第 2 项金额'), { target: { value: '9999999999.99' } });
+
+    expect(screen.getByRole('status')).toHaveTextContent('合计：金额过大');
+    // 先点「合回一项」：提示只可能是它报的，不会是前面哪一步留下的
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '合回一项' }));
+    expect(screen.getByRole('alert')).toHaveTextContent('合计金额过大，请检查');
+    expect(screen.getByLabelText('第 1 项金额')).toBeInTheDocument();
+    expect(screen.queryByLabelText('付款金额')).not.toBeInTheDocument();
+    fireEvent.click(confirmButton());
+    expect(screen.getByRole('alert')).toHaveTextContent('合计金额过大，请检查');
+    expect(confirmReceipt).not.toHaveBeenCalled();
+  });
+
   it('clears an old error when switching between one item and several', () => {
     render(<ReceiptEditor receipt={companyReceipt({ status: 'pending', paidFen: null })} onSaved={vi.fn()} />);
 
@@ -571,5 +653,63 @@ describe('splitting a notice into several items', () => {
     expect(screen.getByRole('button', { name: '合回一项' })).toBeDisabled();
     finish({ ...notice, status: 'ready' });
     await waitFor(() => expect(screen.getByLabelText('第 1 项金额')).toBeEnabled());
+  });
+});
+
+// 真浏览器的月份选择器只选了一半（比如选了月、没选年）时，输入框的值是空的，但 validity.badInput 为真，
+// 这不是「没有月份」。jsdom 自己不会这样，测试里手动把 validity 设上。
+describe('a month box that was only half filled in', () => {
+  beforeEach(() => vi.clearAllMocks());
+  afterEach(() => cleanup());
+
+  function setHalfFilled(input: HTMLElement, halfFilled: boolean): void {
+    Object.defineProperty(input, 'validity', { value: { badInput: halfFilled }, configurable: true });
+  }
+
+  it('is not sent as "no month" for a single item, and goes through once it is cleared or completed', async () => {
+    const original = companyReceipt({ status: 'pending' });
+    confirmReceipt.mockResolvedValue({ ...original, status: 'ready' });
+    render(<ReceiptEditor receipt={original} onSaved={vi.fn()} />);
+    const month = screen.getByLabelText('费用月份');
+    setHalfFilled(month, true);
+
+    fireEvent.click(confirmButton());
+
+    expect(screen.getByRole('alert')).toHaveTextContent('费用月份没有选完整，请把年和月都选上，或者清空');
+    expect(confirmReceipt).not.toHaveBeenCalled();
+
+    setHalfFilled(month, false);
+    fireEvent.click(confirmButton());
+    await waitFor(() => expect(confirmReceipt).toHaveBeenCalledTimes(1));
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('names the item of a notice whose month box is half filled', async () => {
+    const notice = companyNotice({ status: 'pending' });
+    confirmReceipt.mockResolvedValue({ ...notice, status: 'ready' });
+    render(<ReceiptEditor receipt={notice} onSaved={vi.fn()} />);
+    const month = screen.getByLabelText('第 4 项费用月份');
+    setHalfFilled(month, true);
+
+    fireEvent.click(confirmButton());
+
+    expect(screen.getByRole('alert')).toHaveTextContent('第 4 项的费用月份没有选完整，请把年和月都选上，或者清空');
+    expect(confirmReceipt).not.toHaveBeenCalled();
+
+    setHalfFilled(month, false);
+    fireEvent.click(confirmButton());
+    await waitFor(() => expect(confirmReceipt).toHaveBeenCalledTimes(1));
+  });
+
+  it('is still caught when the half-filled box is one of several rows after another row was deleted', () => {
+    render(<ReceiptEditor receipt={companyNotice({ status: 'pending' })} onSaved={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: '删除第 1 项' }));
+    // 删掉第 1 项后，原来的第 3 项（水费）成了第 2 项
+    setHalfFilled(screen.getByLabelText('第 2 项费用月份'), true);
+
+    fireEvent.click(confirmButton());
+
+    expect(screen.getByRole('alert')).toHaveTextContent('第 2 项的费用月份没有选完整');
+    expect(confirmReceipt).not.toHaveBeenCalled();
   });
 });

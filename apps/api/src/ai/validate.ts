@@ -148,7 +148,14 @@ const companyAnalysisSchema = z
     }
   });
 
-/** 金额：去掉千分位逗号、货币符号和「元」，数字类型转成两位小数的字符串；空字符串当没有。 */
+/** 千分位写法：第一组 1–3 位、不以 0 开头，每组 3 位，组与组之间用同一种逗号或空格，例如「12,909.49」「1 234 567」。 */
+const GROUPED = /^[1-9]\d{0,2}([,\s])\d{3}(?:\1\d{3})*(?:\.\d+)?$/;
+
+/**
+ * 金额：去掉货币符号、「元」和千分位逗号，数字类型转成两位小数的字符串；空字符串当没有。
+ * 逗号和空格只认千分位（每组 3 位）：「114,66」「12 34」这种把逗号当小数点的写法，
+ * 如果也直接去掉就变成 11466 元，差了 100 倍，所以原样留着，让后面的校验当作认不出。
+ */
 function normalizeMoney(value: unknown): unknown {
   if (typeof value === 'number') {
     return Number.isFinite(value) && value >= 0 ? value.toFixed(2) : value;
@@ -156,10 +163,11 @@ function normalizeMoney(value: unknown): unknown {
   if (typeof value !== 'string') {
     return value;
   }
-  const text = value
+  const bare = value
     .normalize('NFKC')
-    .replace(/人民币|RMB|CNY|[¥￥$,\s元]/gi, '')
-    .replace(/(\.\d{2})0+$/, '$1');
+    .replace(/人民币|RMB|CNY|[¥￥$元]/gi, '')
+    .trim();
+  const text = (GROUPED.test(bare) ? bare.replace(/[,\s]/g, '') : bare).replace(/(\.\d{2})0+$/, '$1');
   return text === '' ? null : text;
 }
 

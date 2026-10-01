@@ -39,11 +39,18 @@ function LatestDraftPreview({ ledger, onResolve }: { ledger: Ledger; onResolve: 
         .flatMap((month) => month.batches)
         .filter((batch) => !batch.cancelledAt && !batch.archivedAt && batch.pdfPath === null)
         .sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0];
+      // 请求回来时用户可能已经换了区、或者去了别的页面（本组件已卸载）：这时不能再替他打开预览，
+      // 否则 onResolve 里的旧地址会把人从刚去的页面拉回来
+      if (!active) return;
+      // 还有一个空档：点了切换区或别的导航按钮，地址当场就变了，页面却要等下一个任务才跟着换，
+      // 这时本组件还没卸载（active 还是 true）。所以再对一下当前的地址，已经不在本区的预览页就不动
+      const here = parseRoute(window.location.hash);
+      if (here.ledger !== ledger || here.page !== 'preview' || here.batchId !== null) return;
       if (draft !== undefined) {
         onResolve(draft.id);
         return;
       }
-      if (active) setState('empty');
+      setState('empty');
     }, () => {
       if (active) setState('empty');
     });
@@ -100,6 +107,9 @@ export default function App() {
   const selectBatch = (id: string | null): void => setSelectedBatch((previous) => ({ ...previous, [ledger]: id }));
   const openPreview = (id: string): void => { selectBatch(id); go('preview', id); };
 
+  // 页面出错时「返回」去哪：店内是首页，公账区的第一页是「上传回单」
+  const homePage = NAV_PAGES[ledger][0]!;
+  const errorHome = { hash: routeHash(ledger, homePage), name: say(NAV_LABELS[homePage]) };
   const previewId = current.batchId ?? selectedBatch[ledger];
   const content = current.page === 'pool'
     ? <PoolPage ledger={ledger} onBatch={openPreview} />
@@ -151,7 +161,8 @@ export default function App() {
         </nav>
       </header>
       {/* 换区时整页重新挂载：上一个区的列表、输入、弹窗都不能留到另一个区 */}
-      <ErrorBoundary key={ledger}>{content}</ErrorBoundary>
+      {/* 地址一变（用户点了出错页的「返回」或别的导航）就让出错页放手，重新渲染新的那一页 */}
+      <ErrorBoundary key={ledger} home={errorHome} resetKey={route}>{content}</ErrorBoundary>
     </>
   );
 }

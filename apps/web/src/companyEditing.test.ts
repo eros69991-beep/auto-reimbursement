@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { MAX_LINES, buildLines, draftsFromLines, parseAmountInput, parsePeriodInput, readPayee, sumLinesFen, type LineDraft } from './companyEditing';
+import { AMOUNT_RULE, MAX_LINES, buildLines, draftsFromLines, mergedAmount, parseAmountInput, parsePeriodInput, readPayee, showFen, sumLinesFen, type LineDraft } from './companyEditing';
 
 function row(id: number, category: LineDraft['category'], period: string, amount: string): LineDraft {
   return { id, category, period, amount };
@@ -17,12 +17,59 @@ describe('amount typed into a company form', () => {
     ['12909.4', 1_290_940],
     ['0.01', 1],
     ['9999999999.99', 999_999_999_999],
+    ['9,999,999,999.99', 999_999_999_999],
+    ['1,234,567.89', 123_456_789],
+    ['1 234 567.89', 123_456_789],
+    ['1,000', 100_000],
+    ['¥ 12,909.49', 1_290_949],
+    ['￥12,909.49', 1_290_949],
+    ['12,909.4', 1_290_940],
+    ['100', 10_000],
   ])('reads %s as %d fen', (text, fen) => {
     expect(parseAmountInput(text)).toBe(fen);
   });
 
   it.each(['', '  ', '0', '0.00', '-5', 'abc', '12.345', '12909.', '.5', '1e3', '12元', '10000000000.00'])('refuses %j', (text) => {
     expect(parseAmountInput(text)).toBeNull();
+  });
+
+  // 逗号当小数点（114,66 就是 114.66 元）：去掉逗号会变成 11466 元，差 100 倍，所以一律不认
+  it.each(['114,66', '12,34', '1,00', '1,000,00', '12 34', '1,2345', ',100', '100,', '1,,000', '1.234,56', '1,234.567', '¥', '12909.49¥', '1 2 3', '０,５０', '1234,567', '12345 678', '1234,500', '0,500', '01,234', '1,234 567', '1 234,567', '1 234.567,89'])('refuses %j instead of guessing where the decimal point is', (text) => {
+    expect(parseAmountInput(text)).toBeNull();
+  });
+});
+
+describe('showing an amount in the editor', () => {
+  it('shows an ordinary amount as it will be written on the form', () => {
+    expect(showFen(1_290_949)).toBe('12909.49');
+    expect(showFen(0)).toBe('0.00');
+    expect(showFen(999_999_999_999)).toBe('9999999999.99');
+  });
+
+  it('says "too large" instead of throwing when the amount is beyond what can be recorded', () => {
+    expect(showFen(1_000_000_000_000)).toBe('金额过大');
+    expect(showFen(2_000_000_000_000)).toBe('金额过大');
+  });
+});
+
+describe('putting the items of a notice back into one amount', () => {
+  it('adds the items, leaving out the ones that were never filled in', () => {
+    expect(mergedAmount([row(0, '店面租金', '2026-09', '22,814.10'), row(1, '物业费', '', '50.69'), row(2, '', '', ''), row(3, '', '', '  ')])).toEqual({ fen: 2_286_479 });
+  });
+
+  it('gives 0 for a form where nothing was filled in yet', () => {
+    expect(mergedAmount([row(0, '', '', ''), row(1, '', '', '')])).toEqual({ fen: 0 });
+  });
+
+  it('does not quietly count an amount it cannot read as 0, and names the item', () => {
+    expect(mergedAmount([row(0, '店面租金', '', '100.00'), row(1, '物业费', '', '5o.69')])).toEqual({ error: '第 2 项的金额不对，请先改好再合回一项' });
+    expect(mergedAmount([row(0, '店面租金', '', '114,66'), row(1, '物业费', '', '1.00')])).toEqual({ error: '第 1 项的金额不对，请先改好再合回一项' });
+    expect(mergedAmount([row(0, '店面租金', '', '0'), row(1, '物业费', '', '1.00')])).toEqual({ error: '第 1 项的金额不对，请先改好再合回一项' });
+  });
+
+  it('refuses a total beyond what can be recorded', () => {
+    expect(mergedAmount([row(0, '店面租金', '', '9999999999.99'), row(1, '物业费', '', '0.01')])).toEqual({ error: '合计金额过大，请检查' });
+    expect(mergedAmount([row(0, '店面租金', '', '9999999999.98'), row(1, '物业费', '', '0.01')])).toEqual({ fen: 999_999_999_999 });
   });
 });
 
@@ -110,9 +157,18 @@ describe('lines of a notice', () => {
 
   it('names the row that has no category, no amount or a bad month', () => {
     expect(buildLines([row(0, '水费', '', '1'), row(1, '', '', '1')])).toEqual({ error: '第 2 项请选择分类' });
-    expect(buildLines([row(0, '水费', '', '1'), row(1, '电费', '', ''), row(2, '', '', '')])).toEqual({ error: '第 2 项请输入大于 0 的金额' });
-    expect(buildLines([row(0, '水费', '', '0'), row(1, '电费', '', '1')])).toEqual({ error: '第 1 项请输入大于 0 的金额' });
+    expect(buildLines([row(0, '水费', '', '1'), row(1, '电费', '', ''), row(2, '', '', '')])).toEqual({ error: `第 2 项的金额不对：${AMOUNT_RULE}` });
+    expect(buildLines([row(0, '水费', '', '0'), row(1, '电费', '', '1')])).toEqual({ error: `第 1 项的金额不对：${AMOUNT_RULE}` });
     expect(buildLines([row(0, '水费', '', '1'), row(1, '电费', '2026-13', '1')])).toEqual({ error: '第 2 项的费用月份请写成 2026-07 这样' });
+  });
+
+  it('tells the user the decimal point is a dot when an amount it cannot read is turned down', () => {
+    const refused = buildLines([row(0, '水费', '', '114,66'), row(1, '电费', '', '1')]);
+
+    expect(refused).toEqual({ error: expect.stringContaining('第 1 项的金额不对') });
+    expect(AMOUNT_RULE).toContain('小数点用「.」');
+    expect(AMOUNT_RULE).toContain('大于 0');
+    expect(AMOUNT_RULE).toContain('两位小数');
   });
 
   it('refuses the same category in the same month twice, but not in different months or with and without a month', () => {

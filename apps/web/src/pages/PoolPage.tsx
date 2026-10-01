@@ -39,7 +39,7 @@ export function PoolPage({ onBatch, ledger = 'store' }: { onBatch: (id: string) 
         setSelected((current) => current.filter((id) => received.some((receipt) => receipt.id === id)));
         refreshTotals();
         if (outcome === 'error') {
-          setError(friendlyError(reason, '获取识别进度失败'));
+          setError(friendlyError(reason, '获取识别进度失败', say));
         } else if (outcome === 'timeout') {
           setMessage(say('合并后的凭证还在识别中，稍后刷新本页就能看到结果。'));
         } else {
@@ -48,7 +48,7 @@ export function PoolPage({ onBatch, ledger = 'store' }: { onBatch: (id: string) 
             : '合并完成，这张还需要你确认，请到「异常处理」查看。');
         }
       } catch (loadReason) {
-        setError(friendlyError(loadReason, say('获取报销池失败')));
+        setError(friendlyError(loadReason, say('获取报销池失败'), say));
       }
     })();
   });
@@ -60,7 +60,7 @@ export function PoolPage({ onBatch, ledger = 'store' }: { onBatch: (id: string) 
         setTotals(nextTotals);
         setSettings(nextSettings);
       },
-      (reason: unknown) => setError(reason instanceof Error ? reason.message : say('获取报销池失败')),
+      (reason: unknown) => setError(reason instanceof Error ? say(reason.message) : say('获取报销池失败')),
     );
   }, []);
 
@@ -81,7 +81,7 @@ export function PoolPage({ onBatch, ledger = 'store' }: { onBatch: (id: string) 
   function refreshTotals(): void {
     void client.totals().then(
       (nextTotals) => setTotals(nextTotals),
-      (reason: unknown) => setError(reason instanceof Error ? reason.message : say('刷新报销池汇总失败')),
+      (reason: unknown) => setError(reason instanceof Error ? say(reason.message) : say('刷新报销池汇总失败')),
     );
   }
 
@@ -115,7 +115,7 @@ export function PoolPage({ onBatch, ledger = 'store' }: { onBatch: (id: string) 
       setSelected((current) => current.filter((selectedId) => selectedId !== id));
       refreshTotals();
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : say('移出报销池失败'));
+      setError(reason instanceof Error ? say(reason.message) : say('移出报销池失败'));
     }
   }
 
@@ -131,7 +131,7 @@ export function PoolPage({ onBatch, ledger = 'store' }: { onBatch: (id: string) 
       ]);
       setBinRows([...excluded, ...deleted]);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : '加载已移出与回收站失败');
+      setError(reason instanceof Error ? say(reason.message) : '加载已移出与回收站失败');
     }
   }
 
@@ -148,11 +148,11 @@ export function PoolPage({ onBatch, ledger = 'store' }: { onBatch: (id: string) 
       // P-31：恢复后立即刷新报销池列表，不能只更新回收站和汇总
       void client.receipts('pool').then(
         (received) => setRows(received),
-        (loadReason: unknown) => setError(loadReason instanceof Error ? loadReason.message : say('刷新报销池失败')),
+        (loadReason: unknown) => setError(loadReason instanceof Error ? say(loadReason.message) : say('刷新报销池失败')),
       );
       refreshTotals();
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : say('恢复凭证失败'));
+      setError(reason instanceof Error ? say(reason.message) : say('恢复凭证失败'));
     }
   }
 
@@ -171,7 +171,7 @@ export function PoolPage({ onBatch, ledger = 'store' }: { onBatch: (id: string) 
       setMessage('已合并，正在重新识别拼好的图…');
       watch([merged.id]);
     } catch (reason) {
-      setError(friendlyError(reason, '合并失败'));
+      setError(friendlyError(reason, '合并失败', say));
     } finally {
       setBusy(false);
     }
@@ -189,7 +189,7 @@ export function PoolPage({ onBatch, ledger = 'store' }: { onBatch: (id: string) 
       refreshTotals();
       setMessage(`已拆开，恢复成 ${restored.length} 张截图；还没确认的在「异常处理」里。`);
     } catch (reason) {
-      setError(friendlyError(reason, '拆开失败'));
+      setError(friendlyError(reason, '拆开失败', say));
     } finally {
       setBusy(false);
     }
@@ -207,7 +207,7 @@ export function PoolPage({ onBatch, ledger = 'store' }: { onBatch: (id: string) 
       const batch = await client.createBatch(selected, formOptionsFromSettings(settings, new Date(), ledger));
       onBatch(batch.id);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : say('生成报销单失败'));
+      setError(reason instanceof Error ? say(reason.message) : say('生成报销单失败'));
     } finally {
       setBusy(false);
     }

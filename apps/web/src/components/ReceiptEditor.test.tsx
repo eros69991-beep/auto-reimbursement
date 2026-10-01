@@ -141,6 +141,20 @@ describe('receipt editor', () => {
     expect(confirmReceipt).not.toHaveBeenCalled();
   });
 
+  it('shows the server refusals exactly as the server worded them', async () => {
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    confirmReceipt.mockRejectedValueOnce(new Error('凭证当前状态不可确认'));
+    deleteReceipt.mockRejectedValueOnce(new Error('凭证已进入报销单，不能删除'));
+    render(<ReceiptEditor receipt={receipt({ status: 'pending' })} onSaved={vi.fn()} />);
+
+    fireEvent.click(screen.getByRole('button', { name: '确认可报销' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('确认可报销失败：凭证当前状态不可确认');
+
+    fireEvent.click(screen.getByRole('button', { name: '删除凭证' }));
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('凭证已进入报销单，不能删除'));
+    confirm.mockRestore();
+  });
+
   it('deletes the receipt after confirmation', async () => {
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
     deleteReceipt.mockResolvedValue(undefined);

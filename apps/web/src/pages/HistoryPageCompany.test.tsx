@@ -158,3 +158,62 @@ describe('HistoryPage in the company ledger', () => {
     expect(screen.getByRole('dialog', { name: '确认清理原始图片' })).toHaveTextContent('此操作仅删除已归档报销单的原始付款图片，不会删除退款凭证或 PDF。');
   });
 });
+
+// 后台的报错是写给店内的（凭证、报销……），公账页面显示前要换成回单、付款的说法
+describe('HistoryPage in the company ledger: what the server says is shown in company words', () => {
+  it('when the history cannot be loaded', async () => {
+    vi.spyOn(api, 'history').mockRejectedValue(new Error('报销批次不存在'));
+    render(<HistoryPage ledger="company" onPreview={vi.fn()} />);
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('付款批次不存在');
+    expect(alert).not.toHaveTextContent(/凭证|报销/);
+  });
+
+  it('when a month cannot be archived', async () => {
+    vi.spyOn(api, 'history').mockResolvedValue([{ month: '2026-09', batches: [batchOf()] }]);
+    vi.spyOn(api, 'archive').mockRejectedValue(new Error('报销批次不存在'));
+    render(<HistoryPage ledger="company" onPreview={vi.fn()} />);
+
+    fireEvent.click(await screen.findByRole('button', { name: '归档本月' }));
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('付款批次不存在');
+    expect(alert).not.toHaveTextContent(/凭证|报销/);
+  });
+
+  it('when the originals of a month cannot be cleaned', async () => {
+    vi.spyOn(api, 'history').mockResolvedValue([{ month: '2026-09', batches: [batchOf({ archivedAt: '2026-10-01' })] }]);
+    vi.spyOn(api, 'cleanup').mockRejectedValue(new Error('仅可清理已归档且已导出的凭证'));
+    render(<HistoryPage ledger="company" onPreview={vi.fn()} />);
+    fireEvent.click(await screen.findByRole('button', { name: '清理原始图片' }));
+    const dialog = screen.getByRole('dialog', { name: '确认清理原始图片' });
+    fireEvent.change(within(dialog).getByLabelText('请输入 DELETE ORIGINALS 2026-09'), { target: { value: 'DELETE ORIGINALS 2026-09' } });
+
+    fireEvent.click(within(dialog).getByRole('button', { name: '确认清理' }));
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('仅可清理已归档且已导出的回单');
+    expect(alert).not.toHaveTextContent(/凭证|报销/);
+  });
+
+  it('when a payment form cannot be cancelled', async () => {
+    vi.spyOn(api, 'history').mockResolvedValue([{ month: '2026-09', batches: [batchOf()] }]);
+    vi.spyOn(api, 'cancelBatch').mockRejectedValue(new Error('凭证关联已改变，未执行撤销'));
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    render(<HistoryPage ledger="company" onPreview={vi.fn()} />);
+
+    fireEvent.click(await screen.findByRole('button', { name: '撤销本单付款' }));
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('回单关联已改变，未执行撤销');
+    expect(alert).not.toHaveTextContent(/凭证|报销/);
+  });
+
+  it('keeps the words of the server for the store page', async () => {
+    vi.spyOn(api, 'history').mockRejectedValue(new Error('报销批次不存在'));
+    render(<HistoryPage onPreview={vi.fn()} />);
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('报销批次不存在');
+  });
+});

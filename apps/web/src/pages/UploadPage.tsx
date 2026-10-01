@@ -86,7 +86,7 @@ export function UploadPage({ ledger = 'store', client: givenClient }: { ledger?:
       const restored = await api.restoreReceipt(receiptId);
       setNotice(`${say('已从回收站恢复')} ${receiptLabel(restored)}${say('，请到「本期报销池」查看。')}`);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : '恢复失败');
+      setError(reason instanceof Error ? say(reason.message) : '恢复失败');
     }
   }
 
@@ -190,7 +190,7 @@ export function UploadPage({ ledger = 'store', client: givenClient }: { ledger?:
         } catch (reason) {
           // 单批失败不拖累其他批；保留服务器给出的原因（例如限流「上传过于频繁」），方便判断何时重试
           results[index] = null;
-          if (reason instanceof Error && reason.message !== '') failureReasons[index] = reason.message;
+          if (reason instanceof Error && reason.message !== '') failureReasons[index] = say(reason.message);
         } finally {
           completed += chunkFiles.length;
           setUploadDone(completed);

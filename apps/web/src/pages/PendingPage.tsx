@@ -78,7 +78,7 @@ export function PendingPage({ ledger = 'store' }: { ledger?: Ledger }): React.JS
 
   useEffect(() => {
     void load().catch(
-      (reason: unknown) => setError(reason instanceof Error ? reason.message : say('获取待处理凭证失败')),
+      (reason: unknown) => setError(reason instanceof Error ? say(reason.message) : say('获取待处理凭证失败')),
     );
   }, [load]);
 
@@ -87,7 +87,7 @@ export function PendingPage({ ledger = 'store' }: { ledger?: Ledger }): React.JS
       try {
         const waiting = await load();
         if (outcome === 'error') {
-          setError(friendlyError(reason, '获取识别进度失败'));
+          setError(friendlyError(reason, '获取识别进度失败', say));
         } else if (outcome === 'timeout') {
           setNotice(say('合并后的凭证还在识别中，稍后刷新本页就能看到结果。'));
         } else {
@@ -96,7 +96,7 @@ export function PendingPage({ ledger = 'store' }: { ledger?: Ledger }): React.JS
             : say('合并完成，重新识别通过，已进入报销池。'));
         }
       } catch (loadReason) {
-        setError(friendlyError(loadReason, say('获取待处理凭证失败')));
+        setError(friendlyError(loadReason, say('获取待处理凭证失败'), say));
       }
     })();
   });
@@ -116,7 +116,7 @@ export function PendingPage({ ledger = 'store' }: { ledger?: Ledger }): React.JS
     try {
       replaceOrRemove(await client.confirmDistinct(id));
     } catch (reason) {
-      setError(friendlyError(reason, '请求失败'));
+      setError(friendlyError(reason, '请求失败', say));
     }
   }
 
@@ -125,7 +125,7 @@ export function PendingPage({ ledger = 'store' }: { ledger?: Ledger }): React.JS
     try {
       replaceOrRemove(await client.retryReceipt(id));
     } catch (reason) {
-      setError(friendlyError(reason, '请求失败'));
+      setError(friendlyError(reason, '请求失败', say));
     }
   }
 
@@ -169,7 +169,7 @@ export function PendingPage({ ledger = 'store' }: { ledger?: Ledger }): React.JS
       setNotice('已合并，正在重新识别拼好的图…');
       watch([merged.id]);
     } catch (reason) {
-      setError(friendlyError(reason, '合并失败'));
+      setError(friendlyError(reason, '合并失败', say));
       // 失败多半是凭证状态已经变了（还在识别、已删除…），刷新一下列表
       void load().catch(() => undefined);
     } finally {
@@ -187,7 +187,7 @@ export function PendingPage({ ledger = 'store' }: { ledger?: Ledger }): React.JS
       await load();
       setNotice(`已拆开，恢复成 ${restored.length} 张截图。`);
     } catch (reason) {
-      setError(friendlyError(reason, '拆开失败'));
+      setError(friendlyError(reason, '拆开失败', say));
     } finally {
       setMergeBusy(false);
     }

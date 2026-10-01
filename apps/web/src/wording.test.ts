@@ -63,6 +63,14 @@ describe('wording for the two ledgers', () => {
     }
   });
 
+  it('never renames the store area itself when it shows up in a sentence', () => {
+    // 后台在店内和公账的凭证混到一起时的报错，两个区的名字都在句子里
+    expect(company('店内报销和公账付款的凭证不能放在同一张单上')).toBe('店内报销和公账付款的回单不能放在同一张单上');
+    expect(company('店内报销和公账付款的凭证不能合并')).toBe('店内报销和公账付款的回单不能合并');
+    expect(company('店内报销、店内报销，报销')).toBe('店内报销、店内报销，付款');
+    expect(store('店内报销和公账付款的凭证不能合并')).toBe('店内报销和公账付款的凭证不能合并');
+  });
+
   it('names the two areas', () => {
     expect(LEDGER_NAMES).toEqual({ store: '店内报销', company: '公账付款' });
   });

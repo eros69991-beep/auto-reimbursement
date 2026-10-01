@@ -1,9 +1,13 @@
 import { useId, useRef, useState } from 'react';
 import { COMPANY_CATEGORIES, formatFen, netFenOrNull, type Category, type Receipt } from '@auto-reimbursement/contracts';
 import { api, type ReceiptPatch } from '../api';
-import { MAX_LINES, buildLines, draftsFromLines, parseAmountInput, parsePeriodInput, readPayee, sumLinesFen, type LineDraft } from '../companyEditing';
+import { sayFor } from '../wording';
+import { AMOUNT_RULE, MAX_LINES, buildLines, draftsFromLines, mergedAmount, parseAmountInput, parsePeriodInput, readPayee, showFen, sumLinesFen, type LineDraft } from '../companyEditing';
 
 type EditorProps = { receipt: Receipt; onSaved: (receipt: Receipt) => void };
+
+// 这个编辑框只给公账区用；后台返回的报错是写给店内的，显示前换成付款、回单的说法
+const say = sayFor('company');
 
 function initialAmount(receipt: Receipt): string {
   if (receipt.paidFen === null) return '';
@@ -32,6 +36,7 @@ export function CompanyReceiptEditor({ receipt, onSaved }: EditorProps): React.J
   const [error, setError] = useState<string | null>(null);
   const periodHintId = useId();
   const accountHintId = useId();
+  const rootRef = useRef<HTMLElement>(null);
   // 学习规则与 AI 冲突时的建议分类：分类保持 AI 的判断，这里给一键改用（只对单项凭证）
   const suggestion = receipt.ruleMatch?.mode === 'suggested' ? receipt.ruleMatch : null;
 
@@ -39,7 +44,7 @@ export function CompanyReceiptEditor({ receipt, onSaved }: EditorProps): React.J
   const recognizedTotal = receipt.recognizedFen;
 
   function message(reason: unknown): string {
-    return reason instanceof Error ? reason.message : '请求失败';
+    return reason instanceof Error ? say(reason.message) : '请求失败';
   }
 
   function newLine(values: Partial<Omit<LineDraft, 'id'>> = {}): LineDraft {
@@ -62,18 +67,39 @@ export function CompanyReceiptEditor({ receipt, onSaved }: EditorProps): React.J
     setMode('lines');
   }
 
-  // 多项 → 单项：分类、月份取第一行，金额取各项合计
+  // 多项 → 单项：分类、月份取第一行，金额取各项合计；有一项金额填得不对时不合，免得合回去的金额悄悄少一截
   function mergeIntoOne(): void {
+    const merged = mergedAmount(lines);
+    if ('error' in merged) {
+      setError(merged.error);
+      return;
+    }
     setError(null);
     const first = lines[0];
     setCategory(first?.category ?? '');
     setPeriod(first?.period ?? '');
-    setAmount(linesTotal > 0 ? formatFen(linesTotal) : '');
+    setAmount(merged.fen > 0 ? formatFen(merged.fen) : '');
     setMode('single');
+  }
+
+  /**
+   * 浏览器的月份选择器只选了一半（比如选了月、没选年）时，输入框的值是空的，
+   * 但它的 validity.badInput 为真：这不是「没有月份」，不能悄悄当作没填提交。
+   * 返回第几个月份框没填完整（从 0 起，顺序和页面上从上到下一致），都填完整了返回 null。
+   */
+  function unfinishedMonth(): number | null {
+    const inputs = Array.from(rootRef.current?.querySelectorAll<HTMLInputElement>('input[type="month"]') ?? []);
+    const index = inputs.findIndex((input) => input.validity.badInput);
+    return index === -1 ? null : index;
   }
 
   async function confirm(): Promise<void> {
     const patch: ReceiptPatch = {};
+    const unfinished = unfinishedMonth();
+    if (unfinished !== null) {
+      setError(`${mode === 'lines' ? `第 ${unfinished + 1} 项的` : ''}费用月份没有选完整，请把年和月都选上，或者清空`);
+      return;
+    }
     if (mode === 'lines') {
       const built = buildLines(lines);
       if ('error' in built) {
@@ -89,7 +115,7 @@ export function CompanyReceiptEditor({ receipt, onSaved }: EditorProps): React.J
       }
       const paidFen = parseAmountInput(amount);
       if (paidFen === null) {
-        setError('请输入正确的金额');
+        setError(`请输入正确的金额：${AMOUNT_RULE}`);
         return;
       }
       const normalized = parsePeriodInput(period);
@@ -138,7 +164,7 @@ export function CompanyReceiptEditor({ receipt, onSaved }: EditorProps): React.J
   }
 
   return (
-    <section className="receipt-editor company-editor" aria-label="编辑回单">
+    <section ref={rootRef} className="receipt-editor company-editor" aria-label="编辑回单">
       <label>日期（选填）<input aria-label="日期" type="date" value={date} disabled={busy} onChange={(event) => setDate(event.target.value)} /></label>
       {mode === 'single' ? (
         <>
@@ -180,7 +206,7 @@ export function CompanyReceiptEditor({ receipt, onSaved }: EditorProps): React.J
               </div>
             );
           })}
-          <p className="lines-total" role="status">合计：{formatFen(linesTotal)}</p>
+          <p className="lines-total" role="status">合计：{showFen(linesTotal)}</p>
           {recognizedTotal !== null && recognizedTotal !== linesTotal && (
             <p className="field-hint">AI 读到的通知单合计是 {formatFen(recognizedTotal)}，和各项相加不一样，请对着图核对每一项。</p>
           )}

@@ -129,7 +129,7 @@ describe('reconcile workspace for a company payment form', () => {
     const tabs = within(screen.getByRole('group', { name: '对账视图' })).getAllByRole('button').map((button) => button.textContent);
     expect(tabs).toEqual(['回单', '清单', '付款单']);
     expect(screen.getByTestId('pdf-preview')).toHaveAttribute('data-ledger', 'company');
-    expect(document.body).not.toHaveTextContent('报销');
+    expect(document.body).not.toHaveTextContent(/报销|凭证/);
   });
 
   it('gives every item of a notice its own row and its own amount in the checklist', () => {
@@ -169,7 +169,7 @@ describe('reconcile workspace for a company payment form', () => {
     fireEvent.click(screen.getByRole('button', { name: '下一张' }));
 
     expect(title()).toBe([
-      '第 1 张付款单 · 本张凭证 39561.63，含 5 项',
+      '第 1 张付款单 · 本张回单 39561.63，含 5 项',
       '店面租金（2026年9月） 22814.10 · 物业费（2026年9月） 5069.80 · 水费（2026年7月） 48.86',
       '电费（2026年7月） 11466.87 · 空调能源费（2026年7月） 162.00',
     ].join('\n'));
@@ -246,11 +246,11 @@ describe('reconcile workspace for a company payment form', () => {
     // 附件：第 1 张单上的回单、第 1 张单上的通知单、第 2 张单上的通知单
     expect(screen.getByText('1 / 3')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '下一张' }));
-    expect(title().split('\n')[0]).toBe('第 1 张付款单 · 本张凭证 39561.63，含 5 项（本张单据上 2 项）');
+    expect(title().split('\n')[0]).toBe('第 1 张付款单 · 本张回单 39561.63，含 5 项（本张单据上 2 项）');
     fireEvent.click(screen.getByRole('button', { name: '下一张' }));
     expect(screen.getByText('3 / 3')).toBeInTheDocument();
     expect(title().split('\n')).toEqual([
-      '第 2 张付款单 · 本张凭证 39561.63，含 5 项（本张单据上 3 项）',
+      '第 2 张付款单 · 本张回单 39561.63，含 5 项（本张单据上 3 项）',
       '水费（2026年7月） 48.86 · 电费（2026年7月） 11466.87 · 空调能源费（2026年7月） 162.00',
     ]);
   });
@@ -318,6 +318,15 @@ describe('reconcile workspace for a company payment form', () => {
 
     expect(await screen.findByRole('alert')).toHaveTextContent('回单图片加载失败');
     expect(screen.getByRole('button', { name: '重试' })).toBeInTheDocument();
+  });
+
+  it('also puts the reason the server gave for a failed picture in 回单 words', async () => {
+    vi.mocked(fetchBlobUrl).mockReset().mockRejectedValue(new Error('凭证不存在'));
+    render(<ReconcileWorkspace batch={oneSheetBatch()} previewUrl={PREVIEW} />);
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('回单图片加载失败：回单不存在。');
+    expect(alert).not.toHaveTextContent('凭证');
   });
 
   it('says there is nothing attached when the batch has no receipts', () => {

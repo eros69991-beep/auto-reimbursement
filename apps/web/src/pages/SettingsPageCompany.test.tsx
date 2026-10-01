@@ -22,6 +22,7 @@ vi.mock('../api', () => ({
     deleteRule,
     reapplyRules,
     backup: vi.fn(),
+    saveSignature: vi.fn(),
   },
   fetchBlobUrl: vi.fn().mockResolvedValue('blob:mock'),
   openAuthed: vi.fn(),
@@ -134,6 +135,37 @@ describe('SettingsPage in the company ledger', () => {
 
     expect(await screen.findByRole('alert')).toHaveTextContent('请求参数无效');
     expect(screen.queryByText('设置已保存')).not.toBeInTheDocument();
+  });
+
+  // 后台的报错是写给店内的（凭证、报销……），公账页面显示前要换成回单、付款的说法
+  it('shows what the server says in company words: loading, saving, uploading the signature, backing up', async () => {
+    mockedApi.settings.mockRejectedValueOnce(new Error('凭证不存在'));
+    const loading = render(<SettingsPage ledger="company" />);
+    expect(await screen.findByRole('alert')).toHaveTextContent('回单不存在');
+    loading.unmount();
+
+    saveSettings.mockRejectedValueOnce(new Error('报销批次不存在'));
+    mockedApi.saveSignature.mockRejectedValueOnce(new Error('凭证不存在'));
+    mockedApi.backup.mockRejectedValueOnce(new Error('已导出的报销单不可修改'));
+    render(<SettingsPage ledger="company" />);
+    await screen.findByLabelText('公账付款单位');
+
+    fireEvent.click(screen.getByRole('button', { name: '保存设置' }));
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('付款批次不存在'));
+
+    fireEvent.change(screen.getByLabelText('上传签名'), { target: { files: [new File(['x'], 'sign.png', { type: 'image/png' })] } });
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('回单不存在'));
+
+    fireEvent.click(screen.getByRole('button', { name: '备份全部数据' }));
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('已导出的付款单不可修改'));
+    expect(screen.getByRole('alert')).not.toHaveTextContent(/凭证|报销/);
+  });
+
+  it('keeps the words of the server for the store page', async () => {
+    mockedApi.settings.mockRejectedValueOnce(new Error('凭证不存在'));
+    render(<SettingsPage />);
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('凭证不存在');
   });
 
   it('saves the store department without inventing a company payment unit', async () => {

@@ -79,6 +79,26 @@ describe('rules editor in the company ledger', () => {
     expect(await screen.findByRole('status')).toHaveTextContent('固定规则已保存，之后识别的回单马上按它归类；已在待处理里的，点「套用到待处理回单」。');
   });
 
+  it('shows what the server says about a refused save or delete in company words, and keeps the store words for the store', async () => {
+    const onSave = vi.fn().mockRejectedValue(new Error('凭证不存在'));
+    const onDelete = vi.fn().mockRejectedValue(new Error('报销批次不存在'));
+    const company = render(<RulesEditor ledger="company" rules={[rule({ source: 'manual' })]} onSave={onSave} onDelete={onDelete} onReapply={vi.fn()} />);
+
+    fireEvent.click(screen.getByRole('button', { name: '新建固定规则' }));
+    fireEvent.change(screen.getByLabelText('包含文字'), { target: { value: '新沣' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存规则' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('回单不存在');
+    fireEvent.click(screen.getByRole('button', { name: '取消' }));
+    fireEvent.click(screen.getByRole('button', { name: '删除固定规则 新沣' }));
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('付款批次不存在'));
+    expect(screen.getByRole('alert')).not.toHaveTextContent(/凭证|报销/);
+    company.unmount();
+
+    render(<RulesEditor rules={[rule({ source: 'manual', category: '耗材' })]} onSave={vi.fn()} onDelete={onDelete} onReapply={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: '删除固定规则 新沣' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('报销批次不存在');
+  });
+
   it('reports a reapply in company words, with and without changes', async () => {
     const onReapply = vi.fn().mockResolvedValueOnce(3).mockResolvedValueOnce(0);
     render(<RulesEditor ledger="company" rules={[]} onSave={vi.fn()} onDelete={vi.fn()} onReapply={onReapply} />);

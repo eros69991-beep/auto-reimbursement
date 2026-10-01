@@ -255,10 +255,19 @@ describe('validating a company recognition result', () => {
     ['人民币 39,561.63', '39561.63'],
     ['RMB 100', '100'],
     ['12909.490', '12909.49'],
+    ['1,234,567.89', '1234567.89'],
+    ['1 234 567.89', '1234567.89'],
+    ['¥ 12,909.49 元', '12909.49'],
+    [' 100 ', '100'],
     [12909.49, '12909.49'],
     [6785, '6785.00'],
   ])('normalises the amount %s to %s', (amount, expected) => {
     expect(validateCompanyAnalysis({ ...clean, amount }).amount).toBe(expected);
+  });
+
+  // 逗号当小数点（114,66 是 114.66 元）去掉逗号就成了 11466 元，差 100 倍；不替人猜，当作认不出
+  it.each(['114,66', '12,34', '1,00', '1,000,00', '12 34', '1,2345', '1.234,56', ',100', '100,', '1,,000', '1234,567', '12345 678', '1234,500', '0,500', '01,234', '1,234 567', '1 234,567', '1 234.567,89'])('refuses the amount %s instead of guessing where the decimal point is', (amount) => {
+    expect(() => validateCompanyAnalysis({ ...clean, amount })).toThrow('INVALID_RESPONSE');
   });
 
   it('treats an empty amount as missing, and refuses an amount it cannot read', () => {
@@ -322,6 +331,7 @@ describe('validating a company recognition result', () => {
         { label: '合计', amount: '免费' },
         { label: '减免', amount: '-5.00' },
         { label: '零头', amount: '0.00' },
+        { label: '把逗号当小数点', amount: '114,66' },
         'not an object',
         null,
       ],

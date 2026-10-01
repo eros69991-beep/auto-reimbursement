@@ -89,7 +89,7 @@ describe('preview page for a company payment form', () => {
     expect(screen.getByLabelText('经办人')).toHaveValue('测试经办人');
     expect(screen.queryByLabelText('部门')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('签名人')).not.toBeInTheDocument();
-    expect(screen.queryByText(/报销/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/报销|凭证/)).not.toBeInTheDocument();
     expect(screen.getByRole('link', { name: '预览完整 PDF（未定稿，含回单页）' })).toBeInTheDocument();
   });
 
@@ -325,5 +325,87 @@ describe('leaving the preview page with unsaved changes', () => {
 
     expect(confirmSpy).not.toHaveBeenCalled();
     confirmSpy.mockRestore();
+  });
+});
+
+// 后台的报错是写给店内的（凭证、报销……），公账页面显示前要换成回单、付款的说法
+describe('preview page for a company payment form: what the server says is shown in company words', () => {
+  afterEach(() => cleanup());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    window.location.hash = '';
+    batchApi.mockResolvedValue(companyBatch());
+  });
+
+  async function shown(): Promise<HTMLElement> {
+    const alert = await screen.findByRole('alert');
+    expect(alert).not.toHaveTextContent(/凭证|报销/);
+    return alert;
+  }
+
+  it('when the batch cannot be loaded', async () => {
+    batchApi.mockRejectedValue(new Error('报销批次不存在'));
+    render(<PreviewPage ledger="company" batchId="batch-1" />);
+
+    expect(await shown()).toHaveTextContent('付款批次不存在');
+  });
+
+  it('when the settings cannot be saved', async () => {
+    saveBatchOptions.mockRejectedValue(new Error('已导出的报销单不可修改'));
+    render(<PreviewPage ledger="company" batchId="batch-1" />);
+
+    fireEvent.click(await screen.findByRole('button', { name: '保存预览设置' }));
+
+    expect(await shown()).toHaveTextContent('已导出的付款单不可修改');
+  });
+
+  it('when a row cannot be moved', async () => {
+    moveGroup.mockRejectedValue(new Error('这个分类的凭证较多，已分到多张报销单上，不能单独移动。'));
+    render(<PreviewPage ledger="company" batchId="batch-1" />);
+    await screen.findByRole('heading', { name: '分类顺序' });
+
+    fireEvent.click(within(screen.getByText(/^肉款/).closest('p')!).getByRole('button', { name: '下一页' }));
+
+    expect(await shown()).toHaveTextContent('这个分类的回单较多，已分到多张付款单上，不能单独移动。');
+  });
+
+  it('when the PDF cannot be generated', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    exportBatch.mockRejectedValue(new Error('报销单内容超出版式容量，请减少单批凭证数量或缩短填写内容'));
+    render(<PreviewPage ledger="company" batchId="batch-1" />);
+
+    fireEvent.click(await screen.findByRole('button', { name: '生成 PDF' }));
+
+    expect(await shown()).toHaveTextContent('付款单内容超出版式容量，请减少单批回单数量或缩短填写内容');
+  });
+
+  it('when the form cannot be taken back to the pool', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    batchApi.mockResolvedValue(companyBatch({ pdfPath: 'exports/batch-1.pdf' }));
+    cancelBatch.mockRejectedValue(new Error('凭证关联已改变，未执行撤销'));
+    render(<PreviewPage ledger="company" batchId="batch-1" />);
+
+    fireEvent.click(await screen.findByRole('button', { name: '撤销并退回付款池' }));
+
+    expect(await shown()).toHaveTextContent('回单关联已改变，未执行撤销');
+  });
+
+  it('when the PDF cannot be opened', async () => {
+    openAuthed.mockRejectedValue(new Error('报销批次不存在'));
+    render(<PreviewPage ledger="company" batchId="batch-1" />);
+
+    fireEvent.click(await screen.findByRole('link', { name: '预览完整 PDF（未定稿，含回单页）' }));
+
+    expect(await shown()).toHaveTextContent('付款批次不存在');
+  });
+
+  it('keeps the words of the server on the store page', async () => {
+    batchApi.mockResolvedValue(storeBatch());
+    saveBatchOptions.mockRejectedValue(new Error('已导出的报销单不可修改'));
+    render(<PreviewPage batchId="batch-1" />);
+
+    fireEvent.click(await screen.findByRole('button', { name: '保存预览设置' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('已导出的报销单不可修改');
   });
 });

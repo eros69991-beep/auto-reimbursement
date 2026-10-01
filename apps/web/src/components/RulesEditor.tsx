@@ -63,7 +63,7 @@ export function RulesEditor({ ledger = 'store', rules, onSave, onDelete, onReapp
     try {
       await action();
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : fallback);
+      setError(reason instanceof Error ? say(reason.message) : fallback);
     } finally {
       setBusy(false);
     }

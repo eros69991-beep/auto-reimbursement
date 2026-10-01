@@ -26,23 +26,30 @@ const WHOLE_TEXT: ReadonlyMap<string, string> = new Map([
   ['完整报销 PDF 预览', '完整付款单 PDF 预览'],
 ]);
 
+/** 区的名字，导航栏的切换按钮和提示里用。 */
+export const LEDGER_NAMES: Record<Ledger, string> = {
+  store: '店内报销',
+  company: '公账付款',
+};
+
 const asIs: Say = (text) => text;
+
+function replaceTerms(text: string): string {
+  let result = text;
+  for (const [from, to] of TERMS) result = result.replaceAll(from, to);
+  return result;
+}
 
 const toCompany: Say = (text) => {
   const whole = WHOLE_TEXT.get(text);
   if (whole !== undefined) return whole;
-  let result = text;
-  for (const [from, to] of TERMS) result = result.replaceAll(from, to);
-  return result;
+  // 「店内报销」是店内区的名字（后台报「店内报销和公账付款的凭证不能合并」时会出现），
+  // 换词时原样留着，不能变成「店内付款」
+  const store = LEDGER_NAMES.store;
+  return text.split(store).map(replaceTerms).join(store);
 };
 
 /** 这个区的说法：店内原样返回；公账换成付款、回单这套词。 */
 export function sayFor(ledger: Ledger): Say {
   return ledger === 'company' ? toCompany : asIs;
 }
-
-/** 区的名字，导航栏的切换按钮和提示里用。 */
-export const LEDGER_NAMES: Record<Ledger, string> = {
-  store: '店内报销',
-  company: '公账付款',
-};

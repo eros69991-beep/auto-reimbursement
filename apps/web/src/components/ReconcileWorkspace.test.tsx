@@ -584,6 +584,13 @@ describe('reconcile workspace', () => {
       ]);
     });
 
+    it('keeps the words of the server as they are in the store', async () => {
+      vi.mocked(fetchBlobUrl).mockRejectedValueOnce(new Error('凭证不存在'));
+      render(<ReconcileWorkspace batch={sampleBatch()} previewUrl={PREVIEW} />);
+
+      expect(await screen.findByRole('alert')).toHaveTextContent('凭证图片加载失败：凭证不存在。');
+    });
+
     it('does not repeat the generic reason the server gives for any refusal', async () => {
       vi.mocked(fetchBlobUrl).mockRejectedValueOnce(new Error('加载失败'));
       render(<ReconcileWorkspace batch={sampleBatch()} previewUrl={PREVIEW} />);

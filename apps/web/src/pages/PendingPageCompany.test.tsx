@@ -27,6 +27,13 @@ afterEach(cleanup);
 
 const mockedApi = api as unknown as Record<string, ReturnType<typeof vi.fn>>;
 
+// 后台的报错是写给店内的（凭证、报销……），公账页面显示前要换成回单、付款的说法
+async function shownInCompanyWords(): Promise<HTMLElement> {
+  const alert = await screen.findByRole('alert');
+  expect(alert).not.toHaveTextContent(/凭证|报销/);
+  return alert;
+}
+
 describe('PendingPage in the company ledger', () => {
   let pendingRows: Receipt[];
   let poolRows: Receipt[];
@@ -144,6 +151,41 @@ describe('PendingPage in the company ledger', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('获取待处理回单失败');
   });
 
+  describe('what the server says is shown in company words', () => {
+    it('when the list cannot be loaded', async () => {
+      mockedApi.receipts.mockRejectedValue(new Error('凭证不存在'));
+      render(<PendingPage ledger="company" />);
+
+      expect(await shownInCompanyWords()).toHaveTextContent('回单不存在');
+    });
+
+    it('when "not a duplicate" is refused', async () => {
+      mockedApi.confirmDistinct.mockRejectedValue(new Error('凭证当前状态不可确认'));
+      render(<PendingPage ledger="company" />);
+
+      fireEvent.click(await screen.findByRole('button', { name: '确认不是重复，继续加入' }));
+
+      expect(await shownInCompanyWords()).toHaveTextContent('回单当前状态不可确认');
+    });
+
+    it('when a retry is refused', async () => {
+      pendingRows = [companyReceipt({ id: 'failed', status: 'pending', pendingReasons: ['api_failed'] })];
+      mockedApi.retryReceipt.mockRejectedValue(new Error('凭证不存在'));
+      render(<PendingPage ledger="company" />);
+
+      fireEvent.click(await screen.findByRole('button', { name: '重试识别' }));
+
+      expect(await shownInCompanyWords()).toHaveTextContent('回单不存在');
+    });
+
+    it('keeps the words of the server for the store page', async () => {
+      mockedApi.receipts.mockRejectedValue(new Error('凭证不存在'));
+      render(<PendingPage />);
+
+      expect(await screen.findByRole('alert')).toHaveTextContent('凭证不存在');
+    });
+  });
+
   describe('merging screenshots of one company 回单', () => {
     const image = (id: string) => ({ ...companyReceipt().original, id: `image-${id}` });
     const lone = (id: string, order: number): Receipt => companyReceipt({
@@ -181,6 +223,59 @@ describe('PendingPage in the company ledger', () => {
       expect(await screen.findByText('合并完成，重新识别通过，已进入付款池。')).toBeInTheDocument();
       // 合并后重新取的列表也都是公账的
       expect(mockedApi.receipts.mock.calls.every(([, ledger]) => ledger === 'company')).toBe(true);
+    });
+
+    async function tickTwoAndMerge(): Promise<void> {
+      await screen.findAllByLabelText(/选择合并/);
+      const boxes = screen.getAllByRole('checkbox', { name: /选择合并/ });
+      fireEvent.click(boxes[0]!);
+      fireEvent.click(boxes[1]!);
+      fireEvent.click(screen.getByRole('button', { name: '合并为一单' }));
+    }
+
+    it('shows what the server says about a refused merge in company words', async () => {
+      mockedApi.mergeReceipts.mockRejectedValue(new Error('有凭证还在识别中，请等识别完成后再合并'));
+      render(<PendingPage ledger="company" />);
+
+      await tickTwoAndMerge();
+
+      expect(await shownInCompanyWords()).toHaveTextContent('有回单还在识别中，请等识别完成后再合并');
+    });
+
+    it('shows a failed progress check of the merged receipt in company words', async () => {
+      mockedApi.progress.mockRejectedValue(new Error('凭证不存在'));
+      render(<PendingPage ledger="company" />);
+
+      await tickTwoAndMerge();
+
+      expect(await shownInCompanyWords()).toHaveTextContent('回单不存在');
+    });
+
+    it('shows a failed reload after the merged receipt was recognised in company words', async () => {
+      let pendingCalls = 0;
+      mockedApi.receipts.mockImplementation(async (view: string) => {
+        if (view !== 'pending') return [];
+        pendingCalls += 1;
+        if (pendingCalls > 1) throw new Error('报销批次不存在');
+        return pendingRows;
+      });
+      render(<PendingPage ledger="company" />);
+
+      await tickTwoAndMerge();
+
+      expect(await shownInCompanyWords()).toHaveTextContent('付款批次不存在');
+    });
+
+    it('shows what the server says about a refused split in company words', async () => {
+      vi.spyOn(window, 'confirm').mockReturnValue(true);
+      pendingRows = [companyReceipt({ id: 'm', status: 'pending', pendingReasons: ['category_uncertain'], mergedFrom: ['a', 'b'] })];
+      mockedApi.splitReceipt.mockRejectedValue(new Error('这张凭证不是合并来的，没有可以拆开的截图'));
+      render(<PendingPage ledger="company" />);
+      await screen.findByText('由 2 张截图合并（左右拼成一张图）');
+
+      fireEvent.click(screen.getByRole('button', { name: '拆开' }));
+
+      expect(await shownInCompanyWords()).toHaveTextContent('这张回单不是合并来的，没有可以拆开的截图');
     });
 
     it('asks before taking a merged company receipt apart, in company words', async () => {

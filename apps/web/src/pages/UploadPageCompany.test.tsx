@@ -141,6 +141,48 @@ describe('UploadPage in the company ledger', () => {
     expect(await screen.findByRole('status')).toHaveTextContent('已从回收站恢复 肉款 · 12909.49，请到「本期付款池」查看。');
   });
 
+  it('shows a refused restore in company words', async () => {
+    vi.spyOn(api, 'restoreReceipt').mockRejectedValue(new Error('凭证不存在'));
+    vi.spyOn(api, 'upload').mockResolvedValue({
+      accepted: [],
+      rejected: [{ index: 0, code: 'DELETED_DUPLICATE', duplicateId: 'gone' }],
+    });
+    render(<UploadPage ledger="company" />);
+
+    fireEvent.change(screen.getByLabelText('选择回单图片'), { target: { files: [pdfLikePng('肉款.png')] } });
+    fireEvent.click(await screen.findByRole('button', { name: '从回收站恢复' }));
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('回单不存在');
+    expect(alert).not.toHaveTextContent('凭证');
+  });
+
+  it('shows the reason the server gave for a failed upload in company words', async () => {
+    vi.spyOn(api, 'upload').mockRejectedValue(new Error('凭证不存在'));
+    render(<UploadPage ledger="company" />);
+
+    fireEvent.change(screen.getByLabelText('选择回单图片'), { target: { files: [pdfLikePng('肉款.png')] } });
+
+    const failures = await screen.findByRole('list', { name: '上传失败文件' });
+    expect(failures).toHaveTextContent('肉款.png：回单不存在');
+  });
+
+  it('keeps the words of the server for the store page: a refused restore and a failed upload', async () => {
+    vi.spyOn(api, 'restoreReceipt').mockRejectedValue(new Error('凭证不存在'));
+    vi.spyOn(api, 'upload').mockRejectedValueOnce(new Error('凭证不存在')).mockResolvedValue({
+      accepted: [],
+      rejected: [{ index: 0, code: 'DELETED_DUPLICATE', duplicateId: 'gone' }],
+    });
+    render(<UploadPage />);
+
+    fireEvent.change(screen.getByLabelText('选择凭证图片'), { target: { files: [pdfLikePng('a.png')] } });
+    expect(await screen.findByRole('list', { name: '上传失败文件' })).toHaveTextContent('a.png：凭证不存在');
+
+    fireEvent.click(screen.getByRole('button', { name: '重试失败文件' }));
+    fireEvent.click(await screen.findByRole('button', { name: '从回收站恢复' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('凭证不存在');
+  });
+
   it('sends a store user to the store pool after the same restore', async () => {
     vi.spyOn(api, 'restoreReceipt').mockResolvedValue(receipt({ id: 'gone', category: '食材', paidFen: 12000 }));
     vi.spyOn(api, 'upload').mockResolvedValue({

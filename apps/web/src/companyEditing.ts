@@ -21,12 +21,28 @@ export interface LineDraft {
 }
 
 /**
- * 金额输入：银行回单上的金额带千分位（12,909.49），复制过来也认；全角数字、¥、空格一并容忍。
+ * 开头可以有 ¥，数字部分：要么每 3 位一组（第一组 1–3 位、不以 0 开头，各组之间用同一种隔开：逗号或空格），
+ * 要么不分组；小数最多两位。第 1 组是整个数字部分，第 2 组是隔开的符号，第 3 组是小数。
+ */
+const AMOUNT_TEXT = /^¥?\s*([1-9]\d{0,2}([,\s])\d{3}(?:\2\d{3})*|\d+)(\.\d{1,2})?$/;
+
+/**
+ * 金额填得不对时跟在提示后面的规则。习惯用逗号当小数点的人敲「114,66」会被拒，
+ * 只看到「不对」会摸不着头脑，所以把小数点用「.」说在明处。
+ */
+export const AMOUNT_RULE = '要大于 0、最多两位小数，小数点用「.」（逗号只用来每三位隔开，如 12,909.49）';
+
+/**
+ * 金额输入：银行回单上的金额带千分位（12,909.49），复制过来也认；全角数字、开头的 ¥、空格一并容忍。
+ * 逗号和空格只认千分位（每组 3 位，同一个数里用同一种隔开）。「114,66」这种把逗号当小数点的写法，如果也直接去掉逗号，
+ * 就成了 11466 元，差了 100 倍，所以不认，让用户自己改成 114.66。
  * 必须是大于 0 的金额（元，最多两位小数），超出可记录的最大金额也不行；不合格返回 null。
  */
 export function parseAmountInput(text: string): number | null {
+  const match = AMOUNT_TEXT.exec(text.normalize('NFKC').trim());
+  if (match === null) return null;
   try {
-    const fen = parseFen(text.normalize('NFKC').replace(/[\s,¥]/g, ''));
+    const fen = parseFen(`${match[1]!.replace(/[,\s]/g, '')}${match[3] ?? ''}`);
     return fen > 0 ? fen : null;
   } catch {
     return null;
@@ -42,6 +58,35 @@ export function parsePeriodInput(text: string): string | null | 'invalid' {
 /** 各行金额之和（填错的行按 0 算），编辑框里「合计」那一行用。 */
 export function sumLinesFen(rows: readonly LineDraft[]): number {
   return rows.reduce((sum, row) => sum + (parseAmountInput(row.amount) ?? 0), 0);
+}
+
+/** 编辑框里显示的金额。超出可记录的最大金额时 formatFen 会抛错，页面不能因此白屏，改成提示。 */
+export function showFen(fen: number): string {
+  try {
+    return formatFen(fen);
+  } catch {
+    return '金额过大';
+  }
+}
+
+/**
+ * 「合回一项」时单项的金额 = 各项金额之和。空着的行不算；填了但认不出的行不能悄悄当成 0
+ * （合回去的金额就少了一截），要让用户先改对；合计超出可记录的最大金额也不行。
+ */
+export function mergedAmount(rows: readonly LineDraft[]): { fen: number } | { error: string } {
+  let total = 0;
+  for (const [index, row] of rows.entries()) {
+    if (row.amount.trim() === '') continue;
+    const fen = parseAmountInput(row.amount);
+    if (fen === null) return { error: `第 ${index + 1} 项的金额不对，请先改好再合回一项` };
+    total += fen;
+  }
+  try {
+    formatFen(total);
+  } catch {
+    return { error: '合计金额过大，请检查' };
+  }
+  return { fen: total };
 }
 
 /** 凭证上已有的各项变成编辑框里的行（id 从 0 起）。 */
@@ -68,7 +113,7 @@ export function buildLines(rows: readonly LineDraft[]): { lines: ReceiptLine[] }
     const number = index + 1;
     if (row.category === '') return { error: `第 ${number} 项请选择分类` };
     const fen = parseAmountInput(row.amount);
-    if (fen === null) return { error: `第 ${number} 项请输入大于 0 的金额` };
+    if (fen === null) return { error: `第 ${number} 项的金额不对：${AMOUNT_RULE}` };
     const period = parsePeriodInput(row.period);
     if (period === 'invalid') return { error: `第 ${number} 项的费用月份请写成 2026-07 这样` };
     const key = `${row.category}|${period ?? ''}`;

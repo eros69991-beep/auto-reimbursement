@@ -96,7 +96,8 @@ function useSlowFlag(waiting: boolean, resetKey: string): boolean {
 }
 
 function imageFailureText(reason: string, say: Say): string {
-  const detail = reason === '' || reason === '加载失败' ? '' : `：${reason.replace(/[。.]$/, '')}`;
+  // 原因是后台写的话（店内口径，如「凭证不存在」），公账区显示前也要换词
+  const detail = reason === '' || reason === '加载失败' ? '' : `：${say(reason.replace(/[。.]$/, ''))}`;
   return `${say('凭证图片加载失败')}${detail}。`;
 }
 
@@ -344,13 +345,14 @@ export function ReconcileWorkspace({ batch, previewUrl }: { batch: Batch; previe
         netFen: current.netFen,
         ledger,
       })
-      // 一张通知单占了好几行：说明里写它的合计，再列出每一项（分类、月份、金额），和 PDF 附件页页眉一致
-      : linesCaption(
+      // 一张通知单占了好几行：说明里写它的合计，再列出每一项（分类、月份、金额），和 PDF 附件页页眉一致；
+      // 契约里写的是「本张凭证」，页面上公账区叫回单，由 say 换（PDF 页眉里仍是「凭证」，会计上的通称）
+      : say(linesCaption(
         current.sheetNumber,
         current.item,
         current.rows.map((row) => ({ group: row.group.group, position: row.receipt.position, count: row.group.receipts.length, fen: row.receipt.netFen })),
         ledger,
-      );
+      ));
 
   // 图片区：失败 / 加载中 / 图片本身。内联和全屏共用，同一时刻只有一处在画
   function imageArea(): React.JSX.Element {

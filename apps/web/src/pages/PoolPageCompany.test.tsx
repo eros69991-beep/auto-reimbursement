@@ -80,7 +80,7 @@ describe('PoolPage in the company ledger', () => {
     expect(screen.getByRole('checkbox', { name: '全选可付款' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '生成付款单' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '生成报销单' })).not.toBeInTheDocument();
-    expect(screen.queryByText(/报销/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/报销|凭证/)).not.toBeInTheDocument();
   });
 
   it('shows a one-item receipt by category and a notice by its items and payee', async () => {
@@ -262,5 +262,177 @@ describe('PoolPage in the company ledger', () => {
     render(<PoolPage ledger="company" onBatch={vi.fn()} />);
 
     expect(await screen.findByRole('alert')).toHaveTextContent('获取付款池失败');
+  });
+});
+
+// 后台的报错是写给店内的（凭证、报销……），公账页面显示前要换成回单、付款的说法
+describe('PoolPage in the company ledger: what the server says is shown in company words', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockedApi.receipts.mockImplementation(async (view: string) => (view === 'pool' ? [companyReceipt({ id: 'meat', status: 'ready' })] : []));
+    mockedApi.totals.mockResolvedValue(companyTotals);
+    mockedApi.settings.mockResolvedValue(companySettings);
+  });
+
+  async function shown(): Promise<HTMLElement> {
+    const alert = await screen.findByRole('alert');
+    expect(alert).not.toHaveTextContent(/凭证|报销/);
+    return alert;
+  }
+
+  it('when the pool cannot be loaded', async () => {
+    mockedApi.receipts.mockRejectedValue(new Error('凭证不存在'));
+    render(<PoolPage ledger="company" onBatch={vi.fn()} />);
+
+    expect(await shown()).toHaveTextContent('回单不存在');
+  });
+
+  it('when the totals cannot be refreshed after a receipt was moved out', async () => {
+    mockedApi.setPoolMembership.mockResolvedValue({});
+    mockedApi.totals.mockResolvedValueOnce(companyTotals).mockRejectedValueOnce(new Error('报销批次不存在'));
+    render(<PoolPage ledger="company" onBatch={vi.fn()} />);
+    await screen.findByText('可付款笔数：2');
+
+    fireEvent.click(screen.getByRole('button', { name: '移出本次付款池' }));
+
+    expect(await shown()).toHaveTextContent('付款批次不存在');
+  });
+
+  it('when a receipt cannot be moved out of the pool', async () => {
+    mockedApi.setPoolMembership.mockRejectedValue(new Error('凭证已进入报销单，不能移出'));
+    render(<PoolPage ledger="company" onBatch={vi.fn()} />);
+    await screen.findByText('可付款笔数：2');
+
+    fireEvent.click(screen.getByRole('button', { name: '移出本次付款池' }));
+
+    expect(await shown()).toHaveTextContent('回单已进入付款单，不能移出');
+  });
+
+  it('when the bin cannot be loaded', async () => {
+    mockedApi.receipts.mockImplementation(async (view: string) => {
+      if (view === 'pool') return [companyReceipt({ id: 'meat', status: 'ready' })];
+      throw new Error('凭证不存在');
+    });
+    render(<PoolPage ledger="company" onBatch={vi.fn()} />);
+    await screen.findByText('可付款笔数：2');
+
+    fireEvent.click(screen.getByRole('button', { name: '查看已移出 / 回收站' }));
+
+    expect(await shown()).toHaveTextContent('回单不存在');
+  });
+
+  it('when a receipt cannot be restored from the bin', async () => {
+    const out = companyReceipt({ id: 'out', status: 'ready', category: '水费', paidFen: 4886 });
+    mockedApi.receipts.mockImplementation(async (view: string) => (view === 'excluded' ? [out] : []));
+    mockedApi.setPoolMembership.mockRejectedValue(new Error('凭证不存在'));
+    render(<PoolPage ledger="company" onBatch={vi.fn()} />);
+    await screen.findByText(/本期付款池还是空的/);
+    fireEvent.click(screen.getByRole('button', { name: '查看已移出 / 回收站' }));
+
+    fireEvent.click(await screen.findByRole('button', { name: '恢复回单' }));
+
+    expect(await shown()).toHaveTextContent('回单不存在');
+  });
+
+  it('when the pool cannot be reloaded after a restore', async () => {
+    const out = companyReceipt({ id: 'out', status: 'ready', category: '水费', paidFen: 4886 });
+    let poolCalls = 0;
+    mockedApi.receipts.mockImplementation(async (view: string) => {
+      if (view === 'excluded') return [out];
+      if (view !== 'pool') return [];
+      poolCalls += 1;
+      if (poolCalls > 1) throw new Error('报销批次不存在');
+      return [];
+    });
+    mockedApi.setPoolMembership.mockResolvedValue({});
+    render(<PoolPage ledger="company" onBatch={vi.fn()} />);
+    await screen.findByText(/本期付款池还是空的/);
+    fireEvent.click(screen.getByRole('button', { name: '查看已移出 / 回收站' }));
+
+    fireEvent.click(await screen.findByRole('button', { name: '恢复回单' }));
+
+    expect(await shown()).toHaveTextContent('付款批次不存在');
+  });
+
+  it('when the payment form cannot be generated', async () => {
+    mockedApi.createBatch.mockRejectedValue(new Error('凭证当前状态不可生成'));
+    render(<PoolPage ledger="company" onBatch={vi.fn()} />);
+    await screen.findByText('可付款笔数：2');
+    fireEvent.click(screen.getByRole('checkbox', { name: '选择 肉款 · 12909.49' }));
+
+    fireEvent.click(screen.getByRole('button', { name: '生成付款单' }));
+
+    expect(await shown()).toHaveTextContent('回单当前状态不可生成');
+  });
+
+  it('when screenshots cannot be merged', async () => {
+    mockedApi.receipts.mockImplementation(async (view: string) => (view === 'pool'
+      ? [companyReceipt({ id: 'p', status: 'ready', paidFen: 1000 }), companyReceipt({ id: 'q', status: 'ready', paidFen: 2000 })]
+      : []));
+    mockedApi.mergeReceipts.mockRejectedValue(new Error('有凭证还在识别中，请等识别完成后再合并'));
+    render(<PoolPage ledger="company" onBatch={vi.fn()} />);
+    const boxes = await screen.findAllByRole('checkbox', { name: /^选择 / });
+    fireEvent.click(boxes[0]!);
+    fireEvent.click(boxes[1]!);
+
+    fireEvent.click(screen.getByRole('button', { name: '合并为一单' }));
+
+    expect(await shown()).toHaveTextContent('有回单还在识别中，请等识别完成后再合并');
+  });
+
+  it('when the progress of a merged receipt cannot be asked for', async () => {
+    mockedApi.receipts.mockImplementation(async (view: string) => (view === 'pool'
+      ? [companyReceipt({ id: 'p', status: 'ready', paidFen: 1000 }), companyReceipt({ id: 'q', status: 'ready', paidFen: 2000 })]
+      : []));
+    mockedApi.mergeReceipts.mockResolvedValue(companyReceipt({ id: 'm', status: 'recognizing', mergedFrom: ['p', 'q'] }));
+    mockedApi.progress.mockRejectedValue(new Error('凭证不存在'));
+    render(<PoolPage ledger="company" onBatch={vi.fn()} />);
+    const boxes = await screen.findAllByRole('checkbox', { name: /^选择 / });
+    fireEvent.click(boxes[0]!);
+    fireEvent.click(boxes[1]!);
+
+    fireEvent.click(screen.getByRole('button', { name: '合并为一单' }));
+
+    expect(await shown()).toHaveTextContent('回单不存在');
+  });
+
+  it('when the pool cannot be reloaded after the merged receipt was recognised', async () => {
+    let poolCalls = 0;
+    mockedApi.receipts.mockImplementation(async (view: string) => {
+      if (view !== 'pool') return [];
+      poolCalls += 1;
+      if (poolCalls > 1) throw new Error('报销批次不存在');
+      return [companyReceipt({ id: 'p', status: 'ready', paidFen: 1000 }), companyReceipt({ id: 'q', status: 'ready', paidFen: 2000 })];
+    });
+    mockedApi.mergeReceipts.mockResolvedValue(companyReceipt({ id: 'm', status: 'recognizing', mergedFrom: ['p', 'q'] }));
+    mockedApi.progress.mockResolvedValue({ total: 1, recognizing: 0, ready: 1, pending: 0 });
+    render(<PoolPage ledger="company" onBatch={vi.fn()} />);
+    const boxes = await screen.findAllByRole('checkbox', { name: /^选择 / });
+    fireEvent.click(boxes[0]!);
+    fireEvent.click(boxes[1]!);
+
+    fireEvent.click(screen.getByRole('button', { name: '合并为一单' }));
+
+    expect(await shown()).toHaveTextContent('付款批次不存在');
+  });
+
+  it('when a merged receipt cannot be taken apart', async () => {
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    mockedApi.receipts.mockImplementation(async (view: string) => (view === 'pool' ? [companyReceipt({ id: 'm', status: 'ready', mergedFrom: ['p', 'q'] })] : []));
+    mockedApi.splitReceipt.mockRejectedValue(new Error('这张合并凭证已登记过退款，不能拆开'));
+    render(<PoolPage ledger="company" onBatch={vi.fn()} />);
+    await screen.findByText('由 2 张截图合并（左右拼成一张图）');
+
+    fireEvent.click(screen.getByRole('button', { name: '拆开' }));
+
+    expect(await shown()).toHaveTextContent('这张合并回单已登记过退款，不能拆开');
+    confirm.mockRestore();
+  });
+
+  it('keeps the store words of a server message for the store', async () => {
+    mockedApi.receipts.mockRejectedValue(new Error('凭证不存在'));
+    render(<PoolPage onBatch={vi.fn()} />);
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('凭证不存在');
   });
 });

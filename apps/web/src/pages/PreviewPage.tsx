@@ -79,7 +79,7 @@ export function PreviewPage({ batchId, onCancelled, ledger: routeLedger = 'store
       setSaved(snapshotOf(loaded));
     }, (reason: unknown) => {
       if (active) {
-        setError(reason instanceof Error ? reason.message : '加载预览失败');
+        setError(reason instanceof Error ? say(reason.message) : '加载预览失败');
       }
     });
     return () => {
@@ -127,7 +127,7 @@ export function PreviewPage({ batchId, onCancelled, ledger: routeLedger = 'store
     if (!(reason instanceof Error)) return fallback;
     const coded = reason as Error & { code?: unknown };
     const prefix = typeof coded.code === 'string' ? `${coded.code}：` : '';
-    return `${prefix}${friendlyError(reason, fallback)}`;
+    return `${prefix}${friendlyError(reason, fallback, say)}`;
   };
 
   async function save(options: FormOptions, notes: Record<string, string | null>): Promise<void> {
@@ -210,7 +210,7 @@ export function PreviewPage({ batchId, onCancelled, ledger: routeLedger = 'store
       setSaved(snapshotOf(exported));
       setError(null);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : '生成失败');
+      setError(reason instanceof Error ? say(reason.message) : '生成失败');
     } finally {
       setBusy(false);
     }
@@ -226,7 +226,7 @@ export function PreviewPage({ batchId, onCancelled, ledger: routeLedger = 'store
       onCancelled?.();
       window.location.hash = routeHash(ledger, 'pool');
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : '撤销失败');
+      setError(reason instanceof Error ? say(reason.message) : '撤销失败');
       setBusy(false);
     }
   }

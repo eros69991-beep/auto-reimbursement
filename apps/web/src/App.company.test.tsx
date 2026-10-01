@@ -1,11 +1,17 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Batch, Ledger } from '@auto-reimbursement/contracts';
 
 // 渲染真实 App 会请求后端，所以和 App.test.tsx 一样把 api 整个换掉
-const { batchApi, historyApi, cancelBatchApi } = vi.hoisted(() => ({ batchApi: vi.fn(), historyApi: vi.fn(), cancelBatchApi: vi.fn() }));
+const { batchApi, historyApi, cancelBatchApi, crash } = vi.hoisted(() => ({
+  batchApi: vi.fn(),
+  historyApi: vi.fn(),
+  cancelBatchApi: vi.fn(),
+  // 想让哪个替身页渲染时报错，就把它的名字放进来（测出错页用）
+  crash: { page: null as string | null },
+}));
 
 vi.mock('./api', () => ({
   UNAUTHORIZED_EVENT: 'api:unauthorized',
@@ -33,6 +39,7 @@ vi.mock('./components/PdfPreview', () => ({
 function stubPage(name: string) {
   return function Stub({ ledger, onBatch, onPreview }: { ledger?: Ledger; onBatch?: (id: string) => void; onPreview?: (id: string) => void }) {
     const [draft, setDraft] = useState('');
+    if (crash.page === name) throw new Error('页面渲染失败');
     const open = onBatch ?? onPreview;
     return (
       <main data-testid="page" data-page={name} data-ledger={ledger}>
@@ -97,6 +104,7 @@ describe('App with two ledgers', () => {
     cleanup();
     vi.clearAllMocks();
     vi.restoreAllMocks();
+    crash.page = null;
     window.location.hash = '';
   });
 
@@ -459,6 +467,214 @@ describe('App with two ledgers', () => {
       await arrivesAt(draftHash);
       expect(batchApi).not.toHaveBeenCalledWith(picked);
       expect(historyApi).toHaveBeenCalled();
+    });
+  });
+
+  // 找草稿的请求回来之前，用户可能已经换了区、或者去了别的页面：请求回来后不能再把人拉回预览页
+  describe('looking for the latest draft while the user moves on', () => {
+    function slowHistory(): { resolve: (value: unknown) => void } {
+      let resolve: (value: unknown) => void = () => undefined;
+      const pending = new Promise((done) => { resolve = done; });
+      historyApi.mockImplementation((ledger?: Ledger) => (
+        ledger === 'company' ? pending : Promise.resolve([{ month: '2026-09', batches: [storeDraft] }])
+      ));
+      return { resolve };
+    }
+
+    async function settle(): Promise<void> {
+      await act(async () => {
+        await new Promise((done) => setTimeout(done, 30));
+      });
+    }
+
+    it('does not pull the user back to the company preview after they switched to the store', async () => {
+      const slow = slowHistory();
+      window.location.hash = '#company/preview';
+      render(<App />);
+      expect(screen.getByText('正在查找进行中的付款单…')).toBeInTheDocument();
+
+      switchTo('店内报销');
+      await arrivesAt('#batches/store-draft/preview');
+      await screen.findByRole('heading', { name: '生成预览' });
+      await act(async () => { slow.resolve([{ month: '2026-09', batches: [companyDraft] }]); });
+      await settle();
+
+      expect(window.location.hash).toBe('#batches/store-draft/preview');
+      expect(batchApi).not.toHaveBeenCalledWith('company-draft');
+      expect(screen.getByRole('banner')).toHaveAttribute('data-ledger', 'store');
+    });
+
+    it('does not pull the user to the preview after they went to another page of the same ledger', async () => {
+      const slow = slowHistory();
+      window.location.hash = '#company/preview';
+      render(<App />);
+
+      fireEvent.click(within(screen.getByRole('navigation', { name: '主导航' })).getByRole('button', { name: '历史付款单' }));
+      await arrivesAt('#company/history');
+      await waitFor(() => expect(page()).toHaveAttribute('data-page', 'history'));
+      await act(async () => { slow.resolve([{ month: '2026-09', batches: [companyDraft] }]); });
+      await settle();
+
+      expect(window.location.hash).toBe('#company/history');
+      expect(page()).toHaveAttribute('data-page', 'history');
+      expect(batchApi).not.toHaveBeenCalledWith('company-draft');
+    });
+
+    it('does not remember the draft for the ledger the user already left either', async () => {
+      const slow = slowHistory();
+      window.location.hash = '#company/preview';
+      render(<App />);
+      switchTo('店内报销');
+      await arrivesAt('#batches/store-draft/preview');
+      await act(async () => { slow.resolve([{ month: '2026-09', batches: [companyDraft] }]); });
+      await settle();
+      batchApi.mockClear();
+
+      // 回到公账区的预览：没有记住的批次，自己重新找草稿，而不是直接打开刚才那个迟到的结果
+      historyApi.mockImplementation(async (ledger?: Ledger) => [{ month: '2026-09', batches: [ledger === 'company' ? batch('company-newer', 'company') : storeDraft] }]);
+      switchTo('公账付款');
+
+      await arrivesAt('#company/batches/company-newer/preview');
+      expect(batchApi).not.toHaveBeenCalledWith('company-draft');
+    });
+
+    it('still opens the draft when the user stays on the preview page', async () => {
+      const slow = slowHistory();
+      window.location.hash = '#company/preview';
+      render(<App />);
+
+      await act(async () => { slow.resolve([{ month: '2026-09', batches: [companyDraft] }]); });
+
+      await arrivesAt('#company/batches/company-draft/preview');
+    });
+
+    it('lets only the visit that asked decide: an old answer is ignored after the user left the preview page and came back to it', async () => {
+      const answers: Array<(value: unknown) => void> = [];
+      historyApi.mockImplementation((ledger?: Ledger) => (
+        ledger === 'company'
+          ? new Promise((done) => { answers.push(done); })
+          : Promise.resolve([{ month: '2026-09', batches: [storeDraft] }])
+      ));
+      window.location.hash = '#company/preview';
+      render(<App />);
+      const nav = (): ReturnType<typeof within> => within(screen.getByRole('navigation', { name: '主导航' }));
+
+      fireEvent.click(nav().getByRole('button', { name: '历史付款单' }));
+      await waitFor(() => expect(page()).toHaveAttribute('data-page', 'history'));
+      fireEvent.click(nav().getByRole('button', { name: '付款单预览' }));
+      // 回到预览页后重新问了一次；第一次的答复这时才到，不能抢着决定打开哪个草稿
+      await waitFor(() => expect(answers).toHaveLength(2));
+      await act(async () => { answers[0]!([{ month: '2026-09', batches: [companyDraft] }]); });
+      await settle();
+
+      expect(window.location.hash).toBe('#company/preview');
+      expect(batchApi).not.toHaveBeenCalledWith('company-draft');
+      await act(async () => { answers[1]!([{ month: '2026-09', batches: [batch('company-newer', 'company')] }]); });
+      await arrivesAt('#company/batches/company-newer/preview');
+    });
+
+    // 点按钮时地址当场就变了，页面要等下一个任务才跟着换：请求恰好在这个空档回来，组件还没卸载。
+    // 下面只放行 promise 的回调、不放行定时器，空档就一直开着
+    async function answerInTheGap(slow: { resolve: (value: unknown) => void }): Promise<void> {
+      slow.resolve([{ month: '2026-09', batches: [companyDraft] }]);
+      for (let turn = 0; turn < 10; turn += 1) await Promise.resolve();
+    }
+
+    it('does not pull the user back either when the answer comes in the instant after pressing the store button', async () => {
+      const slow = slowHistory();
+      window.location.hash = '#company/preview';
+      render(<App />);
+
+      switchTo('店内报销');
+      expect(window.location.hash).toBe('#preview');
+      await answerInTheGap(slow);
+
+      expect(window.location.hash).toBe('#preview');
+      expect(batchApi).not.toHaveBeenCalledWith('company-draft');
+      await arrivesAt('#batches/store-draft/preview');
+      expect(screen.getByRole('banner')).toHaveAttribute('data-ledger', 'store');
+    });
+
+    it('does not pull the user back either when the answer comes in the instant after pressing another page of the same ledger', async () => {
+      const slow = slowHistory();
+      window.location.hash = '#company/preview';
+      render(<App />);
+
+      fireEvent.click(within(screen.getByRole('navigation', { name: '主导航' })).getByRole('button', { name: '历史付款单' }));
+      expect(window.location.hash).toBe('#company/history');
+      await answerInTheGap(slow);
+
+      expect(window.location.hash).toBe('#company/history');
+      await waitFor(() => expect(page()).toHaveAttribute('data-page', 'history'));
+      expect(batchApi).not.toHaveBeenCalledWith('company-draft');
+    });
+
+    it('does not open a draft either when the address was typed to a batch of its own in that instant', async () => {
+      const slow = slowHistory();
+      window.location.hash = '#company/preview';
+      render(<App />);
+
+      window.location.hash = '#company/batches/company-typed/preview';
+      await answerInTheGap(slow);
+
+      expect(window.location.hash).toBe('#company/batches/company-typed/preview');
+      await waitFor(() => expect(batchApi).toHaveBeenCalledWith('company-typed'));
+      expect(batchApi).not.toHaveBeenCalledWith('company-draft');
+    });
+  });
+
+  // 页面渲染出错时只显示出错页；它的「返回」要回到当前这个区自己的第一页
+  describe('when a page breaks', () => {
+    it.each([
+      { ledger: 'store', from: '#pool', name: '首页', to: '#home' },
+      { ledger: 'company', from: '#company/pool', name: '上传回单', to: '#company/upload' },
+    ])('the $ledger error page leads back to $to, in its own ledger', async ({ ledger, from, name, to }) => {
+      vi.spyOn(console, 'error').mockImplementation(() => undefined);
+      crash.page = 'pool';
+      window.location.hash = from;
+      render(<App />);
+
+      expect(screen.getByRole('alert')).toHaveTextContent(`页面渲染时发生错误，请返回${name}重试`);
+      // 出错的那一页还是会崩（脏数据没变）：点「返回」后出错页先留着，等地址真的换了才放手
+      fireEvent.click(screen.getByRole('button', { name: `返回${name}` }));
+      expect(screen.getByRole('alert')).toBeInTheDocument();
+
+      await arrivesAt(to);
+      await waitFor(() => expect(page()).toHaveAttribute('data-page', 'upload'));
+      expect(page()).toHaveAttribute('data-ledger', ledger);
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    });
+
+    it('lets the user leave a broken page with the navigation bar too, not only with the back button', async () => {
+      vi.spyOn(console, 'error').mockImplementation(() => undefined);
+      crash.page = 'pool';
+      window.location.hash = '#company/pool';
+      render(<App />);
+      expect(screen.getByRole('alert')).toBeInTheDocument();
+
+      fireEvent.click(within(screen.getByRole('navigation', { name: '主导航' })).getByRole('button', { name: '历史付款单' }));
+
+      await waitFor(() => expect(page()).toHaveAttribute('data-page', 'history'));
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    });
+
+    it('shows the error page again if the page the user moved to breaks too, and lets them move on once more', async () => {
+      vi.spyOn(console, 'error').mockImplementation(() => undefined);
+      crash.page = 'pool';
+      window.location.hash = '#company/pool';
+      render(<App />);
+
+      crash.page = 'history';
+      fireEvent.click(within(screen.getByRole('navigation', { name: '主导航' })).getByRole('button', { name: '历史付款单' }));
+      await arrivesAt('#company/history');
+      await waitFor(() => expect(screen.getByRole('alert')).toBeInTheDocument());
+      expect(screen.queryByTestId('page')).not.toBeInTheDocument();
+
+      crash.page = null;
+      fireEvent.click(within(screen.getByRole('navigation', { name: '主导航' })).getByRole('button', { name: '设置' }));
+
+      await waitFor(() => expect(page()).toHaveAttribute('data-page', 'settings'));
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     });
   });
 });
