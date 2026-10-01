@@ -223,23 +223,42 @@ describe('provider-neutral analysis validation', () => {
     });
     expect(partial).toMatchObject({ amount: null, incomplete: true, orderNo: 'WH20260903001' });
     expect(validateAnalysis({ ...valid, incomplete: false }).incomplete).toBe(false);
-    expect(validateAnalysis({ ...valid, orderNo: null }).orderNo).toBeNull();
-    // 模型对不适用的标记给 null：当作没给，不写进结果
-    expect('incomplete' in validateAnalysis({ ...valid, incomplete: null })).toBe(false);
+    // 模型对不适用的项给 null：当作没给，不写进结果
+    const nulls = validateAnalysis({ ...valid, incomplete: null, orderNo: null });
+    expect(nulls).toEqual(valid);
+    expect('incomplete' in nulls).toBe(false);
+    expect('orderNo' in nulls).toBe(false);
     // 标了不完整却给了金额：不当作失败，决策层会把它留给人确认
     expect(validateAnalysis({ ...valid, incomplete: true }).amount).toBe('36.33');
   });
 
-  it('rejects malformed incomplete flags and order numbers', () => {
-    for (const invalid of [
+  it('ignores unusable incomplete flags and order numbers instead of failing the recognition', () => {
+    // 这两项只是辅助判断：类型不对、空的或太长就当没给，识别结果的其余部分照常通过
+    for (const unusable of [
       { incomplete: 'yes' },
       { incomplete: 1 },
-      { orderNo: 123 },
+      { incomplete: {} },
+      { orderNo: '' },
+      { orderNo: '   ' },
       { orderNo: 'n'.repeat(101) },
+      { orderNo: 1.5 },
+      { orderNo: 0 },
+      { orderNo: 2 ** 60 },
+      { orderNo: ['A1'] },
+      { orderNo: false },
     ]) {
-      expect(() => validateAnalysis({ ...valid, ...invalid })).toThrow('INVALID_RESPONSE');
+      const result = validateAnalysis({ ...valid, ...unusable });
+      expect(result).toEqual(valid);
+      expect('incomplete' in result).toBe(false);
+      expect('orderNo' in result).toBe(false);
     }
+    // 订单号全是数字时模型可能给成数字：转成文字收下；前后的空白去掉
+    expect(validateAnalysis({ ...valid, orderNo: 20260903001 }).orderNo).toBe('20260903001');
+    expect(validateAnalysis({ ...valid, orderNo: '  WH001 ' }).orderNo).toBe('WH001');
     expect(validateAnalysis({ ...valid, orderNo: 'n'.repeat(100) }).orderNo).toHaveLength(100);
+    // 识别本身的字段仍然严格，多余的键也仍然不行
+    expect(() => validateAnalysis({ ...valid, incomplete: 'yes', ambiguous: 'no' })).toThrow('INVALID_RESPONSE');
+    expect(() => validateAnalysis({ ...valid, orderNo: 'A1', unknown: 1 })).toThrow('INVALID_RESPONSE');
   });
 
   it('requires strict objects at the root and confidence levels', () => {

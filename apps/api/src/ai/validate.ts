@@ -44,9 +44,9 @@ const analysisSchema = z
     ambiguous: z.boolean(),
     keywords: z.array(z.string().max(100)).max(20),
     evidence: z.string().max(2000),
-    // 以下两项是后加的，旧结果没有（可以不出现）；模型对不适用的项可能给 null
-    incomplete: z.boolean().nullable().optional(),
-    orderNo: z.string().max(100).nullable().optional(),
+    // 以下两项是后加的，旧结果没有（可以不出现）；进来之前 usableHints 已经把不能用的值去掉
+    incomplete: z.boolean().optional(),
+    orderNo: z.string().max(100).optional(),
   })
   .strict()
   .superRefine((analysis, context) => {
@@ -59,14 +59,34 @@ const analysisSchema = z
     }
   });
 
+/**
+ * incomplete 和 orderNo 只是辅助判断（要不要提示合并、要不要交给人确认），不是识别本身：
+ * 模型给了不能用的值（类型不对、空的、太长，或者对不适用的项给了 null）就当没给，
+ * 订单号全是数字时模型可能给成数字，转成文字收下。不能因为这两项让整张凭证识别失败。
+ */
+function usableHints(input: unknown): unknown {
+  if (typeof input !== 'object' || input === null || Array.isArray(input)) {
+    return input;
+  }
+  const { incomplete, orderNo, ...rest } = input as Record<string, unknown>;
+  const hints: { incomplete?: boolean; orderNo?: string } = {};
+  if (typeof incomplete === 'boolean') {
+    hints.incomplete = incomplete;
+  }
+  const text =
+    typeof orderNo === 'number' && Number.isSafeInteger(orderNo) && orderNo > 0
+      ? String(orderNo)
+      : orderNo;
+  if (typeof text === 'string' && text.trim() !== '' && text.trim().length <= 100) {
+    hints.orderNo = text.trim();
+  }
+  return { ...rest, ...hints };
+}
+
 export function validateAnalysis(input: unknown): Analysis {
-  const result = analysisSchema.safeParse(input);
+  const result = analysisSchema.safeParse(usableHints(input));
   if (!result.success) {
     throw new AiError('INVALID_RESPONSE', true);
   }
-  // incomplete 为 null 等同于没给：不把 null 写进识别结果
-  const { incomplete, ...analysis } = result.data;
-  return incomplete === null || incomplete === undefined
-    ? analysis
-    : { ...analysis, incomplete };
+  return result.data;
 }
