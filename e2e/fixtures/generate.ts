@@ -7,9 +7,14 @@ type Fixture = { id: string; file: string };
 
 const here = dirname(fileURLToPath(import.meta.url));
 const manifestPath = join(here, 'manifest.json');
+const companyManifestPath = join(here, 'company-manifest.json');
 const images = join(here, 'images');
 async function main(): Promise<void> {
-const fixtures = JSON.parse(await readFile(manifestPath, 'utf8')) as Fixture[];
+// 公账区的样本（回单、收费通知单）排在店内样本后面：店内每张图的编号（种子）不变，已有的图片不会因为加了公账样本而重画
+const fixtures = [
+  ...JSON.parse(await readFile(manifestPath, 'utf8')) as Fixture[],
+  ...JSON.parse(await readFile(companyManifestPath, 'utf8')) as Fixture[],
+];
 
 await mkdir(images, { recursive: true });
 for (const [index, fixture] of fixtures.entries()) {

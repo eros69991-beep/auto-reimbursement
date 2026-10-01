@@ -6,9 +6,9 @@ import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { parseFen, type Analysis, type Category, type Reason } from '@auto-reimbursement/contracts';
+import { parseFen, type Analysis, type Category, type Ledger, type Reason } from '@auto-reimbursement/contracts';
 import { createApp } from '../apps/api/src/app.ts';
-import { AiError, type ReceiptAnalyzer } from '../apps/api/src/ai/types.ts';
+import { AiError, type AnalyzeOptions, type ReceiptAnalyzer } from '../apps/api/src/ai/types.ts';
 import { LOCAL_CORS_ORIGINS, type Config } from '../apps/api/src/config.ts';
 import { openStore, type Store } from '../apps/api/src/db.ts';
 import { applyAnalysis } from '../apps/api/src/decision.ts';
@@ -24,6 +24,8 @@ type Expected = {
 export type Fixture = {
   id: string;
   file: string;
+  /** 样本属于哪个区；不写是店内。假识别只在对应的区里认得它：公账的图走了店内的识别（或反过来）就等于识别失败，和真实 AI 用错提示词一样。 */
+  ledger?: Ledger;
   run?: 'learning';
   expected: Expected;
   analysis: Analysis | null;
@@ -39,10 +41,11 @@ class FakeAnalyzer implements ReceiptAnalyzer {
     return this.attempts.get(id) ?? 0;
   }
 
-  async analyzeReceipt(image: { bytes: Buffer }): Promise<Analysis> {
+  async analyzeReceipt(image: { bytes: Buffer }, options?: AnalyzeOptions): Promise<Analysis> {
     const sha256 = createHash('sha256').update(image.bytes).digest('hex');
     const fixture = this.fixtures.get(sha256);
     if (fixture === undefined) throw new AiError('INVALID_RESPONSE', false);
+    if ((fixture.ledger ?? 'store') !== (options?.ledger ?? 'store')) throw new AiError('INVALID_RESPONSE', false);
     this.attempts.set(fixture.id, this.callsFor(fixture.id) + 1);
     if (fixture.failure === 'terminal') throw new AiError('AUTH', false);
     if (fixture.failure === 'transient' && this.callsFor(fixture.id) === 1) throw new AiError('UPSTREAM', true);
@@ -69,7 +72,10 @@ type FixtureRuntimeOptions = {
 export async function createFixtureRuntime(portOrOptions: number | FixtureRuntimeOptions = 0): Promise<FixtureRuntime> {
   const options = typeof portOrOptions === 'number' ? { port: portOrOptions } : portOrOptions;
   const fixtureDirectory = join(process.cwd(), 'e2e', 'fixtures');
-  const fixtureRows = JSON.parse(await readFile(join(fixtureDirectory, 'manifest.json'), 'utf8')) as Fixture[];
+  const fixtureRows = [
+    ...JSON.parse(await readFile(join(fixtureDirectory, 'manifest.json'), 'utf8')) as Fixture[],
+    ...JSON.parse(await readFile(join(fixtureDirectory, 'company-manifest.json'), 'utf8')) as Fixture[],
+  ];
   const fixtureMap = new Map<string, Fixture>();
   for (const fixture of fixtureRows) {
     const bytes = await readFile(join(fixtureDirectory, 'images', fixture.file));
