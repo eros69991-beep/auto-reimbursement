@@ -46,6 +46,10 @@ const ERROR_TABLE: Record<string, ErrorSpec> = {
   SPLIT_SOURCES_MISSING: { status: 409, message: '合并前的截图记录不完整，无法拆开' },
   SPLIT_HAS_REFUND: { status: 409, message: '这张合并凭证已登记过退款，不能拆开' },
   MERGED_RECEIPT: { status: 409, message: '这张截图已合并进另一张凭证，请在那张凭证上点「拆开」' },
+  MIXED_LEDGER: { status: 409, message: '店内报销和公账付款的凭证不能放在同一张单上' },
+  MERGE_MIXED_LEDGER: { status: 409, message: '店内报销和公账付款的凭证不能合并' },
+  LEDGER_DUPLICATE: { status: 409, message: '同一张图已经在另一个区里了，这张不能再放回来。要用这一张的话，请先把另一个区里的那张删掉' },
+  REFUND_NOT_SUPPORTED: { status: 409, message: '公账付款没有退款；金额有变化请直接修改金额' },
   // 400 专项文案
   FORM_TEXT_OVERFLOW: { status: 400, message: '报销单内容超出版式容量，请减少单批凭证数量或缩短填写内容' },
   FORM_AMOUNT_OVERFLOW: { status: 400, message: '报销单内容超出版式容量，请减少单批凭证数量或缩短填写内容' },

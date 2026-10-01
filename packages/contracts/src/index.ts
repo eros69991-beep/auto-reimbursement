@@ -11,7 +11,52 @@ export const CATEGORIES = [
   '员工餐',
 ] as const;
 
-export type Category = (typeof CATEGORIES)[number];
+/**
+ * 公账付款区的分类：公司账户付出的款（肉款、品牌管理费、租金、物业费、水电空调）。
+ * 和上面店内报销的分类互不相干，两个区各用各的；「其他公账支出」是兜底，装修款、广告费这类不在前五类里的也能记下来。
+ */
+export const COMPANY_CATEGORIES = [
+  '肉款',
+  '品牌管理费',
+  '店面租金',
+  '物业费',
+  '水电空调',
+  '其他公账支出',
+] as const;
+
+export type StoreCategory = (typeof CATEGORIES)[number];
+export type CompanyCategory = (typeof COMPANY_CATEGORIES)[number];
+export type Category = StoreCategory | CompanyCategory;
+
+/** 两个区的全部分类。规则、移动分类这类不分区的地方用它校验；要按区校验用 categoriesFor。 */
+export const ALL_CATEGORIES: readonly Category[] = [...CATEGORIES, ...COMPANY_CATEGORIES];
+
+/**
+ * 区域：店内报销（store）和公账付款（company）。两个区的凭证、报销池、待处理、历史、归档、规则互相隔离。
+ * 数据里的 ledger 字段缺省就是店内——老数据没有这个字段，当店内处理，不需要迁移。
+ */
+export type Ledger = 'store' | 'company';
+export const LEDGERS: readonly Ledger[] = ['store', 'company'];
+
+export function isLedger(value: unknown): value is Ledger {
+  return value === 'store' || value === 'company';
+}
+
+/** 一行数据属于哪个区：没有 ledger 字段（老数据）或值不认识都按店内。 */
+export function ledgerOf(row: { ledger?: Ledger } | null | undefined): Ledger {
+  return row?.ledger === 'company' ? 'company' : 'store';
+}
+
+/** 这个区能用的分类。 */
+export function categoriesFor(ledger: Ledger): readonly Category[] {
+  return ledger === 'company' ? COMPANY_CATEGORIES : CATEGORIES;
+}
+
+/** 一个分类属于哪个区。规则没有单独的区字段，靠它的分类判断。 */
+export function categoryLedger(category: Category): Ledger {
+  return (COMPANY_CATEGORIES as readonly string[]).includes(category) ? 'company' : 'store';
+}
+
 export type Status =
   | 'recognizing'
   | 'pending'
@@ -83,6 +128,8 @@ export interface ImageRef {
 export interface Receipt {
   /** Absent in older data means included once ready. */
   poolExcluded?: boolean;
+  /** 属于哪个区（店内报销 / 公账付款）。缺省（老数据）就是店内；创建后不再变。 */
+  ledger?: Ledger;
   id: string;
   original: ImageRef;
   refundImages: ImageRef[];
@@ -238,6 +285,8 @@ export interface FormSheet {
 export interface Batch {
   /** Retains the original snapshot/PDF for audit; never an active reimbursement. */
   cancelledAt?: string | null;
+  /** 属于哪个区。缺省（老数据、店内批次）就是店内；一个批次里的凭证都在同一个区。 */
+  ledger?: Ledger;
   id: string;
   month: string;
   createdAt: string;
@@ -277,12 +326,19 @@ export type Table = keyof Tables;
 export interface Totals {
   count: number;
   totalFen: number;
-  byCategory: Record<Category, number>;
+  /** 本区的分类各自的合计（只有本区的分类，另一个区的分类不出现） */
+  byCategory: Partial<Record<Category, number>>;
 }
 
 export interface UploadResult {
   accepted: Receipt[];
-  rejected: Array<{ index: number; code: string; duplicateId?: string }>;
+  rejected: Array<{
+    index: number;
+    code: string;
+    duplicateId?: string;
+    /** 完全一样的图已经在另一个区里时，说明它在哪个区（同区的重复不带这一项） */
+    duplicateLedger?: Ledger;
+  }>;
 }
 
 export interface Progress {

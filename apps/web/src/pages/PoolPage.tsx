@@ -214,7 +214,7 @@ export function PoolPage({ onBatch }: { onBatch: (id: string) => void }): React.
       {totals !== null && <section className="pool-totals" aria-label="报销池汇总">
         <p>可报销笔数：{totals.count}</p>
         <p>合计：{formatFen(totals.totalFen)}</p>
-        <ul>{CATEGORIES.map((category) => <li key={category}>{category}：{formatFen(totals.byCategory[category])}</li>)}</ul>
+        <ul>{CATEGORIES.map((category) => <li key={category}>{category}：{formatFen(totals.byCategory[category] ?? 0)}</li>)}</ul>
       </section>}
       <button type="button" onClick={() => void toggleBin()}>查看已移出 / 回收站</button>
       {eligibleIds.size > 0 && <label className="pool-select-all">

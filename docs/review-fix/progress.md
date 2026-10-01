@@ -492,3 +492,28 @@ P-20 统一错误表：
 - 云端用真 WebKit 复现的做法（只在这次手工做的，脚本没有放进仓库）：`apt-get install webkit2gtk-driver libwebkit2gtk-4.1-0 xvfb`，起 `Xvfb :99` 和 `WebKitWebDriver --port=4444`，用 WebDriver 新建会话（`browserName: MiniBrowser`，`webkitgtk:browserOptions.binary` 指向 `/usr/lib/x86_64-linux-gnu/webkit2gtk-4.1/MiniBrowser`、参数 `--automation`），打开用 `vite build` 构建的页面。因为 WebKitGTK 比当时的 Safari 新，要先在页面里删掉 `ReadableStream.prototype` 的 `Symbol.asyncIterator` 和 `values` 才像 Safari 26。
 - 真 Safari 里的其他不兼容只能靠用户在真机上试；修复推上去后请再用 iPhone 和 Mac 的 Safari 各看一次预览。万一还有别的报错，「技术细节」里现在有堆栈，截图发来就能定位。
 - Safari 27 起支持 for await，但这里的写法在所有版本都能用，不需要再改回去。
+
+## 公账付款区 Task 9 — 隔离地基（Claude，2026-10-01，基于 f489d1e；方案见 `company-ledger-plan.md`）
+
+做了什么：新增「公账付款」区的数据地基，后端按区域把店内报销和公账付款完全隔开。这一步只动契约和后端，没有改任何店内行为，前端只为类型检查通过改了一处（`PoolPage` 的 `byCategory` 取值加 `?? 0`）。
+
+**契约（`packages/contracts`）**
+- 新增 `COMPANY_CATEGORIES`（肉款、品牌管理费、店面租金、物业费、水电空调、其他公账支出），`StoreCategory`、`CompanyCategory`，`Category` 变成两者并集，`ALL_CATEGORIES`；`Ledger = 'store' | 'company'`、`isLedger`、`ledgerOf`（缺省或不认识都是店内）、`categoriesFor(ledger)`、`categoryLedger(category)`。
+- `Receipt.ledger?`、`Batch.ledger?`：店内的凭证和批次不写这个字段，存下来的 JSON 和以前一样，老数据不需要迁移，回滚到 f489d1e 也读得了。`Totals.byCategory` 改成 `Partial<Record<Category, number>>`；`UploadResult.rejected[]` 多一个可选的 `duplicateLedger`。
+
+**后端按区域隔离**（没带 `ledger` 参数的请求都等于店内；写了不认识的值返回 400 `INVALID_LEDGER`）
+- 上传 `POST /api/receipts/upload?ledger=company`（multer 不允许带表单字段，所以用查询参数）；凭证列表、汇总 `?ledger=`；历史、归档、取消归档、清理原图都只动本区；规则 `GET /api/rules?ledger=`、`POST /api/rules/reapply?ledger=`。
+- 分类校验按凭证所在的区：店内凭证只能选店内分类，公账凭证只能选公账分类（确认、修改）；移动分类、规则这类不分区的地方认两个区的全部分类。
+- 规则属于哪个区由它的分类决定，不加字段；`decide()` 只看本区的规则；学习到的公账规则 id 带 `company:` 前缀，同一个商户名在两个区是两条互不相干的规则。
+- 查重：完全一样的图，另一个区有「在用」的同一张也拒绝（拒绝信息带 `duplicateLedger`，说明在哪个区）；另一个区回收站里的同一张不算（传错区后可以删掉重传）；相似图判断只在本区比，公账区上传时不做相似图判断（银行回单模板一样，会误报），识别后仍按金额、日期、收款方、图相似二次判断（只在本区）。
+- 合并截图只能合并同一区（`MERGE_MIXED_LEDGER`），合并出来的凭证继承区域；一个批次只能装一个区的凭证（混了 409 `MIXED_LEDGER`），公账批次记 `ledger: 'company'`；公账不支持退款（409 `REFUND_NOT_SUPPORTED`）。
+- 新增拦截 `LEDGER_DUPLICATE`（409）：在这个区删除、又传到了另一个区的同一张图，不能再从回收站恢复回来；合并凭证拆开时也一样检查。免得同一张图在两个区都在用、入两次账。
+
+**测试**
+- 新增 `apps/api/test/company-ledger.test.ts`（33 例）：上传、列表、汇总各区互不出现；不认识的区 400；查重（跨区拒绝并说明在哪个区、删除后在对的区重传、同区回收站照旧、相似图只在店内判断且公账区不判断、两区都在用时指本区那张、识别后二次判断不跨区）；批次、历史、归档、取消归档、清理原图各区互不影响（含 HTTP 接口，另一区没做完的事不挡住这一区）；规则列表、固定规则、重新套用、识别时套用、学习规则 id 都按区；分类校验、退款、合并、拆开。
+- 故意改坏 39 处隔离逻辑（去掉过滤、去掉混区拦截、接口忽略区参数等）逐个验证：第一轮 34 处里 29 处被抓到，没抓到的 5 处补了测试；又为新拦截、清理和取消归档接口加了 5 处；最后 39 处全部都会被新测试抓到。
+- 现有测试原样通过：contracts 51、api 376 + 新增 33 = 409、web 193；`pnpm typecheck` 通过（api 和 web）。
+
+**留意**
+- 这一步只是地基：公账区还没有自己的 AI 提示词和校验（Task 10）、通知单多项明细（Task 11）、付款单版式（Task 12）、前端页面（Task 13）。
+- 同一张图要从店内挪到公账区，办法是在传错的区删除、再传到对的区；没有「移到另一个区」按钮（见方案「以后」）。

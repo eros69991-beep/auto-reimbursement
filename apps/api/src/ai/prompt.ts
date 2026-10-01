@@ -1,10 +1,10 @@
-import { CATEGORIES, type Category } from '@auto-reimbursement/contracts';
+import { CATEGORIES, type StoreCategory } from '@auto-reimbursement/contracts';
 
 /**
  * 每个分类一句业务说明（门店的记账习惯）。只给分类名时 AI 分不清「百慕达食材」和「食材」，
  * 试点里武汉仓的订单一直被归成食材。以后多店时可挪进设置、按门店配置。
  */
-export const CATEGORY_HINTS: Record<Category, string> = {
+export const CATEGORY_HINTS: Record<StoreCategory, string> = {
   百慕达食材:
     '在百慕达订货小程序下的订单，截图常见橙色「订单列表」页面和「武汉仓」字样；不要把这类订单归为「食材」。整单以酒水饮料为主时归「酒水」',
   食材: '菜市场、超市、生鲜平台等零散采购的蔬菜水果、米面粮油、调料、干货、蛋奶等（百慕达小程序的订单除外，肉类单独归类）',

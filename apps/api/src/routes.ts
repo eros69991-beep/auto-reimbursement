@@ -6,9 +6,11 @@ import { extname } from 'node:path';
 import { Router } from 'express';
 import multer from 'multer';
 import {
-  CATEGORIES,
+  ALL_CATEGORIES,
+  isLedger,
   type Category,
   type FormOptions,
+  type Ledger,
   type Note,
   type Rule,
   type Settings,
@@ -103,17 +105,19 @@ export function createRouter(
     response.json(getApiStatus(config));
   });
 
-  router.get('/history', (_request, response) => {
-    response.json(history(store));
+  // 历史、归档、清理、凭证列表、汇总、规则都按「区」分开：?ledger=company 是公账付款，不带就是店内报销
+  router.get('/history', (request, response, next) => {
+    try { response.json(history(store, ledgerFromQuery(request.query.ledger))); }
+    catch (error) { next(maintenanceHttpError(error)); }
   });
 
   router.post('/archive/:month', (request, response, next) => {
-    try { response.json(archiveMonth(store, request.params.month, new Date())); }
+    try { response.json(archiveMonth(store, request.params.month, new Date(), ledgerFromQuery(request.query.ledger))); }
     catch (error) { next(maintenanceHttpError(error)); }
   });
 
   router.post('/unarchive/:month', (request, response, next) => {
-    try { response.json(unarchiveMonth(store, request.params.month)); }
+    try { response.json(unarchiveMonth(store, request.params.month, ledgerFromQuery(request.query.ledger))); }
     catch (error) { next(maintenanceHttpError(error)); }
   });
 
@@ -121,7 +125,7 @@ export function createRouter(
     try {
       const confirmation = request.body?.confirmation;
       if (typeof confirmation !== 'string') throw new Error('INVALID_CLEANUP_CONFIRMATION');
-      response.json(await cleanOriginals(store, config, request.params.month, confirmation));
+      response.json(await cleanOriginals(store, config, request.params.month, confirmation, ledgerFromQuery(request.query.ledger)));
     } catch (error) { next(maintenanceHttpError(error)); }
   });
 
@@ -231,11 +235,13 @@ export function createRouter(
       next(new HttpError(400, 'INVALID_RECEIPT_VIEW', '请求参数无效'));
       return;
     }
-    response.json(listReceipts(store, request.query.view));
+    try { response.json(listReceipts(store, request.query.view, ledgerFromQuery(request.query.ledger))); }
+    catch (error) { next(error); }
   });
 
-  router.get('/pool/totals', (_request, response) => {
-    response.json(poolTotals(store.list('receipts')));
+  router.get('/pool/totals', (request, response, next) => {
+    try { response.json(poolTotals(store.list('receipts'), ledgerFromQuery(request.query.ledger))); }
+    catch (error) { next(error); }
   });
 
   router.delete('/receipts/:id', (request, response, next) => {
@@ -441,6 +447,8 @@ export function createRouter(
     async (request, response, next) => {
       try {
         const files = (request.files as Express.Multer.File[] | undefined) ?? [];
+        // 上传请求不允许带表单字段（multer fields: 0），区域用查询参数传：/receipts/upload?ledger=company
+        const ledger = ledgerFromQuery(request.query.ledger);
         if (files.length === 0) {
           response.status(400).json({
             code: 'EMPTY_UPLOAD',
@@ -457,6 +465,7 @@ export function createRouter(
             bytes: file.buffer,
           })),
           new Date(),
+          ledger,
         );
         queue?.enqueue(result.accepted.map((receipt) => receipt.id));
         response.status(201).json(result);
@@ -633,14 +642,21 @@ export function createRouter(
     },
   );
 
-  router.get('/rules', (_request, response) => {
-    response.json(listRules(store));
+  // 不带 ledger 返回全部规则；带了只返回那个区的（规则属于哪个区由它的分类决定）
+  router.get('/rules', (request, response, next) => {
+    try {
+      const ledger = request.query.ledger === undefined ? undefined : ledgerFromQuery(request.query.ledger);
+      response.json(listRules(store, ledger));
+    } catch (error) {
+      next(correctionHttpError(error));
+    }
   });
 
-  // 规则改动后，对仍保持识别原样的待处理凭证重新套用规则（不调用 AI）
-  router.post('/rules/reapply', (_request, response, next) => {
+  // 规则改动后，对仍保持识别原样的待处理凭证重新套用规则（不调用 AI）；带 ledger 就只处理那个区的
+  router.post('/rules/reapply', (request, response, next) => {
     try {
-      response.json({ affected: reapplyRules(store) });
+      const ledger = request.query.ledger === undefined ? undefined : ledgerFromQuery(request.query.ledger);
+      response.json({ affected: reapplyRules(store, ledger) });
     } catch (error) {
       next(correctionHttpError(error));
     }
@@ -694,6 +710,13 @@ export function createRouter(
   });
 
   return router;
+}
+
+/** 请求里的区域：不带就是店内报销；只认 store / company，别的值返回 400。 */
+function ledgerFromQuery(value: unknown): Ledger {
+  if (value === undefined) return 'store';
+  if (isLedger(value)) return value;
+  throw new HttpError(400, 'INVALID_LEDGER', '请求参数无效');
 }
 
 function ruleFromRequest(id: string, body: unknown): Rule {
@@ -808,7 +831,7 @@ function batchMoveRequest(body: unknown): {
   const value = body as Record<string, unknown>;
   if (
     typeof value.category !== 'string' ||
-    !CATEGORIES.includes(value.category as Category) ||
+    !ALL_CATEGORIES.includes(value.category as Category) ||
     (value.direction !== -1 && value.direction !== 1)
   ) {
     throw new Error('INVALID_MOVE');

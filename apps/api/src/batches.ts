@@ -1,14 +1,16 @@
 import { randomUUID } from 'node:crypto';
 
 import {
-  CATEGORIES,
+  categoriesFor,
   formatFen,
+  ledgerOf,
   netFen,
   type Batch,
   type Category,
   type FormGroup,
   type FormOptions,
   type FormSheet,
+  type Ledger,
   type Receipt,
   type Totals,
 } from '@auto-reimbursement/contracts';
@@ -26,19 +28,20 @@ import { createFormDocument, formMetrics } from './render/form.js';
 import { isEligible } from './refunds.js';
 import { getSettings, validateNote } from './settings.js';
 
-export function poolTotals(receipts: Receipt[]): Totals {
-  const byCategory = Object.fromEntries(
-    CATEGORIES.map((category) => [category, 0]),
-  ) as Totals['byCategory'];
+/** 报销池（付款池）汇总：只算 ledger 这个区里可生成单据的凭证，分类也只列这个区的。 */
+export function poolTotals(receipts: Receipt[], ledger: Ledger = 'store'): Totals {
+  const byCategory: Record<string, number> = Object.fromEntries(
+    categoriesFor(ledger).map((category) => [category, 0]),
+  );
   let totalFen = 0;
   let count = 0;
   for (const receipt of receipts) {
-    if (!isEligible(receipt)) {
+    if (ledgerOf(receipt) !== ledger || !isEligible(receipt)) {
       continue;
     }
     const value = netFen(receipt);
     totalFen = addFen(totalFen, value);
-    byCategory[receipt.category!] = addFen(byCategory[receipt.category!], value);
+    byCategory[receipt.category!] = addFen(byCategory[receipt.category!] ?? 0, value);
     count += 1;
   }
   return { count, totalFen, byCategory };
@@ -61,6 +64,12 @@ export function createBatch(
     const selected = (rows as Receipt[]).sort(
       (left, right) => left.uploadOrder - right.uploadOrder,
     );
+    // 一张单据只能装同一个区的凭证：店内报销和公账付款不会混在一张单上
+    const ledgers = new Set(selected.map((receipt) => ledgerOf(receipt)));
+    if (ledgers.size !== 1) {
+      throw new Error('MIXED_LEDGER');
+    }
+    const [ledger] = [...ledgers] as [Ledger];
     const items = selected.map((receipt) => ({
       receiptId: receipt.id,
       uploadOrder: receipt.uploadOrder,
@@ -79,6 +88,8 @@ export function createBatch(
     const sheets = withPdfMetrics((metrics) => packGroups(groupItems(items), metrics));
     const batch: Batch = {
       id: randomUUID(),
+      // 店内批次不写这个字段，存下来的数据和以前完全一样
+      ...(ledger === 'company' ? { ledger } : {}),
       month: businessMonth(now),
       createdAt: now.toISOString(),
       totalFen,

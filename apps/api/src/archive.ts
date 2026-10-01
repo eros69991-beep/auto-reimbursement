@@ -1,6 +1,6 @@
 import { unlink } from 'node:fs/promises';
 
-import type { Batch, HistoryMonth, MaintenanceResult, Receipt } from '@auto-reimbursement/contracts';
+import { ledgerOf, type Batch, type HistoryMonth, type Ledger, type MaintenanceResult, type Receipt } from '@auto-reimbursement/contracts';
 
 import type { Config } from './config.js';
 import type { Store } from './db.js';
@@ -9,8 +9,9 @@ import { readSavedBatchPdf } from './render/pdf.js';
 
 type LinkedSet = { receipts: Receipt[]; batches: Batch[] };
 
-export function archiveMonth(store: Store, month: string, now: Date): MaintenanceResult {
-  const selected = linkedSet(store, month);
+// 归档、取消归档、清理原图都只动 ledger 这个区的凭证和批次，另一个区同月份的不受影响。
+export function archiveMonth(store: Store, month: string, now: Date, ledger: Ledger = 'store'): MaintenanceResult {
+  const selected = linkedSet(store, month, ledger);
   if (selected.receipts.some((receipt) => receipt.status === 'recognizing' || receipt.status === 'pending') ||
       selected.batches.some((batch) => batch.pdfPath === null)) {
     throw new Error('MONTH_HAS_UNFINISHED_WORK');
@@ -27,8 +28,8 @@ export function archiveMonth(store: Store, month: string, now: Date): Maintenanc
   return { affected: selected.receipts.length };
 }
 
-export function unarchiveMonth(store: Store, month: string): MaintenanceResult {
-  const selected = linkedSet(store, month);
+export function unarchiveMonth(store: Store, month: string, ledger: Ledger = 'store'): MaintenanceResult {
+  const selected = linkedSet(store, month, ledger);
   store.transact(() => {
     for (const receipt of selected.receipts) {
       if (receipt.status === 'archived') {
@@ -40,9 +41,9 @@ export function unarchiveMonth(store: Store, month: string): MaintenanceResult {
   return { affected: selected.receipts.length };
 }
 
-export async function cleanOriginals(store: Store, config: Config, month: string, confirmation: string): Promise<MaintenanceResult> {
+export async function cleanOriginals(store: Store, config: Config, month: string, confirmation: string, ledger: Ledger = 'store'): Promise<MaintenanceResult> {
   if (confirmation !== `DELETE ORIGINALS ${month}`) throw new Error('INVALID_CLEANUP_CONFIRMATION');
-  const selected = linkedSet(store, month);
+  const selected = linkedSet(store, month, ledger);
   if (selected.receipts.length === 0 || selected.receipts.some((receipt) => receipt.status !== 'archived' || receipt.batchId === null) ||
       selected.batches.some((batch) => batch.pdfPath === null)) throw new Error('CLEANUP_NOT_ALLOWED');
   try {
@@ -119,18 +120,19 @@ function cleanupFailure(affected: number, id: string): Error {
   return new Error(`CLEANUP_FAILED:${affected}:${/^[A-Za-z0-9_-]{1,100}$/.test(id) ? id : 'unknown'}`);
 }
 
-export function history(store: Store): HistoryMonth[] {
+export function history(store: Store, ledger: Ledger = 'store'): HistoryMonth[] {
   const grouped = new Map<string, Batch[]>();
   for (const batch of store.list('batches')) {
+    if (ledgerOf(batch) !== ledger) continue;
     const month = batch.month;
     grouped.set(month, [...(grouped.get(month) ?? []), batch]);
   }
   return [...grouped.entries()].sort(([a], [b]) => b.localeCompare(a)).map(([month, batches]) => ({ month, batches: batches.sort((a, b) => b.createdAt.localeCompare(a.createdAt)) }));
 }
 
-function linkedSet(store: Store, month: string): LinkedSet {
-  const receipts = store.list('receipts').filter((receipt) => receipt.deletedAt === null);
-  const batches = store.list('batches').filter((batch) => !batch.cancelledAt);
+function linkedSet(store: Store, month: string, ledger: Ledger): LinkedSet {
+  const receipts = store.list('receipts').filter((receipt) => receipt.deletedAt === null && ledgerOf(receipt) === ledger);
+  const batches = store.list('batches').filter((batch) => !batch.cancelledAt && ledgerOf(batch) === ledger);
   const receiptIds = new Set(receipts
     .filter((receipt) => receipt.month === month)
     .map((receipt) => receipt.id));

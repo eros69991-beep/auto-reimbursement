@@ -1,9 +1,12 @@
 import {
+  categoryLedger,
   isManualRule,
+  ledgerOf,
   MIN_MANUAL_RULE_KEY_LENGTH,
   parseFen,
   type Analysis,
   type Category,
+  type Ledger,
   type Reason,
   type Receipt,
   type Rule,
@@ -31,12 +34,15 @@ export type Decision = {
  * 分类决策。优先级：人工确认（不经过这里）> 固定规则 > AI。
  * - 固定规则（设置页手动添加）命中就直接定分类，只剩金额需要把关。
  * - 学习到的强规则只能放行或报冲突，不改写分类；冲突时把规则的分类作为建议附上，由人一键选择。
+ * 规则只看凭证所在的区（ledger）：店内的规则不会用到公账凭证上，反过来也一样。
  */
 export function decide(
   analysis: Analysis,
-  rules: Rule[],
+  allRules: Rule[],
   settings: Settings,
+  ledger: Ledger = 'store',
 ): Decision {
+  const rules = allRules.filter((rule) => categoryLedger(rule.category) === ledger);
   const manualMatches = rules.filter(
     (rule) => isManualRule(rule) && matchesManualRule(rule, analysis),
   );
@@ -162,7 +168,7 @@ export function applyAnalysis(
     }
 
     const recognizedFen = analysis.amount === null ? null : parseFen(analysis.amount);
-    const decision = decide(analysis, store.list('rules'), getSettings(store));
+    const decision = decide(analysis, store.list('rules'), getSettings(store), ledgerOf(receipt));
     const analyzed: Receipt = {
       ...receipt,
       analysis,
@@ -212,18 +218,18 @@ const DECISION_REASONS: ReadonlySet<Reason> = new Set<Reason>([
 /**
  * 设置页「套用到待处理」：规则改动后，用已保存的识别结果重新走一遍分类决策（不调用 AI）。
  * 只处理仍保持识别原样的待处理凭证——人工改过金额或分类的、疑似重复、识别失败的都不动。
- * 返回有变化的凭证数。
+ * 给了 ledger 就只处理那个区的凭证（设置页在哪个区，就只重新套用哪个区的）。返回有变化的凭证数。
  */
-export function reapplyRules(store: Store): number {
+export function reapplyRules(store: Store, ledger?: Ledger): number {
   return store.transact(() => {
     const rules = store.list('rules');
     const settings = getSettings(store);
     let affected = 0;
     for (const receipt of store.list('receipts')) {
-      if (!canReapply(receipt)) {
+      if (!canReapply(receipt) || (ledger !== undefined && ledgerOf(receipt) !== ledger)) {
         continue;
       }
-      const decision = decide(receipt.analysis!, rules, settings);
+      const decision = decide(receipt.analysis!, rules, settings, ledgerOf(receipt));
       const next: Receipt = {
         ...receipt,
         category: decision.category,

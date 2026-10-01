@@ -1,8 +1,11 @@
 import {
-  CATEGORIES,
+  ALL_CATEGORIES,
+  categoryLedger,
   isManualRule,
+  ledgerOf,
   MIN_MANUAL_RULE_KEY_LENGTH,
   type Category,
+  type Ledger,
   type Receipt,
   type Rule,
 } from '@auto-reimbursement/contracts';
@@ -38,7 +41,8 @@ export function recordCorrectionInTransaction(
     return null;
   }
 
-  const ruleId = `${feature.kind}:${feature.key}`;
+  // 公账区学到的规则 id 加前缀：同一个商户名在两个区里是两条互不相干的规则，不会互相覆盖
+  const ruleId = `${ledgerOf(receipt) === 'company' ? 'company:' : ''}${feature.kind}:${feature.key}`;
   const previous = store.get('rules', ruleId);
   // 已被用户设为固定规则的特征，不再被确认记录改写（否则一次手动改类会把固定规则悄悄改回学习规则）
   if (previous !== null && isManualRule(previous)) {
@@ -64,9 +68,11 @@ export function recordCorrectionInTransaction(
   return rule;
 }
 
-export function listRules(store: Store): Rule[] {
+/** 规则没有单独的区字段，属于哪个区看它的分类。不给 ledger 就是全部。 */
+export function listRules(store: Store, ledger?: Ledger): Rule[] {
   return store
     .list('rules')
+    .filter((rule) => ledger === undefined || categoryLedger(rule.category) === ledger)
     .sort((left, right) => left.id.localeCompare(right.id));
 }
 
@@ -127,7 +133,7 @@ function featureFor(receipt: Receipt): Feature | null {
 }
 
 function assertCategory(value: unknown): asserts value is Category {
-  if (!CATEGORIES.includes(value as Category)) {
+  if (!ALL_CATEGORIES.includes(value as Category)) {
     throw new Error('INVALID_CATEGORY');
   }
 }

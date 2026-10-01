@@ -2,16 +2,18 @@ import { randomUUID } from 'node:crypto';
 import { unlink } from 'node:fs/promises';
 
 import {
-  CATEGORIES,
+  categoriesFor,
+  ledgerOf,
   type Category,
   type FileIndexEntry,
+  type Ledger,
   type Receipt,
   type UploadResult,
 } from '@auto-reimbursement/contracts';
 
 import type { Config } from './config.js';
 import type { Store } from './db.js';
-import { findDuplicates } from './duplicates.js';
+import { findDuplicates, liveCopyInOtherLedger } from './duplicates.js';
 import { recordCorrectionInTransaction } from './learning.js';
 import { fileIndexSha256, safePath, storeImage, type InputImage } from './storage.js';
 import { businessMonth } from './time.js';
@@ -29,13 +31,22 @@ type DuplicateMatch = ReturnType<typeof findDuplicates>;
 
 /**
  * 上传的图与已有凭证的原图完全一致时的拒绝原因：
- * 在用的凭证 → EXACT_DUPLICATE；在回收站 → DELETED_DUPLICATE（P-32，前端提示可恢复）；
+ * 在用的凭证 → EXACT_DUPLICATE（另一个区里在用的也算，同一张图不能入两次账；那种情况带 duplicateLedger 说明在哪个区）；
+ * 在回收站 → DELETED_DUPLICATE（P-32，前端提示可恢复；只看本区的回收站，另一个区回收站里的同一张不算）；
  * 已被合并隐藏的来源截图 → MERGED_DUPLICATE，duplicateId 是合并后那张凭证。
  */
 function duplicateRejection(
   match: DuplicateMatch,
-): { code: 'EXACT_DUPLICATE' | 'DELETED_DUPLICATE' | 'MERGED_DUPLICATE'; duplicateId: string } | null {
-  if (match.exactId !== null) return { code: 'EXACT_DUPLICATE', duplicateId: match.exactId };
+): {
+  code: 'EXACT_DUPLICATE' | 'DELETED_DUPLICATE' | 'MERGED_DUPLICATE';
+  duplicateId: string;
+  duplicateLedger?: Ledger;
+} | null {
+  if (match.exactId !== null) {
+    return match.exactOtherLedger === undefined
+      ? { code: 'EXACT_DUPLICATE', duplicateId: match.exactId }
+      : { code: 'EXACT_DUPLICATE', duplicateId: match.exactId, duplicateLedger: match.exactOtherLedger };
+  }
   if (match.mergedIntoId !== null) return { code: 'MERGED_DUPLICATE', duplicateId: match.mergedIntoId };
   if (match.deletedExactId !== null) return { code: 'DELETED_DUPLICATE', duplicateId: match.deletedExactId };
   return null;
@@ -46,6 +57,7 @@ export async function uploadReceipts(
   config: Config,
   files: InputImage[],
   now: Date,
+  ledger: Ledger = 'store',
 ): Promise<UploadResult> {
   const accepted: Receipt[] = [];
   const rejected: UploadResult['rejected'] = [];
@@ -67,7 +79,7 @@ export async function uploadReceipts(
 
     const receiptId = randomUUID();
     try {
-      const initialRejection = duplicateRejection(findDuplicates(store, original));
+      const initialRejection = duplicateRejection(findDuplicates(store, original, ledger));
       if (initialRejection !== null) {
         await unlink(safePath(config.dataDir, original.path));
         rejected.push({ index, ...initialRejection });
@@ -75,13 +87,15 @@ export async function uploadReceipts(
       }
 
       const result = store.transact(() => {
-        const match = findDuplicates(store, original);
+        const match = findDuplicates(store, original, ledger);
         const rejection = duplicateRejection(match);
         if (rejection !== null) {
           return { receipt: null, rejection };
         }
         const row: Receipt = {
           id: receiptId,
+          // 店内的凭证不写这个字段，存下来的数据和以前完全一样
+          ...(ledger === 'company' ? { ledger } : {}),
           original,
           refundImages: [],
           month,
@@ -148,11 +162,12 @@ export interface ReceiptPatch {
 
 const MAX_MERCHANT_LENGTH = 50;
 
-function assertValidPatch(patch: ReceiptPatch): void {
+function assertValidPatch(patch: ReceiptPatch, ledger: Ledger): void {
   if (patch.paidFen !== undefined && !validFen(patch.paidFen)) {
     throw new Error('INVALID_PAID_FEN');
   }
-  if (patch.category !== undefined && !CATEGORIES.includes(patch.category)) {
+  // 分类只能是凭证所在的区里的分类：公账凭证不能改成店内的分类，反过来也一样
+  if (patch.category !== undefined && !categoriesFor(ledger).includes(patch.category)) {
     throw new Error('INVALID_CATEGORY');
   }
   if (patch.merchant !== undefined) {
@@ -207,7 +222,7 @@ export function updateReceipt(
       throw new Error('NOT_FOUND');
     }
     assertMutable(receipt);
-    assertValidPatch(patch);
+    assertValidPatch(patch, ledgerOf(receipt));
     if (patch.paidFen !== undefined && patch.paidFen < receipt.refundFen) {
       throw new Error('REFUND_EXCEEDS_PAID');
     }
@@ -233,14 +248,14 @@ export function confirmReceipt(
       throw new Error('NOT_FOUND');
     }
     assertMutable(receipt);
-    assertValidPatch(patch);
+    assertValidPatch(patch, ledgerOf(receipt));
     const merged = applyPatch(receipt, patch);
     const paidFen = merged.paidFen;
     const category = merged.category;
     if (paidFen === null || category === null) {
       throw new Error('INCOMPLETE_RECEIPT');
     }
-    if (!validFen(paidFen) || !CATEGORIES.includes(category)) {
+    if (!validFen(paidFen) || !categoriesFor(ledgerOf(receipt)).includes(category)) {
       throw new Error('INCOMPLETE_RECEIPT');
     }
     if (receipt.refundFen > paidFen) {
@@ -270,10 +285,13 @@ export function confirmReceipt(
 export function listReceipts(
   store: Store,
   view: 'pool' | 'pending' | 'excluded' | 'deleted',
+  ledger: Ledger = 'store',
 ): Receipt[] {
   return store
     .list('receipts')
     .filter((receipt) => {
+      // 两个区互相看不到对方的凭证
+      if (ledgerOf(receipt) !== ledger) return false;
       // 被合并隐藏的来源截图不算「已删除」：它们在合并后的那张上点「拆开」才会回来
       if (view === 'deleted') return receipt.deletedAt !== null && receipt.mergedInto === undefined;
       if (receipt.deletedAt !== null || receipt.archivedAt !== null) {
@@ -326,6 +344,10 @@ export function restoreReceipt(store: Store, id: string): Receipt {
       // 被合并隐藏的来源截图要在合并后的那张上「拆开」；那张已经不存在（数据异常）时才按普通凭证恢复
       if (store.get('receipts', receipt.mergedInto) !== null) throw new Error('MERGED_RECEIPT');
       delete restored.mergedInto;
+    }
+    // 先在这个区删除、又把同一张图传到了另一个区：另一个区那张在用，这张不能再恢复（同一张图不能入两次账）
+    if (liveCopyInOtherLedger(store, receipt) !== null) {
+      throw new Error('LEDGER_DUPLICATE');
     }
     assertMutable(restored);
     store.put('receipts', restored);

@@ -1,6 +1,7 @@
 import { unlink } from 'node:fs/promises';
 
 import {
+  ledgerOf,
   netFenOrNull,
   type FileIndexEntry,
   type Receipt,
@@ -96,5 +97,9 @@ function requiredMutableReceipt(store: Store, id: string): Receipt {
     throw new Error('NOT_FOUND');
   }
   assertMutable(receipt);
+  // 公账付款是银行转账，没有退款：不让登记，免得和各项明细对不上
+  if (ledgerOf(receipt) === 'company') {
+    throw new Error('REFUND_NOT_SUPPORTED');
+  }
   return receipt;
 }

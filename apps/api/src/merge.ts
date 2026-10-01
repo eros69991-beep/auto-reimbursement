@@ -3,6 +3,7 @@ import { unlink } from 'node:fs/promises';
 
 import {
   canMergeReceipt,
+  ledgerOf,
   MERGE_MAX,
   MERGE_MIN,
   type FileIndexEntry,
@@ -13,6 +14,7 @@ import sharp from 'sharp';
 
 import type { Config } from './config.js';
 import type { Store } from './db.js';
+import { liveCopyInOtherLedger } from './duplicates.js';
 import { logger } from './logger.js';
 import { assertMutable } from './receipts.js';
 import { fileIndexSha256, readVerifiedFile, safePath, storeImage } from './storage.js';
@@ -123,6 +125,10 @@ function loadSources(store: Store, receiptIds: string[]): Receipt[] {
   if (found.some((source) => !canMergeReceipt(source))) {
     throw new Error('MERGE_NOT_ALLOWED');
   }
+  // 同一单的截图一定在同一个区里；两个区的凭证不能拼在一起
+  if (new Set(found.map((source) => ledgerOf(source))).size > 1) {
+    throw new Error('MERGE_MIXED_LEDGER');
+  }
   return found;
 }
 
@@ -193,6 +199,8 @@ export async function mergeReceipts(
 
       const merged: Receipt = {
         id: randomUUID(),
+        // 合并出来的凭证和来源在同一个区（店内的不写这个字段）
+        ...(ledgerOf(first) === 'company' ? { ledger: 'company' as const } : {}),
         original: image,
         refundImages: [],
         month: first.month,
@@ -267,6 +275,10 @@ export async function splitReceipt(store: Store, config: Config, id: string): Pr
     const hidden = sources as Receipt[];
     if (hidden.some((source) => source.original.deletedAt !== null)) {
       throw new Error('ORIGINAL_CLEANED');
+    }
+    // 合并前的某张截图，之后又被传到了另一个区（那时它在这个区是隐藏的，不算重复）：不能同时在用
+    if (hidden.some((source) => liveCopyInOtherLedger(store, source) !== null)) {
+      throw new Error('LEDGER_DUPLICATE');
     }
     const restored = hidden.map((source) => {
       const back: Receipt = { ...source, deletedAt: null };
