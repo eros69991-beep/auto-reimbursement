@@ -35,6 +35,7 @@ import { HttpError, toHttpError } from './errors.js';
 import { logger } from './logger.js';
 import { confirmDistinct } from './duplicates.js';
 import { deleteRule, listRules, saveRule } from './learning.js';
+import { mergeReceipts, splitReceipt } from './merge.js';
 import { getProgress, type RecognitionQueue } from './queue.js';
 import { exportBatchPdf, readSavedBatchPdf, renderBatchPdf } from './render/pdf.js';
 import {
@@ -245,6 +246,25 @@ export function createRouter(
       const receipt = restoreReceipt(store, request.params.id);
       if (receipt.status === 'recognizing') queue?.enqueue([receipt.id]);
       response.json(receipt);
+    } catch (error) { next(correctionHttpError(error)); }
+  });
+
+  // 同一单被截成几张图：把 2–3 张拼成一张重新识别；来源截图隐藏起来，随时可以「拆开」
+  router.post('/receipts/merge', async (request, response, next) => {
+    try {
+      const receiptIds: unknown = request.body?.receiptIds;
+      if (!Array.isArray(receiptIds) || receiptIds.some((id) => typeof id !== 'string')) {
+        throw new Error('INVALID_MERGE');
+      }
+      const merged = await mergeReceipts(store, config, receiptIds as string[], new Date());
+      queue?.enqueue([merged.id]);
+      response.status(201).json(merged);
+    } catch (error) { next(correctionHttpError(error)); }
+  });
+
+  router.post('/receipts/:id/split', async (request, response, next) => {
+    try {
+      response.json(await splitReceipt(store, config, request.params.id));
     } catch (error) { next(correctionHttpError(error)); }
   });
 

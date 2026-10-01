@@ -36,11 +36,18 @@ export async function fingerprint(
 export function findDuplicates(
   store: Store,
   image: ImageRef,
-): { exactId: string | null; deletedExactId: string | null; suspectedIds: string[] } {
+): {
+  exactId: string | null;
+  deletedExactId: string | null;
+  /** 与某张已被合并隐藏的来源截图一致：返回合并后那张凭证的 id */
+  mergedIntoId: string | null;
+  suspectedIds: string[];
+} {
   const exactCandidates: string[] = [];
   // P-32：已删除（回收站）的精确重复单独返回，让前端提示「可从回收站恢复」；
   // 疑似重复则完全跳过已删除凭证，避免误报
   const deletedExactCandidates: string[] = [];
+  const mergedCandidates: string[] = [];
   const suspectedIds: string[] = [];
   for (const receipt of orderedReceipts(store)) {
     if (receipt.original.id === image.id) {
@@ -53,6 +60,17 @@ export function findDuplicates(
     ) {
       if (receipt.deletedAt === null) {
         exactCandidates.push(receipt.id);
+      } else if (receipt.mergedInto !== undefined) {
+        // 被合并隐藏的来源截图：指向合并后的那张凭证。那张已删除（在回收站）时按回收站里的重复处理，
+        // 恢复的就是合并后的凭证；找不到它（数据异常）时退回到这张来源本身
+        const target = store.get('receipts', receipt.mergedInto);
+        if (target === null) {
+          deletedExactCandidates.push(receipt.id);
+        } else if (target.deletedAt === null) {
+          mergedCandidates.push(target.id);
+        } else {
+          deletedExactCandidates.push(target.id);
+        }
       } else {
         deletedExactCandidates.push(receipt.id);
       }
@@ -70,6 +88,7 @@ export function findDuplicates(
   return {
     exactId: exactCandidates[0] ?? null,
     deletedExactId: deletedExactCandidates[0] ?? null,
+    mergedIntoId: mergedCandidates[0] ?? null,
     suspectedIds,
   };
 }

@@ -293,6 +293,68 @@ describe('fixed (manual) rules', () => {
   });
 });
 
+describe('incomplete screenshots', () => {
+  it('holds back an incomplete screenshot however confident the AI is', () => {
+    // 试点反馈 3：同一单被截成两张，只有商品清单的那张读不出实付金额
+    expect(
+      decide(
+        analysis({ amount: null, incomplete: true, confidence: { amount: 0.99, category: 0.99 } }),
+        [],
+        settings,
+      ),
+    ).toEqual({
+      status: 'pending',
+      reasons: ['incomplete_screenshot', 'amount_uncertain'],
+      category: '耗材',
+    });
+  });
+
+  it('gives only the incomplete reason when an amount was read anyway', () => {
+    expect(
+      decide(analysis({ incomplete: true, confidence: { amount: 0.99, category: 0.99 } }), [], settings),
+    ).toEqual({ status: 'pending', reasons: ['incomplete_screenshot'], category: '耗材' });
+  });
+
+  it('ignores the flag when it is false or missing', () => {
+    expect(decide(analysis({ incomplete: false }), [], settings).status).toBe('ready');
+    expect(decide(analysis(), [], settings).status).toBe('ready');
+  });
+
+  it('comes before an ambiguous amount and beats an agreeing learned rule', () => {
+    expect(
+      decide(analysis({ amount: null, ambiguous: true, incomplete: true }), [], settings).reasons,
+    ).toEqual(['incomplete_screenshot', 'amount_uncertain']);
+    expect(
+      decide(
+        analysis({ merchant: 'acme store', incomplete: true, confidence: { amount: 0.8, category: 0.7 } }),
+        [strongRule()],
+        settings,
+      ),
+    ).toMatchObject({ status: 'pending', reasons: ['incomplete_screenshot'] });
+  });
+
+  it('still holds back a receipt whose category a fixed rule decided, keeping that category', () => {
+    expect(
+      decide(
+        analysis({
+          amount: null,
+          category: '食材',
+          merchant: '武汉仓',
+          incomplete: true,
+          confidence: { amount: 0.99, category: 0.99 },
+        }),
+        [fixedRule()],
+        settings,
+      ),
+    ).toEqual({
+      status: 'pending',
+      reasons: ['incomplete_screenshot', 'amount_uncertain'],
+      category: '百慕达食材',
+      ruleMatch: { mode: 'applied', ruleId: 'fixed-1', key: '武汉仓', category: '百慕达食材' },
+    });
+  });
+});
+
 describe('learned strong rule suggestions', () => {
   it('keeps the AI category on conflict and attaches the rule category as a suggestion', () => {
     // 试点反馈图 6：武汉仓 201.45 AI 判酒水、学习规则说百慕达食材，最后酒水才是对的

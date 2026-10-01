@@ -34,7 +34,8 @@ export type Reason =
   | 'suspected_duplicate'
   | 'ambiguous_amount'
   | 'unreadable'
-  | 'rule_conflict';
+  | 'rule_conflict'
+  | 'incomplete_screenshot';
 
 export interface Confidence {
   amount: number;
@@ -50,6 +51,10 @@ export interface Analysis {
   ambiguous: boolean;
   keywords: string[];
   evidence: string;
+  /** AI 判断这张图只是一张订单的一部分（页面被截断、看不到合计或实付金额）。旧数据没有此字段。 */
+  incomplete?: boolean;
+  /** 图中的订单号，用来判断两张截图是不是同一单。旧数据没有此字段。 */
+  orderNo?: string | null;
 }
 
 export interface ImageRef {
@@ -98,6 +103,13 @@ export interface Receipt {
   deletedAt: string | null;
   /** 规则对本张分类的影响，供界面说明；旧数据没有此字段。 */
   ruleMatch?: RuleMatch | null;
+  /** 由几张截图合并而来的凭证：来源凭证的 id，按拼接时从左到右的顺序。旧数据没有此字段。 */
+  mergedFrom?: string[];
+  /**
+   * 已被合并进另一张凭证的来源截图：合并后那张凭证的 id。这类凭证被隐藏（同时带 deletedAt），拆开时恢复。
+   * 旧数据没有此字段。
+   */
+  mergedInto?: string;
 }
 
 export interface Rule {
@@ -352,4 +364,109 @@ export function netFenOrNull(
   } catch {
     return null;
   }
+}
+
+// ---- 合并截图：同一张订单被截成几张图，在服务器左右拼成一张再识别 ----
+
+/** 一次合并 2–3 张截图：左右并排，再多每张就缩得看不清了。 */
+export const MERGE_MIN = 2;
+export const MERGE_MAX = 3;
+
+/**
+ * 这张凭证现在能不能被合并：还没进报销单、没删除、没归档、没有退款记录，原图还在，
+ * 且自己不是合并出来的（合并过的要先拆开）。识别中的凭证要等识别完才能合并，所以这里也返回 false。
+ */
+export function canMergeReceipt(receipt: Receipt): boolean {
+  return (
+    (receipt.status === 'pending' || receipt.status === 'ready') &&
+    receipt.deletedAt === null &&
+    receipt.archivedAt === null &&
+    receipt.batchId === null &&
+    receipt.refundFen === 0 &&
+    receipt.refundImages.length === 0 &&
+    receipt.mergedFrom === undefined &&
+    receipt.mergedInto === undefined &&
+    receipt.original.deletedAt === null
+  );
+}
+
+export interface MergeSuggestion {
+  /** 建议合并的凭证，按上传顺序从左到右 */
+  receiptIds: string[];
+  /** 判断依据：订单号相同 / 商户相同 / 日期相同 */
+  basis: Array<'orderNo' | 'merchant' | 'date'>;
+}
+
+/** 视为同一次上传：两张的上传时间相差不超过 10 分钟 */
+const MERGE_SAME_UPLOAD_MS = 10 * 60_000;
+/** 上传顺序里相隔不超过几张（分批并发上传时，同一单的两张不一定紧挨着） */
+const MERGE_NEAR_POSITIONS = 3;
+
+function mergeText(value: string | null | undefined): string {
+  return (value ?? '').normalize('NFKC').trim().toLowerCase().replace(/\s+/g, '');
+}
+
+/** 缺金额、被 AI 标为不完整、或金额有多个候选：看起来只是一张订单的一部分 */
+function looksIncomplete(receipt: Receipt): boolean {
+  const analysis = receipt.analysis;
+  return analysis !== null && (analysis.incomplete === true || analysis.ambiguous || analysis.amount === null);
+}
+
+function mergeBasis(left: Receipt, right: Receipt): MergeSuggestion['basis'] | null {
+  const orderLeft = mergeText(left.analysis?.orderNo);
+  const orderRight = mergeText(right.analysis?.orderNo);
+  if (orderLeft !== '' && orderRight !== '') {
+    // 订单号都看清了：相同一定是同一单，不同一定不是，不再看别的
+    return orderLeft === orderRight ? ['orderNo'] : null;
+  }
+  const merchantLeft = mergeText(left.merchant);
+  const merchantRight = mergeText(right.merchant);
+  const dateLeft = left.date;
+  const dateRight = right.date;
+  if (merchantLeft !== '' && merchantRight !== '' && merchantLeft !== merchantRight) return null;
+  if (dateLeft !== null && dateRight !== null && dateLeft !== dateRight) return null;
+  const basis: MergeSuggestion['basis'] = [];
+  if (merchantLeft !== '' && merchantLeft === merchantRight) basis.push('merchant');
+  if (dateLeft !== null && dateLeft === dateRight) basis.push('date');
+  if (basis.length === 0) return null;
+  // 商户 / 日期相同的凭证很多，只在其中一张看起来不完整时才提示，免得把正常的两张当成一单
+  return looksIncomplete(left) || looksIncomplete(right) ? basis : null;
+}
+
+/**
+ * 找出疑似同一单的截图对：上传时间相近、上传顺序相邻、商户或日期相同（订单号相同最可靠），
+ * 且其中一张缺金额或被标为不完整。每张最多出现在一个建议里；传入待处理和报销池的凭证一起算。
+ */
+export function suggestMerges(receipts: Receipt[]): MergeSuggestion[] {
+  const candidates = [...new Map(receipts.map((receipt) => [receipt.id, receipt])).values()]
+    .filter((receipt) => canMergeReceipt(receipt) && receipt.analysis !== null)
+    .sort((left, right) => left.uploadOrder - right.uploadOrder || (left.id < right.id ? -1 : left.id > right.id ? 1 : 0));
+  const used = new Set<string>();
+  const suggestions: MergeSuggestion[] = [];
+  for (const [index, receipt] of candidates.entries()) {
+    if (used.has(receipt.id)) continue;
+    let best: { offset: number; basis: MergeSuggestion['basis'] } | null = null;
+    for (let offset = -MERGE_NEAR_POSITIONS; offset <= MERGE_NEAR_POSITIONS; offset += 1) {
+      const partner = offset === 0 ? undefined : candidates[index + offset];
+      if (partner === undefined || used.has(partner.id)) continue;
+      const gap = Math.abs(Date.parse(receipt.uploadedAt) - Date.parse(partner.uploadedAt));
+      if (!(gap <= MERGE_SAME_UPLOAD_MS)) continue;
+      const basis = mergeBasis(receipt, partner);
+      if (basis === null) continue;
+      const better = best === null
+        || (basis.includes('orderNo') && !best.basis.includes('orderNo'))
+        || (basis.includes('orderNo') === best.basis.includes('orderNo')
+          && (Math.abs(offset) < Math.abs(best.offset) || (Math.abs(offset) === Math.abs(best.offset) && offset > 0)));
+      if (better) best = { offset, basis };
+    }
+    if (best === null) continue;
+    const partner = candidates[index + best.offset]!;
+    used.add(receipt.id);
+    used.add(partner.id);
+    suggestions.push({
+      receiptIds: best.offset > 0 ? [receipt.id, partner.id] : [partner.id, receipt.id],
+      basis: best.basis,
+    });
+  }
+  return suggestions;
 }

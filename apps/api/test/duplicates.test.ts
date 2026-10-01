@@ -74,6 +74,63 @@ describe('historical duplicate detection', () => {
     expect(renamedDeleted.deletedExactId).toBe('deleted');
   });
 
+  it('points a hidden merge source at the receipt it was merged into', () => {
+    const hiddenSource = (mergedInto: string) => sampleReceipt({
+      id: 'source',
+      original: imageRef({
+        id: 'source-image',
+        sha256: 'd'.repeat(64),
+        perceptualHash: '1234567890abcdef',
+      }),
+      deletedAt: '2026-10-02T00:00:00.000Z',
+      mergedInto,
+    });
+    const resend = imageRef({
+      id: 'resent-image',
+      sha256: 'd'.repeat(64),
+      perceptualHash: '1234567890abcdef',
+    });
+
+    // 合并后的凭证还在：提示「已合并进某一单」，指向合并后的那张
+    store.put('receipts', hiddenSource('merged'));
+    store.put('receipts', sampleReceipt({
+      id: 'merged',
+      uploadOrder: 5,
+      original: imageRef({ id: 'merged-image', sha256: 'e'.repeat(64), perceptualHash: 'ffffffffffffffff' }),
+      mergedFrom: ['source'],
+    }));
+    expect(findDuplicates(store, resend)).toEqual({
+      exactId: null,
+      deletedExactId: null,
+      mergedIntoId: 'merged',
+      suspectedIds: [],
+    });
+
+    // 合并后的凭证进了回收站：恢复的应该是合并后的那张，而不是被隐藏的来源
+    store.put('receipts', sampleReceipt({
+      id: 'merged',
+      uploadOrder: 5,
+      original: imageRef({ id: 'merged-image', sha256: 'e'.repeat(64), perceptualHash: 'ffffffffffffffff' }),
+      mergedFrom: ['source'],
+      deletedAt: '2026-10-03T00:00:00.000Z',
+    }));
+    expect(findDuplicates(store, resend)).toEqual({
+      exactId: null,
+      deletedExactId: 'merged',
+      mergedIntoId: null,
+      suspectedIds: [],
+    });
+
+    // 合并后的凭证找不到了（数据异常）：退回到来源本身，别丢掉重复提示
+    store.remove('receipts', 'merged');
+    expect(findDuplicates(store, resend)).toEqual({
+      exactId: null,
+      deletedExactId: 'source',
+      mergedIntoId: null,
+      suspectedIds: [],
+    });
+  });
+
   it('uses SHA-256 bytes and a real 64-bit dHash for recompressed images', async () => {
     const { source, recompressed, checkerboard } = await imageFixtures();
     const sourceFingerprint = await fingerprint(source);
@@ -108,13 +165,13 @@ describe('historical duplicate detection', () => {
         store,
         imageRef({ id: 'recompressed-image', ...recompressedFingerprint }),
       ),
-    ).toEqual({ exactId: null, deletedExactId: null, suspectedIds: ['source'] });
+    ).toEqual({ exactId: null, deletedExactId: null, mergedIntoId: null, suspectedIds: ['source'] });
     expect(
       findDuplicates(
         store,
         imageRef({ id: 'checkerboard-image', ...checkerboardFingerprint }),
       ),
-    ).toEqual({ exactId: null, deletedExactId: null, suspectedIds: [] });
+    ).toEqual({ exactId: null, deletedExactId: null, mergedIntoId: null, suspectedIds: [] });
   });
 
   it('does not match empty fingerprints or the image itself', () => {
@@ -131,6 +188,7 @@ describe('historical duplicate detection', () => {
     expect(findDuplicates(store, receipt.original)).toEqual({
       exactId: null,
       deletedExactId: null,
+      mergedIntoId: null,
       suspectedIds: [],
     });
     expect(
@@ -138,7 +196,7 @@ describe('historical duplicate detection', () => {
         store,
         imageRef({ id: 'empty-image', sha256: '', perceptualHash: '' }),
       ),
-    ).toEqual({ exactId: null, deletedExactId: null, suspectedIds: [] });
+    ).toEqual({ exactId: null, deletedExactId: null, mergedIntoId: null, suspectedIds: [] });
   });
 
   it('returns duplicate IDs in upload order with an ID tie-breaker', () => {

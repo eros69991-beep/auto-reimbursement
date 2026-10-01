@@ -1,9 +1,11 @@
-import { useEffect, useMemo, useState } from 'react';
-import { CATEGORIES, formatFen, netFenOrNull, type Receipt, type Settings, type Totals } from '@auto-reimbursement/contracts';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { canMergeReceipt, CATEGORIES, formatFen, MERGE_MAX, MERGE_MIN, netFenOrNull, type Receipt, type Settings, type Totals } from '@auto-reimbursement/contracts';
 import { api, formOptionsFromSettings } from '../api';
+import { friendlyError } from '../errors';
 import { ReceiptCard } from '../components/ReceiptCard';
 import { ReceiptEditor } from '../components/ReceiptEditor';
 import { receiptLabel } from '../receiptLabel';
+import { useRecognitionWatch } from '../useRecognitionWatch';
 
 function eligible(receipt: Receipt): boolean {
   const net = receipt.paidFen === null ? null : netFenOrNull(receipt);
@@ -20,6 +22,30 @@ export function PoolPage({ onBatch }: { onBatch: (id: string) => void }): React.
   const [busy, setBusy] = useState(false);
   const [binOpen, setBinOpen] = useState(false);
   const [binRows, setBinRows] = useState<Receipt[]>([]);
+  const mergedId = useRef<string | null>(null);
+
+  // 合并后的新凭证要重新识别：识别完刷新报销池；没通过的会出现在「异常处理」里
+  const { watching, watch } = useRecognitionWatch((outcome, reason) => {
+    void (async () => {
+      try {
+        const received = await api.receipts('pool');
+        setRows(received);
+        setSelected((current) => current.filter((id) => received.some((receipt) => receipt.id === id)));
+        refreshTotals();
+        if (outcome === 'error') {
+          setError(friendlyError(reason, '获取识别进度失败'));
+        } else if (outcome === 'timeout') {
+          setMessage('合并后的凭证还在识别中，稍后刷新本页就能看到结果。');
+        } else {
+          setMessage(received.some((receipt) => receipt.id === mergedId.current)
+            ? '合并完成，重新识别通过，已加入报销池。'
+            : '合并完成，这张还需要你确认，请到「异常处理」查看。');
+        }
+      } catch (loadReason) {
+        setError(friendlyError(loadReason, '获取报销池失败'));
+      }
+    })();
+  });
 
   useEffect(() => {
     void Promise.all([api.receipts('pool'), api.totals(), api.settings()]).then(
@@ -38,6 +64,10 @@ export function PoolPage({ onBatch }: { onBatch: (id: string) => void }): React.
     () => rows
       .filter((receipt) => selected.includes(receipt.id))
       .reduce((sum, receipt) => sum + (receipt.paidFen === null ? 0 : (netFenOrNull(receipt) ?? 0)), 0),
+    [rows, selected],
+  );
+  const selectedMergeable = useMemo(
+    () => rows.filter((receipt) => selected.includes(receipt.id)).every(canMergeReceipt),
     [rows, selected],
   );
   const allEligibleSelected = eligibleIds.size > 0 && [...eligibleIds].every((id) => selected.includes(id));
@@ -120,6 +150,45 @@ export function PoolPage({ onBatch }: { onBatch: (id: string) => void }): React.
     }
   }
 
+  // 同一单被截成几张图：把勾选的 2–3 张左右拼成一张，作为新凭证重新识别
+  async function merge(): Promise<void> {
+    const ids = rows.filter((receipt) => selected.includes(receipt.id)).map((receipt) => receipt.id);
+    setError(null);
+    setMessage(null);
+    setBusy(true);
+    try {
+      const merged = await api.mergeReceipts(ids);
+      mergedId.current = merged.id;
+      setRows((current) => current.filter((receipt) => !ids.includes(receipt.id)));
+      setSelected([]);
+      refreshTotals();
+      setMessage('已合并，正在重新识别拼好的图…');
+      watch([merged.id]);
+    } catch (reason) {
+      setError(friendlyError(reason, '合并失败'));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function split(receipt: Receipt): Promise<void> {
+    if (!window.confirm('拆开后，这张合并凭证的识别结果和修改会丢掉，截图恢复成合并前的几张。确定拆开吗？')) return;
+    setError(null);
+    setMessage(null);
+    setBusy(true);
+    try {
+      const restored = await api.splitReceipt(receipt.id);
+      setRows(await api.receipts('pool'));
+      setSelected((current) => current.filter((id) => id !== receipt.id));
+      refreshTotals();
+      setMessage(`已拆开，恢复成 ${restored.length} 张截图；还没确认的在「异常处理」里。`);
+    } catch (reason) {
+      setError(friendlyError(reason, '拆开失败'));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function create(): Promise<void> {
     if (selected.length === 0) {
       setError('请选择至少一张可报销凭证');
@@ -178,16 +247,25 @@ export function PoolPage({ onBatch }: { onBatch: (id: string) => void }): React.
             receipt={receipt}
             selectable={selectable}
             checked={selected.includes(receipt.id)}
-            busy={busy}
+            busy={busy || watching}
             onToggle={toggle}
             onSaved={replace}
             onRemove={removeFromPool}
+            onSplit={split}
           />;
         })}
       </div>
       <div className="pool-selection-bar" aria-label="已选汇总">
         <span>已选 {selected.length} 张 · 合计 {formatFen(selectedTotalFen)}</span>
-        <button type="button" disabled={busy || settings === null} onClick={() => void create()}>生成报销单</button>
+        <span className="receipt-actions">
+          {/* 同一单被截成几张图时，勾选这几张合并；合并过的要先拆开才能再合并 */}
+          {selected.length >= MERGE_MIN && selected.length <= MERGE_MAX && (
+            <button type="button" disabled={busy || watching || !selectedMergeable} onClick={() => void merge()}>
+              {selectedMergeable ? '合并为一单' : '合并过的要先拆开'}
+            </button>
+          )}
+          <button type="button" disabled={busy || watching || settings === null} onClick={() => void create()}>生成报销单</button>
+        </span>
       </div>
     </main>
   );
@@ -202,6 +280,7 @@ function PoolRow({
   onToggle,
   onSaved,
   onRemove,
+  onSplit,
 }: {
   receipt: Receipt;
   selectable: boolean;
@@ -210,6 +289,7 @@ function PoolRow({
   onToggle: (id: string, checked: boolean) => void;
   onSaved: (receipt: Receipt) => void;
   onRemove: (id: string) => Promise<void>;
+  onSplit: (receipt: Receipt) => Promise<void>;
 }): React.JSX.Element {
   const [editorOpen, setEditorOpen] = useState(false);
   return <ReceiptCard receipt={receipt}>
@@ -228,6 +308,7 @@ function PoolRow({
         {editorOpen ? '收起编辑' : '编辑'}
       </button>
       <button type="button" disabled={busy} onClick={() => void onRemove(receipt.id)}>移出本次报销池</button>
+      {receipt.mergedFrom !== undefined && <button type="button" disabled={busy} onClick={() => void onSplit(receipt)}>拆开</button>}
     </div>
     {editorOpen && <ReceiptEditor receipt={receipt} onSaved={onSaved} />}
   </ReceiptCard>;

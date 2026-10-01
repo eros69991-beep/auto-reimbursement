@@ -19,6 +19,9 @@ vi.mock('../api', () => ({
     openAuthed: vi.fn(),
     confirmReceipt: vi.fn(),
     deleteReceipt: vi.fn(),
+    mergeReceipts: vi.fn(),
+    splitReceipt: vi.fn(),
+    progress: vi.fn(),
   },
   fetchBlobUrl: vi.fn().mockResolvedValue('blob:mock'),
 }));
@@ -157,5 +160,139 @@ describe('PoolPage', () => {
     fireEvent.click(screen.getByRole('checkbox', { name: '全选可报销' }));
     expect(screen.getByRole('checkbox', { name: '选择 耗材 · 36.33' })).not.toBeChecked();
     expect(screen.getByText('已选 0 张 · 合计 0.00')).toBeInTheDocument();
+  });
+});
+
+// 试点反馈 3：已经识别通过的几张，发现其实是同一单，也能在报销池里合并 / 拆开
+describe('PoolPage merging screenshots of one order', () => {
+  const ready = (id: string, order: number, fen: number, overrides: Parameters<typeof receipt>[0] = {}) => receipt({
+    id,
+    original: { ...receipt().original, id: `image-${id}` },
+    uploadOrder: order,
+    paidFen: fen,
+    recognizedFen: fen,
+    ...overrides,
+  });
+  let poolRows: ReturnType<typeof receipt>[];
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    poolRows = [ready('x', 1, 1000), ready('y', 2, 2000), ready('z', 3, 3000), ready('w', 4, 4000)];
+    mockedApi.receipts.mockImplementation(async (view: string) => (view === 'pool' ? poolRows : []));
+    mockedApi.totals.mockResolvedValue(totals);
+    mockedApi.settings.mockResolvedValue(settings);
+    mockedApi.mergeReceipts.mockResolvedValue(
+      ready('m', 1, 0, { status: 'recognizing', mergedFrom: ['x', 'y'] }),
+    );
+    mockedApi.progress.mockResolvedValue({ total: 1, recognizing: 0, ready: 1, pending: 0 });
+  });
+
+  const merge = () => screen.getByRole('button', { name: '合并为一单' });
+
+  it('offers merging only when two or three receipts are ticked', async () => {
+    render(<PoolPage onBatch={vi.fn()} />);
+    const boxes = await screen.findAllByRole('checkbox', { name: /^选择 / });
+
+    fireEvent.click(boxes[0]!);
+    expect(screen.queryByRole('button', { name: '合并为一单' })).not.toBeInTheDocument();
+    fireEvent.click(boxes[1]!);
+    expect(merge()).not.toBeDisabled();
+    fireEvent.click(boxes[2]!);
+    expect(merge()).not.toBeDisabled();
+    fireEvent.click(boxes[3]!);
+    expect(screen.queryByRole('button', { name: '合并为一单' })).not.toBeInTheDocument();
+  });
+
+  it('merges the ticked receipts in list order and refreshes the pool when recognition ends', async () => {
+    render(<PoolPage onBatch={vi.fn()} />);
+    const boxes = await screen.findAllByRole('checkbox', { name: /^选择 / });
+    fireEvent.click(boxes[2]!);
+    fireEvent.click(boxes[0]!);
+    poolRows = [ready('m', 1, 58800, { mergedFrom: ['x', 'z'] }), ready('y', 2, 2000), ready('w', 4, 4000)];
+
+    fireEvent.click(merge());
+
+    await waitFor(() => expect(mockedApi.mergeReceipts).toHaveBeenCalledWith(['x', 'z']));
+    await waitFor(() => expect(mockedApi.progress).toHaveBeenCalledWith(['m']));
+    expect(await screen.findByText('合并完成，重新识别通过，已加入报销池。')).toBeInTheDocument();
+    expect(screen.getByText('由 2 张截图合并（左右拼成一张图）')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '耗材 · 588.00' })).toBeInTheDocument();
+    // 选择已清空
+    expect(screen.getByText('已选 0 张 · 合计 0.00')).toBeInTheDocument();
+  });
+
+  it('points to the exception page when the merged picture still needs a person', async () => {
+    render(<PoolPage onBatch={vi.fn()} />);
+    const boxes = await screen.findAllByRole('checkbox', { name: /^选择 / });
+    fireEvent.click(boxes[0]!);
+    fireEvent.click(boxes[1]!);
+    poolRows = [ready('z', 3, 3000), ready('w', 4, 4000)];
+
+    fireEvent.click(merge());
+
+    expect(await screen.findByText('合并完成，这张还需要你确认，请到「异常处理」查看。')).toBeInTheDocument();
+  });
+
+  it('shows why a merge was refused', async () => {
+    mockedApi.mergeReceipts.mockRejectedValue(new Error('所选凭证现在不能合并'));
+    render(<PoolPage onBatch={vi.fn()} />);
+    const boxes = await screen.findAllByRole('checkbox', { name: /^选择 / });
+    fireEvent.click(boxes[0]!);
+    fireEvent.click(boxes[1]!);
+
+    fireEvent.click(merge());
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('所选凭证现在不能合并');
+    // 失败后几张都还在，选择也还在
+    expect(screen.getAllByRole('checkbox', { name: /^选择 / })).toHaveLength(4);
+    expect(screen.getByText(/已选 2 张/)).toBeInTheDocument();
+  });
+
+  it('will not merge a receipt that was itself merged before, and tells the user to take it apart first', async () => {
+    poolRows = [ready('m', 1, 58800, { mergedFrom: ['p', 'q'] }), ready('y', 2, 2000)];
+    render(<PoolPage onBatch={vi.fn()} />);
+    const boxes = await screen.findAllByRole('checkbox', { name: /^选择 / });
+    fireEvent.click(boxes[0]!);
+    fireEvent.click(boxes[1]!);
+
+    const blocked = screen.getByRole('button', { name: '合并过的要先拆开' });
+    expect(blocked).toBeDisabled();
+    expect(mockedApi.mergeReceipts).not.toHaveBeenCalled();
+  });
+
+  it('takes a merged receipt apart after confirmation and reloads the pool', async () => {
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    poolRows = [ready('m', 1, 58800, { mergedFrom: ['x', 'y'] })];
+    mockedApi.splitReceipt.mockResolvedValue([ready('x', 1, 1000), ready('y', 2, 2000)]);
+    render(<PoolPage onBatch={vi.fn()} />);
+    await screen.findByText('由 2 张截图合并（左右拼成一张图）');
+    poolRows = [ready('x', 1, 1000), ready('y', 2, 2000)];
+
+    fireEvent.click(screen.getByRole('button', { name: '拆开' }));
+
+    await waitFor(() => expect(mockedApi.splitReceipt).toHaveBeenCalledWith('m'));
+    expect(await screen.findByText('已拆开，恢复成 2 张截图；还没确认的在「异常处理」里。')).toBeInTheDocument();
+    expect(screen.queryByText('由 2 张截图合并（左右拼成一张图）')).not.toBeInTheDocument();
+    expect(screen.getAllByRole('checkbox', { name: /^选择 / })).toHaveLength(2);
+    confirm.mockRestore();
+  });
+
+  it('leaves a merged receipt alone when taking it apart is declined', async () => {
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    poolRows = [ready('m', 1, 58800, { mergedFrom: ['x', 'y'] })];
+    render(<PoolPage onBatch={vi.fn()} />);
+    await screen.findByText('由 2 张截图合并（左右拼成一张图）');
+
+    fireEvent.click(screen.getByRole('button', { name: '拆开' }));
+
+    expect(mockedApi.splitReceipt).not.toHaveBeenCalled();
+    confirm.mockRestore();
+  });
+
+  it('has no 拆开 button on ordinary receipts', async () => {
+    render(<PoolPage onBatch={vi.fn()} />);
+    await screen.findAllByRole('checkbox', { name: /^选择 / });
+
+    expect(screen.queryByRole('button', { name: '拆开' })).not.toBeInTheDocument();
   });
 });

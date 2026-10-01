@@ -29,6 +29,10 @@ export function ReceiptCard({ receipt, children }: { receipt: Receipt; children?
           <span className="status-badge">{STATUS_LABELS[receipt.status]}</span>
         </div>
         <p>{receipt.date ?? '日期待确认'}</p>
+        {/* 同一单被截成几张时拼成的凭证：说明这张图是几张拼的，拆开的按钮由所在页面给 */}
+        {receipt.mergedFrom !== undefined && (
+          <p className="merge-note">由 {receipt.mergedFrom.length} 张截图合并（左右拼成一张图）</p>
+        )}
         {/* 退款入口已去掉；这里只给旧数据里已登记过退款的凭证说明上面的金额是怎么来的 */}
         {receipt.refundFen > 0 && <p className="refund-note">已扣除退款 {formatFen(receipt.refundFen)}</p>}
         {receipt.ruleMatch?.mode === 'applied' && receipt.ruleMatch.category === receipt.category && (

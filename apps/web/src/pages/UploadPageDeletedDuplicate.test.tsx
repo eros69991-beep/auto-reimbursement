@@ -64,3 +64,27 @@ describe('deleted duplicate restore (P-32)', () => {
     expect(screen.queryByRole('button', { name: '从回收站恢复' })).not.toBeInTheDocument();
   });
 });
+
+// 试点反馈 3：同一单的几张截图合并后，再上传其中一张，要说清楚它已经在哪一单里
+describe('merged duplicate', () => {
+  it('says the screenshot was merged into another receipt and links to the merged picture', async () => {
+    const client = clientWith({
+      accepted: [],
+      rejected: [{ index: 0, code: 'MERGED_DUPLICATE', duplicateId: 'merged-1' }],
+    });
+
+    render(<UploadPage client={client} />);
+    fireEvent.change(screen.getByLabelText('选择凭证图片'), {
+      target: { files: [new File(['x'], 'part-1.jpg', { type: 'image/jpeg' })] },
+    });
+
+    expect(await screen.findByText(/重复文件（已合并进某一单）/)).toBeInTheDocument();
+    expect(screen.getByText(/part-1\.jpg/)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: '查看合并后的凭证' })).toHaveAttribute(
+      'href',
+      '/api/receipts/merged-1/original-image',
+    );
+    expect(screen.queryByRole('link', { name: '查看重复凭证' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '从回收站恢复' })).not.toBeInTheDocument();
+  });
+});

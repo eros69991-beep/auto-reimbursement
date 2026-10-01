@@ -73,3 +73,52 @@ describe('authenticated file downloads', () => {
     await expect(fetchBlobUrl('/api/batches/b1/pdf')).rejects.toThrow('加载失败');
   });
 });
+
+describe('merging screenshots of one order', () => {
+  it('posts the receipt ids to merge and returns the new, still-recognizing receipt', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ id: 'merged', status: 'recognizing', mergedFrom: ['a', 'b'] }), {
+        status: 201,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+
+    const merged = await api.mergeReceipts(['a', 'b']);
+
+    expect(merged).toMatchObject({ id: 'merged', mergedFrom: ['a', 'b'] });
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(String(url)).toMatch(/\/api\/receipts\/merge$/);
+    expect(init).toMatchObject({ method: 'POST', body: JSON.stringify({ receiptIds: ['a', 'b'] }) });
+    expect(init?.headers).toMatchObject({ 'Content-Type': 'application/json' });
+  });
+
+  it('posts to the split address of the merged receipt and returns the restored ones', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify([{ id: 'a' }, { id: 'b' }]), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+
+    const restored = await api.splitReceipt('merged / 1');
+
+    expect(restored.map((receipt) => receipt.id)).toEqual(['a', 'b']);
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(String(url)).toMatch(/\/api\/receipts\/merged%20%2F%201\/split$/);
+    expect(init).toMatchObject({ method: 'POST' });
+  });
+
+  it('passes on the reason the server gives when a merge is refused', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ code: 'MERGE_NOT_READY', message: '有凭证还在识别中，请等识别完成后再合并' }), {
+        status: 409,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+
+    await expect(api.mergeReceipts(['a', 'b'])).rejects.toMatchObject({
+      message: '有凭证还在识别中，请等识别完成后再合并',
+      code: 'MERGE_NOT_READY',
+    });
+  });
+});

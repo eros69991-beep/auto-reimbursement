@@ -44,6 +44,9 @@ const analysisSchema = z
     ambiguous: z.boolean(),
     keywords: z.array(z.string().max(100)).max(20),
     evidence: z.string().max(2000),
+    // 以下两项是后加的，旧结果没有（可以不出现）；模型对不适用的项可能给 null
+    incomplete: z.boolean().nullable().optional(),
+    orderNo: z.string().max(100).nullable().optional(),
   })
   .strict()
   .superRefine((analysis, context) => {
@@ -61,5 +64,9 @@ export function validateAnalysis(input: unknown): Analysis {
   if (!result.success) {
     throw new AiError('INVALID_RESPONSE', true);
   }
-  return result.data;
+  // incomplete 为 null 等同于没给：不把 null 写进识别结果
+  const { incomplete, ...analysis } = result.data;
+  return incomplete === null || incomplete === undefined
+    ? analysis
+    : { ...analysis, incomplete };
 }

@@ -58,6 +58,10 @@ function decideByAi(
   matchingStrongRules: Rule[],
   settings: Settings,
 ): Decision {
+  if (analysis.incomplete === true) {
+    // 只拍到了一单的一部分（比如只有菜品清单、没有实付）：金额不可信，交给人合并截图或手填
+    return pending(incompleteReasons(analysis), analysis.category);
+  }
   if (analysis.ambiguous) {
     return pending(['ambiguous_amount'], analysis.category);
   }
@@ -201,6 +205,7 @@ const DECISION_REASONS: ReadonlySet<Reason> = new Set<Reason>([
   'amount_uncertain',
   'category_uncertain',
   'ambiguous_amount',
+  'incomplete_screenshot',
   'rule_conflict',
 ]);
 
@@ -297,6 +302,9 @@ function confidenceReasons(analysis: Analysis, settings: Settings): Reason[] {
 
 // 固定规则只替代分类判断，金额仍按原标准把关
 function amountUncertainty(analysis: Analysis, settings: Settings): Reason[] {
+  if (analysis.incomplete === true) {
+    return incompleteReasons(analysis);
+  }
   if (analysis.ambiguous) {
     return ['ambiguous_amount'];
   }
@@ -308,6 +316,13 @@ function amountUncertainty(analysis: Analysis, settings: Settings): Reason[] {
     return ['amount_uncertain'];
   }
   return [];
+}
+
+// 「截图不完整」放在最前面；同时读不出金额时再补一条，卡片上两个原因都能看到
+function incompleteReasons(analysis: Analysis): Reason[] {
+  return analysis.amount === null
+    ? ['incomplete_screenshot', 'amount_uncertain']
+    : ['incomplete_screenshot'];
 }
 
 function matchesRule(rule: Rule, analysis: Analysis): boolean {

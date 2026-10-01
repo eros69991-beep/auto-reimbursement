@@ -130,6 +130,29 @@ describe('fixed rules over HTTP', () => {
     expect((await request(application).post('/api/rules/reapply')).body).toEqual({ affected: 0 });
   });
 
+  it('keeps an incomplete screenshot pending when reapplying, only taking the rule category', async () => {
+    store.put(
+      'receipts',
+      pendingReceipt('half', {
+        analysis: wuhanAnalysis({ amount: null, incomplete: true, confidence: { amount: 0.1, category: 0.5 } }),
+        recognizedFen: null,
+        paidFen: null,
+        pendingReasons: ['incomplete_screenshot', 'amount_uncertain'],
+      }),
+    );
+    const application = createApp({ store, config });
+    // 没有规则时，重新套用不会改动它
+    expect((await request(application).post('/api/rules/reapply')).body).toEqual({ affected: 0 });
+
+    expect((await request(application).put('/api/rules/fixed-wuhan').send(fixedRuleBody)).status).toBe(200);
+    expect((await request(application).post('/api/rules/reapply')).body).toEqual({ affected: 1 });
+    expect(store.get('receipts', 'half')).toMatchObject({
+      status: 'pending',
+      category: '百慕达食材',
+      pendingReasons: ['incomplete_screenshot', 'amount_uncertain'],
+    });
+  });
+
   it('turns a rule conflict into a suggestion that survives reapplying', async () => {
     store.put('rules', {
       id: 'merchant:武汉仓',

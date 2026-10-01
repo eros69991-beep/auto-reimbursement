@@ -321,9 +321,9 @@ export function UploadPage({ client = api }: { client?: UploadClient }): React.J
             <ul aria-label="被拒绝文件">
               {rejected.map((item) => (
                 <li key={`${item.index}-${item.code}`}>
-                  {item.code === 'DELETED_DUPLICATE' ? '重复文件（在回收站）' : item.duplicateId ? '重复文件' : '未接收文件'}：{item.name}
+                  {item.code === 'DELETED_DUPLICATE' ? '重复文件（在回收站）' : item.code === 'MERGED_DUPLICATE' ? '重复文件（已合并进某一单）' : item.duplicateId ? '重复文件' : '未接收文件'}：{item.name}
                   {!item.duplicateId && `（${rejectionReason(item.code)}）`}
-                  {item.duplicateId && item.code !== 'DELETED_DUPLICATE' && <>（<a href={client.receiptOriginalUrl(item.duplicateId)} onClick={(event) => { event.preventDefault(); void api.openAuthed(`/api/receipts/${encodeURIComponent(item.duplicateId!)}/original-image`); }}>查看重复凭证</a>）</>}
+                  {item.duplicateId && item.code !== 'DELETED_DUPLICATE' && <>（<a href={client.receiptOriginalUrl(item.duplicateId)} onClick={(event) => { event.preventDefault(); void api.openAuthed(`/api/receipts/${encodeURIComponent(item.duplicateId!)}/original-image`); }}>{item.code === 'MERGED_DUPLICATE' ? '查看合并后的凭证' : '查看重复凭证'}</a>）</>}
                   {item.code === 'DELETED_DUPLICATE' && item.duplicateId && (
                     <>（<button type="button" onClick={() => void restoreDeleted(item.duplicateId!)}>从回收站恢复</button>）</>
                   )}

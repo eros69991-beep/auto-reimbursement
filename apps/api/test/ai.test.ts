@@ -210,6 +210,38 @@ describe('provider-neutral analysis validation', () => {
     }
   });
 
+  it('accepts the optional incomplete flag and order number, and keeps them out when absent', () => {
+    expect(validateAnalysis(valid)).toEqual(valid);
+    expect('incomplete' in validateAnalysis(valid)).toBe(false);
+    expect('orderNo' in validateAnalysis(valid)).toBe(false);
+
+    const partial = validateAnalysis({
+      ...valid,
+      amount: null,
+      incomplete: true,
+      orderNo: 'WH20260903001',
+    });
+    expect(partial).toMatchObject({ amount: null, incomplete: true, orderNo: 'WH20260903001' });
+    expect(validateAnalysis({ ...valid, incomplete: false }).incomplete).toBe(false);
+    expect(validateAnalysis({ ...valid, orderNo: null }).orderNo).toBeNull();
+    // 模型对不适用的标记给 null：当作没给，不写进结果
+    expect('incomplete' in validateAnalysis({ ...valid, incomplete: null })).toBe(false);
+    // 标了不完整却给了金额：不当作失败，决策层会把它留给人确认
+    expect(validateAnalysis({ ...valid, incomplete: true }).amount).toBe('36.33');
+  });
+
+  it('rejects malformed incomplete flags and order numbers', () => {
+    for (const invalid of [
+      { incomplete: 'yes' },
+      { incomplete: 1 },
+      { orderNo: 123 },
+      { orderNo: 'n'.repeat(101) },
+    ]) {
+      expect(() => validateAnalysis({ ...valid, ...invalid })).toThrow('INVALID_RESPONSE');
+    }
+    expect(validateAnalysis({ ...valid, orderNo: 'n'.repeat(100) }).orderNo).toHaveLength(100);
+  });
+
   it('requires strict objects at the root and confidence levels', () => {
     for (const input of [
       null,
@@ -291,6 +323,16 @@ describe('OpenAI-compatible receipt analyzer', () => {
     }
     expect(RECEIPT_PROMPT).toContain('amount=null');
     expect(RECEIPT_PROMPT).toContain('ambiguous=true');
+  });
+
+  it('tells the provider about stitched screenshots, incomplete orders and order numbers', () => {
+    // 试点反馈 3：同一单的几张截图拼成一张后重新识别
+    for (const term of ['incomplete', 'orderNo', '拼在一起', '灰色竖线', '同一单整体识别', '不要把各段里出现的小计']) {
+      expect(RECEIPT_PROMPT).toContain(term);
+    }
+    expect(RECEIPT_PROMPT).toContain(
+      '输出键必须且只能是：amount, category, merchant, date, confidence, ambiguous, keywords, evidence, incomplete, orderNo。',
+    );
   });
 
   it('explains every category so 百慕达食材 is not confused with 食材', () => {

@@ -76,7 +76,43 @@ export async function cleanOriginals(store: Store, config: Config, month: string
     });
     affected += 1;
   }
+  // 合并出来的凭证，被隐藏的来源截图也属于这张凭证的原图：一起清掉，不算进张数
+  for (const receipt of selected.receipts) {
+    for (const sourceId of receipt.mergedFrom ?? []) {
+      await cleanHiddenSource(store, config, receipt.id, sourceId, affected);
+    }
+  }
   return { affected };
+}
+
+async function cleanHiddenSource(
+  store: Store,
+  config: Config,
+  mergedId: string,
+  sourceId: string,
+  affected: number,
+): Promise<void> {
+  const source = store.get('receipts', sourceId);
+  if (source === null || source.mergedInto !== mergedId || source.original.deletedAt !== null) return;
+  const file = store.get('files', source.original.id);
+  if (file === null || file.kind !== 'original' || file.ownerId !== source.id || file.path !== source.original.path) {
+    throw cleanupFailure(affected, source.id);
+  }
+  if (file.deletedAt === null) {
+    try {
+      await unlink(safePath(config.dataDir, file.path));
+    } catch (error) {
+      if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) throw cleanupFailure(affected, source.id);
+    }
+  }
+  const deletedAt = new Date().toISOString();
+  store.transact(() => {
+    const current = store.get('receipts', source.id);
+    const entry = store.get('files', file.id);
+    if (current === null || entry === null) throw cleanupFailure(affected, source.id);
+    store.put('files', { ...entry, deletedAt: entry.deletedAt ?? deletedAt });
+    store.put('receipts', { ...current, original: { ...current.original, deletedAt: current.original.deletedAt ?? deletedAt } });
+  });
 }
 
 function cleanupFailure(affected: number, id: string): Error {

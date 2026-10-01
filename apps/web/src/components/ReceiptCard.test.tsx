@@ -75,3 +75,19 @@ describe('receipt card', () => {
     expect(screen.getByText('查看识别详情')).toBeInTheDocument();
   });
 });
+
+describe('merged receipt card', () => {
+  afterEach(() => cleanup());
+
+  it('says how many screenshots were stitched into the picture', () => {
+    render(<ReceiptCard receipt={receipt({ mergedFrom: ['x', 'y', 'z'] })} />);
+
+    expect(screen.getByText('由 3 张截图合并（左右拼成一张图）')).toBeInTheDocument();
+  });
+
+  it('says nothing about merging on an ordinary receipt', () => {
+    render(<ReceiptCard receipt={receipt()} />);
+
+    expect(screen.queryByText(/合并/)).not.toBeInTheDocument();
+  });
+});

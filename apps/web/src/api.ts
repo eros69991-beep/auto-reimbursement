@@ -249,6 +249,20 @@ function restoreReceipt(id: string): Promise<Receipt> {
   return requestJson<Receipt>(`/api/receipts/${encodeURIComponent(id)}/restore`, { method: 'POST' });
 }
 
+// 同一单被截成几张图：把 2–3 张凭证在服务器左右拼成一张，作为新凭证重新识别（返回的是识别中的新凭证）
+function mergeReceipts(ids: string[]): Promise<Receipt> {
+  return requestJson<Receipt>('/api/receipts/merge', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ receiptIds: ids }),
+  });
+}
+
+// 拆开合并出来的凭证：来源截图恢复成原来的样子，返回恢复的凭证
+function splitReceipt(id: string): Promise<Receipt[]> {
+  return requestJson<Receipt[]>(`/api/receipts/${encodeURIComponent(id)}/split`, { method: 'POST' });
+}
+
 function setRefund(id: string, refundFen: number): Promise<Receipt> {
   return requestJson<Receipt>(`/api/receipts/${encodeURIComponent(id)}/refund`, {
     method: 'PUT',
@@ -347,6 +361,8 @@ export const api = {
   retryReceipt,
   setPoolMembership,
   restoreReceipt,
+  mergeReceipts,
+  splitReceipt,
   setRefund,
   addRefundImage,
   deleteReceipt,
