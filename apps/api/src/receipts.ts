@@ -4,13 +4,17 @@ import { unlink } from 'node:fs/promises';
 import {
   categoriesFor,
   ledgerOf,
+  linesTotalFen,
   type Category,
   type FileIndexEntry,
   type Ledger,
+  type Payee,
   type Receipt,
+  type ReceiptLine,
   type UploadResult,
 } from '@auto-reimbursement/contracts';
 
+import { parseLinesInput, parsePayeeInput, parsePeriodInput } from './company.js';
 import type { Config } from './config.js';
 import type { Store } from './db.js';
 import { findDuplicates, liveCopyInOtherLedger } from './duplicates.js';
@@ -158,6 +162,15 @@ export interface ReceiptPatch {
   category?: Category;
   merchant?: string;
   date?: string;
+  /**
+   * 公账区：多项明细（至少 2 项，分类加月份不重复，每项大于 0）。给了明细，分类取第一项，金额取各项之和
+   * （同时给了 paidFen 就必须正好等于各项之和）；null 表示去掉明细、回到单分类。
+   */
+  lines?: ReceiptLine[] | null;
+  /** 公账区：单分类凭证的费用月份（YYYY-MM）；null 表示去掉。有明细时月份在各项里，不能再给。 */
+  period?: string | null;
+  /** 公账区：收款方（户名、开户银行、账号）；null 表示去掉。 */
+  payee?: Payee | null;
 }
 
 const MAX_MERCHANT_LENGTH = 50;
@@ -178,6 +191,13 @@ function assertValidPatch(patch: ReceiptPatch, ledger: Ledger): void {
   }
   if (patch.date !== undefined && !isCalendarDate(patch.date)) {
     throw new Error('INVALID_DATE');
+  }
+  // 明细、月份、收款方只有公账区才有
+  if (
+    ledger !== 'company' &&
+    (patch.lines !== undefined || patch.period !== undefined || patch.payee !== undefined)
+  ) {
+    throw new Error('INVALID_RECEIPT_PATCH');
   }
 }
 
@@ -204,11 +224,46 @@ function applyPatch(receipt: Receipt, patch: ReceiptPatch): Receipt {
     merchant: patch.merchant === undefined ? receipt.merchant : patch.merchant.trim(),
     date: patch.date ?? receipt.date,
   };
+  applyCompanyFields(patched, receipt, patch);
   // 人工改了分类，规则说明（按规则归类 / 规则建议）就不再适用
   if (patched.category !== receipt.category && receipt.ruleMatch) {
     patched.ruleMatch = null;
   }
   return patched;
+}
+
+// 公账区的明细、月份、收款方。有明细的凭证：分类是第一项的（兼容字段）、月份在各项里、
+// 改明细时金额跟着各项走；只改金额而不给明细会对不上，直接拒绝。
+function applyCompanyFields(patched: Receipt, receipt: Receipt, patch: ReceiptPatch): void {
+  const newLines = patch.lines === undefined || patch.lines === null ? patch.lines : parseLinesInput(patch.lines);
+  const newPeriod = patch.period === undefined ? undefined : parsePeriodInput(patch.period);
+  const newPayee = patch.payee === undefined ? undefined : parsePayeeInput(patch.payee);
+  const lines = newLines === undefined ? receipt.lines : (newLines ?? undefined);
+
+  if (lines !== undefined) {
+    if (patch.category !== undefined && patch.category !== lines[0]!.category) {
+      throw new Error('INVALID_CATEGORY');
+    }
+    if (newPeriod !== undefined && newPeriod !== null) {
+      throw new Error('INVALID_PERIOD');
+    }
+    const total = linesTotalFen(lines);
+    if (patch.paidFen !== undefined && patch.paidFen !== total) {
+      throw new Error('LINES_SUM_MISMATCH');
+    }
+    patched.lines = lines;
+    patched.category = lines[0]!.category;
+    if (newLines !== undefined) patched.paidFen = total;
+    delete patched.period;
+  } else {
+    delete patched.lines;
+    if (newPeriod === null) delete patched.period;
+    else if (newPeriod !== undefined) patched.period = newPeriod;
+  }
+  if (newPayee === null) delete patched.payee;
+  else if (newPayee !== undefined) patched.payee = newPayee;
+  // 明细变了（拆开或合回去），原来的规则说明不再适用
+  if (newLines !== undefined && receipt.ruleMatch) patched.ruleMatch = null;
 }
 
 export function updateReceipt(
@@ -258,6 +313,10 @@ export function confirmReceipt(
     if (!validFen(paidFen) || !categoriesFor(ledgerOf(receipt)).includes(category)) {
       throw new Error('INCOMPLETE_RECEIPT');
     }
+    // 确认之后进付款池：多项凭证各项加起来必须正好等于金额
+    if (merged.lines !== undefined && linesTotalFen(merged.lines) !== paidFen) {
+      throw new Error('LINES_SUM_MISMATCH');
+    }
     if (receipt.refundFen > paidFen) {
       throw new Error('REFUND_EXCEEDS_PAID');
     }
@@ -277,7 +336,8 @@ export function confirmReceipt(
       confirmed.ruleMatch = null;
     }
     store.put('receipts', confirmed);
-    recordCorrectionInTransaction(store, id, category);
+    // 多项凭证里有好几个分类，不拿它学规则
+    if (confirmed.lines === undefined) recordCorrectionInTransaction(store, id, category);
     return confirmed;
   });
 }

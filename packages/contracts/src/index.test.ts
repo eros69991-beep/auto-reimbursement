@@ -10,9 +10,11 @@ import {
   formGroupLabel,
   formatFen,
   formatPeriod,
+  groupKey,
   isLedger,
   isPeriod,
   ledgerOf,
+  linesTotalFen,
   netFen,
   parseFen,
   parsePeriod,
@@ -93,9 +95,54 @@ describe('form group labels', () => {
     expect(formGroupLabel({ category: '食材', part: 2 })).toBe('食材（续）');
     expect(formGroupLabel({ category: '百慕达食材', part: 3 })).toBe('百慕达食材（续）');
   });
+
+  it('writes the month after the category on company rows, then the continuation mark', () => {
+    expect(formGroupLabel({ category: '电费', period: '2026-07' })).toBe('电费（2026年7月）');
+    expect(formGroupLabel({ category: '店面租金', period: '2026-09', part: 1 })).toBe('店面租金（2026年9月）');
+    expect(formGroupLabel({ category: '空调能源费', period: '2026-12', part: 2 })).toBe('空调能源费（2026年12月）（续）');
+    expect(formGroupLabel({ category: '肉款', part: 2 })).toBe('肉款（续）');
+  });
+
+  it('tells rows apart by category and month, and a row without a month from a row with one', () => {
+    expect(groupKey({ category: '电费' })).toBe('电费');
+    expect(groupKey({ category: '电费', period: '2026-07' })).toBe('电费|2026-07');
+    const keys = new Set([
+      groupKey({ category: '电费', period: '2026-07' }),
+      groupKey({ category: '电费', period: '2026-08' }),
+      groupKey({ category: '电费' }),
+      groupKey({ category: '水费', period: '2026-07' }),
+    ]);
+    expect(keys.size).toBe(4);
+    expect(groupKey({ category: '电费', period: '2026-07', part: 2 })).toBe(groupKey({ category: '电费', period: '2026-07' }));
+  });
+});
+
+describe('items of a receipt', () => {
+  it('adds up the items in fen', () => {
+    expect(linesTotalFen([])).toBe(0);
+    expect(linesTotalFen([{ fen: 2281410 }, { fen: 506980 }, { fen: 4886 }, { fen: 1146687 }, { fen: 16200 }])).toBe(3956163);
+    expect(formatFen(linesTotalFen([{ fen: 2281410 }, { fen: 506980 }, { fen: 4886 }, { fen: 1146687 }, { fen: 16200 }]))).toBe('39561.63');
+  });
 });
 
 describe('receipt caption', () => {
+  it('names the month of a company row like the form does', () => {
+    expect(receiptCaption({
+      sheetNumber: 2,
+      group: { category: '电费', period: '2026-07', totalFen: 1146687 },
+      position: 1,
+      count: 1,
+      netFen: 1146687,
+    })).toBe('第 2 张报销单 · 电费（2026年7月） 第 1/1 张 · 本张 11466.87 · 电费（2026年7月）合计 11466.87');
+    expect(receiptCaption({
+      sheetNumber: 1,
+      group: { category: '电费', period: '2026-07', part: 2, totalFen: 300 },
+      position: 2,
+      count: 3,
+      netFen: 100,
+    })).toBe('第 1 张报销单 · 电费（2026年7月）（续） 第 2/3 张 · 本张 1.00 · 电费（2026年7月）（续）合计 3.00');
+  });
+
   it('says which form, which receipt of the category, its amount and the category total', () => {
     expect(receiptCaption({
       sheetNumber: 1,

@@ -299,9 +299,16 @@ export interface FormOptions {
 export interface Snapshot {
   receiptId: string;
   uploadOrder: number;
+  /** 多项凭证（有 lines）时取第一项的分类，只是兼容字段；付款单上按 lines 里每一项排。 */
   category: Category;
   /** Absent in older batches. Kept for the reconcile view; the form no longer prints it (the summary lists amounts). */
   merchant?: string | null;
+  /** 公账区的多项凭证（收费通知单）：各项的分类、月份、金额，每一项在付款单上占自己的一行。定稿后不再变。 */
+  lines?: ReceiptLine[];
+  /** 公账区单分类凭证的费用月份（YYYY-MM）。 */
+  period?: string;
+  /** 公账区：收款方（户名、开户银行、账号），付款单备注栏里写。 */
+  payee?: Payee;
   paidFen: number;
   refundFen: number;
   netFen: number;
@@ -311,6 +318,11 @@ export interface Snapshot {
 
 export interface FormGroup {
   category: Category;
+  /**
+   * 公账区：这一行的费用月份（YYYY-MM）。付款单上的一行是一个「分类 + 月份」，同分类不同月份是两行；
+   * 店内的行没有这个字段。
+   */
+  period?: string;
   receiptIds: string[];
   amountsFen: number[];
   totalFen: number;
@@ -321,9 +333,26 @@ export interface FormGroup {
   part?: number;
 }
 
-/** 报销单上写的分类名：被拆到多张上的分类，第 2 部分起带「（续）」。 */
-export function formGroupLabel(group: Pick<FormGroup, 'category' | 'part'>): string {
-  return group.part !== undefined && group.part > 1 ? `${group.category}（续）` : group.category;
+/**
+ * 一行的标识：分类相同、月份也相同的凭证放在同一行（店内没有月份，就是分类名）。
+ * 排版、对账、移动这一行都按它认。
+ */
+export function groupKey(group: Pick<FormGroup, 'category' | 'period'>): string {
+  return group.period === undefined ? group.category : `${group.category}|${group.period}`;
+}
+
+/** 一张凭证各项金额的合计（分）。 */
+export function linesTotalFen(lines: ReadonlyArray<Pick<ReceiptLine, 'fen'>>): number {
+  return lines.reduce((total, line) => total + line.fen, 0);
+}
+
+/**
+ * 报销单上写的项目名：公账区的行带月份，例如「电费（2026年7月）」；
+ * 被拆到多张上的分类，第 2 部分起带「（续）」。
+ */
+export function formGroupLabel(group: Pick<FormGroup, 'category' | 'part' | 'period'>): string {
+  const name = group.period === undefined ? group.category : `${group.category}（${formatPeriod(group.period)}）`;
+  return group.part !== undefined && group.part > 1 ? `${name}（续）` : name;
 }
 
 /**
@@ -334,12 +363,12 @@ export function formGroupLabel(group: Pick<FormGroup, 'category' | 'part'>): str
 export function receiptCaption(input: {
   /** 第几张报销单，从 1 起 */
   sheetNumber: number;
-  group: Pick<FormGroup, 'category' | 'part' | 'totalFen'>;
+  group: Pick<FormGroup, 'category' | 'part' | 'period' | 'totalFen'>;
   /** 这张凭证在本分类（本部分）里排第几，从 1 起，顺序与报销单摘要里的金额一致 */
   position: number;
   /** 本分类（本部分）一共几张凭证 */
   count: number;
-  /** 本张的实报金额（已扣退款） */
+  /** 本张在这一行里的金额：店内是实报金额（已扣退款），公账区的多项凭证是这一项的金额 */
   netFen: number;
 }): string {
   const label = formGroupLabel(input.group);

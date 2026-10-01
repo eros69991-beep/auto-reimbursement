@@ -8,6 +8,7 @@ import multer from 'multer';
 import {
   ALL_CATEGORIES,
   isLedger,
+  isPeriod,
   type Category,
   type FormOptions,
   type Ledger,
@@ -398,8 +399,8 @@ export function createRouter(
 
   router.post('/batches/:id/move', (request, response, next) => {
     try {
-      const { category, direction } = batchMoveRequest(request.body);
-      response.json(moveBatchGroup(store, request.params.id, category, direction));
+      const { category, direction, period } = batchMoveRequest(request.body);
+      response.json(moveBatchGroup(store, request.params.id, category, direction, period));
     } catch (error) {
       next(batchHttpError(error));
     }
@@ -752,7 +753,8 @@ function ruleFromRequest(id: string, body: unknown): Rule {
   return rule;
 }
 
-// P-11：PATCH/confirm 除 paidFen/category 外还接受 merchant（≤50 字）和 date（YYYY-MM-DD）
+// P-11：PATCH/confirm 除 paidFen/category 外还接受 merchant（≤50 字）和 date（YYYY-MM-DD）；
+// 公账区的凭证还可以带 lines（多项明细）、period（费用月份）、payee（收款方），null 表示去掉，细节在 receipts.ts 里校验
 function receiptPatchFromRequest(body: unknown): ReceiptPatch {
   if (body === null || typeof body !== 'object' || Array.isArray(body)) {
     throw new Error('INVALID_RECEIPT_PATCH');
@@ -762,7 +764,10 @@ function receiptPatchFromRequest(body: unknown): ReceiptPatch {
     !Object.hasOwn(value, 'paidFen') &&
     !Object.hasOwn(value, 'category') &&
     !Object.hasOwn(value, 'merchant') &&
-    !Object.hasOwn(value, 'date')
+    !Object.hasOwn(value, 'date') &&
+    !Object.hasOwn(value, 'lines') &&
+    !Object.hasOwn(value, 'period') &&
+    !Object.hasOwn(value, 'payee')
   ) {
     throw new Error('INVALID_RECEIPT_PATCH');
   }
@@ -772,11 +777,27 @@ function receiptPatchFromRequest(body: unknown): ReceiptPatch {
   if (value.date !== undefined && typeof value.date !== 'string') {
     throw new Error('INVALID_DATE');
   }
+  if (value.lines !== undefined && value.lines !== null && !Array.isArray(value.lines)) {
+    throw new Error('INVALID_LINES');
+  }
+  if (value.period !== undefined && value.period !== null && typeof value.period !== 'string') {
+    throw new Error('INVALID_PERIOD');
+  }
+  if (
+    value.payee !== undefined &&
+    value.payee !== null &&
+    (typeof value.payee !== 'object' || Array.isArray(value.payee))
+  ) {
+    throw new Error('INVALID_PAYEE');
+  }
   return {
     paidFen: value.paidFen as number | undefined,
     category: value.category as Rule['category'] | undefined,
     merchant: value.merchant as string | undefined,
     date: value.date as string | undefined,
+    lines: value.lines as ReceiptPatch['lines'],
+    period: value.period as ReceiptPatch['period'],
+    payee: value.payee as ReceiptPatch['payee'],
   };
 }
 
@@ -821,9 +842,11 @@ function batchRequest(body: unknown): {
   return { receiptIds: value.receiptIds, options: value.options as FormOptions };
 }
 
+// 移动的是单据上的一行：分类，公账区还要带上这一行的月份（同分类不同月份是不同的行）
 function batchMoveRequest(body: unknown): {
   category: Category;
   direction: -1 | 1;
+  period?: string;
 } {
   if (body === null || typeof body !== 'object' || Array.isArray(body)) {
     throw new Error('INVALID_MOVE');
@@ -832,11 +855,16 @@ function batchMoveRequest(body: unknown): {
   if (
     typeof value.category !== 'string' ||
     !ALL_CATEGORIES.includes(value.category as Category) ||
-    (value.direction !== -1 && value.direction !== 1)
+    (value.direction !== -1 && value.direction !== 1) ||
+    (value.period !== undefined && value.period !== null && !isPeriod(value.period))
   ) {
     throw new Error('INVALID_MOVE');
   }
-  return { category: value.category as Category, direction: value.direction };
+  return {
+    category: value.category as Category,
+    direction: value.direction,
+    ...(typeof value.period === 'string' ? { period: value.period } : {}),
+  };
 }
 
 function batchOptionsRequest(body: unknown): {

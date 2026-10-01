@@ -1,5 +1,6 @@
 import {
   COMPANY_CATEGORIES,
+  isPeriod,
   parseFen,
   parsePeriod,
   type Analysis,
@@ -151,4 +152,97 @@ export function looksLikeAccountNumber(text: string): boolean {
 /** AI 给的月份：认得出就规范成 YYYY-MM，认不出就当没有（返回 undefined）。 */
 export function periodOrUndefined(value: unknown): string | undefined {
   return parsePeriod(value) ?? undefined;
+}
+
+// ---- 人工提交的内容：明细、月份、收款方（严格校验，和 AI 读出来的宽松整理不同） ----
+
+/** 一张凭证最多拆成几项。 */
+export const MAX_LINES = 20;
+const MAX_FEN = 999_999_999_999;
+const MAX_PAYEE_TEXT = 100;
+
+/**
+ * 编辑框提交的多项明细：至少 2 项、最多 20 项；每项的分类是公账分类、金额是大于 0 的整数分；
+ * 月份写成 YYYY-MM（没有可以不写，写 null 或空串也当没有）；同一个（分类、月份）只能有一项。
+ * 不合格的抛 INVALID_LINES / INVALID_PERIOD / DUPLICATE_LINE，不悄悄改。
+ */
+export function parseLinesInput(input: unknown): ReceiptLine[] {
+  if (!Array.isArray(input) || input.length < 2 || input.length > MAX_LINES) {
+    throw new Error('INVALID_LINES');
+  }
+  const seen = new Set<string>();
+  const lines: ReceiptLine[] = [];
+  for (const item of input) {
+    if (item === null || typeof item !== 'object' || Array.isArray(item)) {
+      throw new Error('INVALID_LINES');
+    }
+    const raw = item as Record<string, unknown>;
+    const category = raw.category;
+    if (typeof category !== 'string' || !(COMPANY_CATEGORIES as readonly string[]).includes(category)) {
+      throw new Error('INVALID_LINES');
+    }
+    const fen = raw.fen;
+    if (typeof fen !== 'number' || !Number.isSafeInteger(fen) || fen <= 0 || fen > MAX_FEN) {
+      throw new Error('INVALID_LINES');
+    }
+    const period = parsePeriodInput(raw.period) ?? undefined;
+    const key = `${category}|${period ?? ''}`;
+    if (seen.has(key)) {
+      throw new Error('DUPLICATE_LINE');
+    }
+    seen.add(key);
+    lines.push({
+      category: category as CompanyCategory,
+      fen,
+      ...(period === undefined ? {} : { period }),
+    });
+  }
+  return lines;
+}
+
+/** 编辑框提交的费用月份：YYYY-MM；null 或空串表示没有（返回 null）；别的写法抛 INVALID_PERIOD。 */
+export function parsePeriodInput(input: unknown): string | null {
+  if (input === undefined || input === null || input === '') return null;
+  if (!isPeriod(input)) {
+    throw new Error('INVALID_PERIOD');
+  }
+  return input;
+}
+
+/**
+ * 编辑框提交的收款方：户名、开户银行去掉多余空白、各最长 100 字；账号去掉空格和横线，只认 6–34 位字母数字
+ * （账号是 JSON 字符串，数字类型会丢精度，不接受）。三项都空返回 null（表示去掉收款方）。
+ * 不合格的抛 INVALID_PAYEE，不悄悄丢掉。
+ */
+export function parsePayeeInput(input: unknown): Payee | null {
+  if (input === null) return null;
+  if (typeof input !== 'object' || Array.isArray(input)) {
+    throw new Error('INVALID_PAYEE');
+  }
+  const raw = input as Record<string, unknown>;
+  const text = (value: unknown): string | undefined => {
+    if (value === undefined || value === null) return undefined;
+    if (typeof value !== 'string') throw new Error('INVALID_PAYEE');
+    const cleaned = value.replace(/\s+/g, ' ').trim();
+    if (cleaned === '') return undefined;
+    if ([...cleaned].length > MAX_PAYEE_TEXT) throw new Error('INVALID_PAYEE');
+    return cleaned;
+  };
+  const name = text(raw.name);
+  const bank = text(raw.bank);
+  let account: string | undefined;
+  if (raw.account !== undefined && raw.account !== null) {
+    if (typeof raw.account !== 'string') throw new Error('INVALID_PAYEE');
+    const digits = raw.account.replace(/[\s-]/g, '');
+    if (digits !== '') {
+      if (!ACCOUNT_PATTERN.test(digits)) throw new Error('INVALID_PAYEE');
+      account = digits;
+    }
+  }
+  const payee: Payee = {
+    ...(name === undefined ? {} : { name }),
+    ...(bank === undefined ? {} : { bank }),
+    ...(account === undefined ? {} : { account }),
+  };
+  return Object.keys(payee).length === 0 ? null : payee;
 }

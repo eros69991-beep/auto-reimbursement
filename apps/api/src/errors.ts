@@ -50,12 +50,17 @@ const ERROR_TABLE: Record<string, ErrorSpec> = {
   MERGE_MIXED_LEDGER: { status: 409, message: '店内报销和公账付款的凭证不能合并' },
   LEDGER_DUPLICATE: { status: 409, message: '同一张图已经在另一个区里了，这张不能再放回来。要用这一张的话，请先把另一个区里的那张删掉' },
   REFUND_NOT_SUPPORTED: { status: 409, message: '公账付款没有退款；金额有变化请直接修改金额' },
+  LINES_SUM_MISMATCH: { status: 409, message: '各项金额加起来要正好等于合计，请核对每一项' },
   // 400 专项文案
   FORM_TEXT_OVERFLOW: { status: 400, message: '报销单内容超出版式容量，请减少单批凭证数量或缩短填写内容' },
   FORM_AMOUNT_OVERFLOW: { status: 400, message: '报销单内容超出版式容量，请减少单批凭证数量或缩短填写内容' },
   INVALID_CLEANUP_CONFIRMATION: { status: 400, message: '确认文字不正确' },
   RULE_KEY_TOO_SHORT: { status: 400, message: '固定规则的文字至少要 2 个字' },
   INVALID_MERGE: { status: 400, message: '一次合并 2 到 3 张不同的凭证' },
+  INVALID_LINES: { status: 400, message: '分项不对：至少 2 项、最多 20 项，每项要选公账分类、金额大于 0' },
+  DUPLICATE_LINE: { status: 400, message: '同一个分类、同一个月份只能有一项，请合并成一项' },
+  INVALID_PERIOD: { status: 400, message: '费用月份要写成「年-月」，例如 2026-07；有分项的凭证，月份写在每一项里' },
+  INVALID_PAYEE: { status: 400, message: '收款方不对：户名、开户银行最多 100 字，银行账号是 6–34 位数字或字母' },
   // 400 通用参数错误（不带 INVALID_ 前缀的少数历史错误码）
   LAYOUT_OVERFLOW: { status: 400, message: '请求参数无效' },
   CATEGORY_TOO_LARGE: { status: 400, message: '这张报销单放不下这个分类（每张最多 5 行，合计不能超过 9999999.99 元）' },

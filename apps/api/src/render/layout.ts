@@ -1,5 +1,6 @@
 import {
   formatFen,
+  groupKey,
   type Category,
   type FormGroup,
   type FormSheet,
@@ -45,22 +46,42 @@ export function defaultMetrics(): LayoutMetrics {
   };
 }
 
+/**
+ * 把凭证排成一行一行（FormGroup）：一行是一个「分类 + 月份」，店内没有月份，就是一个分类一行。
+ * 公账区的多项凭证（收费通知单）按它的每一项分到各自的行里，同一张凭证因此出现在好几行；
+ * 每一行里的凭证、金额按上传顺序排。行按第一次出现的顺序排。
+ */
 export function groupItems(items: Snapshot[]): FormGroup[] {
-  const groups = new Map<Category, FormGroup>();
-  for (const item of [...items].sort((left, right) => left.uploadOrder - right.uploadOrder)) {
-    const existing = groups.get(item.category);
+  const groups = new Map<string, FormGroup>();
+  const add = (category: Category, period: string | undefined, receiptId: string, fen: number): void => {
+    const key = groupKey({ category, period });
+    const existing = groups.get(key);
     if (existing === undefined) {
-      groups.set(item.category, {
-        category: item.category,
-        receiptIds: [item.receiptId],
-        amountsFen: [item.netFen],
-        totalFen: item.netFen,
+      groups.set(key, {
+        category,
+        // 店内的行不写月份，和以前存下来的排版一样
+        ...(period === undefined ? {} : { period }),
+        receiptIds: [receiptId],
+        amountsFen: [fen],
+        totalFen: fen,
       });
-      continue;
+      return;
     }
-    existing.receiptIds.push(item.receiptId);
-    existing.amountsFen.push(item.netFen);
-    existing.totalFen = addFen(existing.totalFen, item.netFen);
+    // 同一张凭证在同一行只出现一次（正常数据里同一张凭证的行不会重复，这里防脏数据）
+    if (existing.receiptIds.at(-1) === receiptId) {
+      existing.amountsFen[existing.amountsFen.length - 1] = existing.amountsFen.at(-1)! + fen;
+    } else {
+      existing.receiptIds.push(receiptId);
+      existing.amountsFen.push(fen);
+    }
+    existing.totalFen = addFen(existing.totalFen, fen);
+  };
+  for (const item of [...items].sort((left, right) => left.uploadOrder - right.uploadOrder)) {
+    if (item.lines === undefined) {
+      add(item.category, item.period, item.receiptId, item.netFen);
+    } else {
+      for (const line of item.lines) add(line.category, line.period, item.receiptId, line.fen);
+    }
   }
   for (const group of groups.values()) {
     formatFen(group.totalFen);
@@ -194,8 +215,15 @@ export function mergedRowBoundaries(placements: GroupPlacement[]): Set<number> {
  * - 放不下但一张报销单装得下，整个分类换到下一张；
  * - 一张都装不下（超过表体行数），从本页剩余的行开始排，排满接下一张，
  *   每一部分各有小计，第 2 部分起带 part 序号（报销单上写「分类（续）」）。
+ * keepTogether：在好几行里都出现的凭证（公账区的收费通知单拆成了几项）的 id。它的各行是连着的一块，
+ * 本页剩下的地方放不下这一整块、但一张新单放得下时，整块换到新的一张，免得一张通知单被拆在两张单上。
+ * 不给（店内）就和以前完全一样。
  */
-export function packGroups(groups: FormGroup[], metrics: LayoutMetrics): FormSheet[] {
+export function packGroups(
+  groups: FormGroup[],
+  metrics: LayoutMetrics,
+  keepTogether: ReadonlySet<string> = new Set(),
+): FormSheet[] {
   for (const group of groups) {
     assertAmountsFit(group, metrics);
   }
@@ -207,17 +235,44 @@ export function packGroups(groups: FormGroup[], metrics: LayoutMetrics): FormShe
     return sheet;
   };
 
-  for (const group of groups) {
-    const current = sheets.at(-1);
-    if (current !== undefined && sheetFits([...current.groups, group], metrics)) {
-      current.groups.push(copyGroup(group));
-    } else if (sheetFits([group], metrics)) {
-      openSheet().groups.push(copyGroup(group));
-    } else {
-      splitAcrossSheets(group, sheets, openSheet, metrics);
+  for (const chunk of chunkGroups(groups, keepTogether)) {
+    if (chunk.length > 1) {
+      const current = sheets.at(-1);
+      const fitsHere = current !== undefined && sheetFits([...current.groups, ...chunk], metrics);
+      if (!fitsHere && sheetFits(chunk, metrics)) openSheet();
+    }
+    for (const group of chunk) {
+      const current = sheets.at(-1);
+      if (current !== undefined && sheetFits([...current.groups, group], metrics)) {
+        current.groups.push(copyGroup(group));
+      } else if (sheetFits([group], metrics)) {
+        openSheet().groups.push(copyGroup(group));
+      } else {
+        splitAcrossSheets(group, sheets, openSheet, metrics);
+      }
     }
   }
   return sheets;
+}
+
+// 连着的几行如果有同一张（keepTogether 里的）凭证，就算一块；没有的各自一块。
+function chunkGroups(groups: FormGroup[], keepTogether: ReadonlySet<string>): FormGroup[][] {
+  if (keepTogether.size === 0) return groups.map((group) => [group]);
+  const chunks: FormGroup[][] = [];
+  let ids = new Set<string>();
+  for (const group of groups) {
+    const chunk = group.receiptIds.some((id) => ids.has(id)) ? chunks.at(-1) : undefined;
+    if (chunk === undefined) {
+      chunks.push([group]);
+      ids = new Set();
+    } else {
+      chunk.push(group);
+    }
+    for (const id of group.receiptIds) {
+      if (keepTogether.has(id)) ids.add(id);
+    }
+  }
+  return chunks;
 }
 
 function splitAcrossSheets(
@@ -252,6 +307,7 @@ function splitAcrossSheets(
     }
     sheet.groups.push({
       category: group.category,
+      ...(group.period === undefined ? {} : { period: group.period }),
       receiptIds: group.receiptIds.slice(start, start + count),
       amountsFen: group.amountsFen.slice(start, start + count),
       totalFen: fen,
@@ -262,11 +318,13 @@ function splitAcrossSheets(
   }
 }
 
+/** 把一行（分类 + 月份；店内没有月份）挪到前一张或后一张报销单。 */
 export function moveGroup(
   sheets: FormSheet[],
   category: Category,
   direction: -1 | 1,
   metrics: LayoutMetrics,
+  period?: string,
 ): FormSheet[] {
   if (direction !== -1 && direction !== 1) {
     throw new LayoutError('INVALID_LAYOUT');
@@ -276,7 +334,7 @@ export function moveGroup(
   const matches: Array<{ sheetIndex: number; groupIndex: number }> = [];
   for (const [sheetIndex, sheet] of copied.entries()) {
     for (const [groupIndex, group] of sheet.groups.entries()) {
-      if (group.category === category) {
+      if (group.category === category && group.period === period) {
         matches.push({ sheetIndex, groupIndex });
       }
     }
@@ -364,6 +422,7 @@ function copyGroup(group: FormGroup): FormGroup {
     amountsFen: [...group.amountsFen],
     totalFen: group.totalFen,
   };
+  if (group.period !== undefined) copy.period = group.period;
   if (group.part !== undefined) copy.part = group.part;
   return copy;
 }

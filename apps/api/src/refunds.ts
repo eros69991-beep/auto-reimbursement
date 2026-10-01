@@ -2,6 +2,7 @@ import { unlink } from 'node:fs/promises';
 
 import {
   ledgerOf,
+  linesTotalFen,
   netFenOrNull,
   type FileIndexEntry,
   type Receipt,
@@ -87,7 +88,9 @@ export function isEligible(receipt: Receipt): boolean {
     receipt.category !== null &&
     receipt.paidFen !== null &&
     net !== null &&
-    net > 0
+    net > 0 &&
+    // 公账区的多项凭证（收费通知单）：各项加起来必须正好等于金额，对不上的不进付款池
+    (receipt.lines === undefined || linesTotalFen(receipt.lines) === net)
   );
 }
 

@@ -3,7 +3,10 @@ import { randomUUID } from 'node:crypto';
 import {
   categoriesFor,
   formatFen,
+  groupKey,
+  isPeriod,
   ledgerOf,
+  linesTotalFen,
   netFen,
   type Batch,
   type Category,
@@ -12,6 +15,7 @@ import {
   type FormSheet,
   type Ledger,
   type Receipt,
+  type Snapshot,
   type Totals,
 } from '@auto-reimbursement/contracts';
 
@@ -28,7 +32,10 @@ import { createFormDocument, formMetrics } from './render/form.js';
 import { isEligible } from './refunds.js';
 import { getSettings, validateNote } from './settings.js';
 
-/** 报销池（付款池）汇总：只算 ledger 这个区里可生成单据的凭证，分类也只列这个区的。 */
+/**
+ * 报销池（付款池）汇总：只算 ledger 这个区里可生成单据的凭证，分类也只列这个区的。
+ * 公账区的多项凭证（收费通知单）按它的每一项分到各自的分类里；count 数的是凭证（一张通知单算一张）。
+ */
 export function poolTotals(receipts: Receipt[], ledger: Ledger = 'store'): Totals {
   const byCategory: Record<string, number> = Object.fromEntries(
     categoriesFor(ledger).map((category) => [category, 0]),
@@ -41,7 +48,13 @@ export function poolTotals(receipts: Receipt[], ledger: Ledger = 'store'): Total
     }
     const value = netFen(receipt);
     totalFen = addFen(totalFen, value);
-    byCategory[receipt.category!] = addFen(byCategory[receipt.category!] ?? 0, value);
+    if (receipt.lines === undefined) {
+      byCategory[receipt.category!] = addFen(byCategory[receipt.category!] ?? 0, value);
+    } else {
+      for (const line of receipt.lines) {
+        byCategory[line.category] = addFen(byCategory[line.category] ?? 0, line.fen);
+      }
+    }
     count += 1;
   }
   return { count, totalFen, byCategory };
@@ -70,11 +83,15 @@ export function createBatch(
       throw new Error('MIXED_LEDGER');
     }
     const [ledger] = [...ledgers] as [Ledger];
-    const items = selected.map((receipt) => ({
+    const items: Snapshot[] = selected.map((receipt) => ({
       receiptId: receipt.id,
       uploadOrder: receipt.uploadOrder,
       category: receipt.category!,
       merchant: receipt.merchant ?? null,
+      // 公账区才有的几项：没有就不写，店内批次存下来的数据和以前完全一样
+      ...(receipt.lines === undefined ? {} : { lines: structuredClone(receipt.lines) }),
+      ...(receipt.period === undefined ? {} : { period: receipt.period }),
+      ...(receipt.payee === undefined ? {} : { payee: structuredClone(receipt.payee) }),
       paidFen: receipt.paidFen!,
       refundFen: receipt.refundFen,
       netFen: netFen(receipt),
@@ -85,7 +102,9 @@ export function createBatch(
       (total, item) => addFen(total, item.netFen),
       0,
     );
-    const sheets = withPdfMetrics((metrics) => packGroups(groupItems(items), metrics));
+    // 一张多项凭证（收费通知单）的各行尽量排在同一张单上
+    const together = new Set(items.filter((item) => item.lines !== undefined).map((item) => item.receiptId));
+    const sheets = withPdfMetrics((metrics) => packGroups(groupItems(items), metrics, together));
     const batch: Batch = {
       id: randomUUID(),
       // 店内批次不写这个字段，存下来的数据和以前完全一样
@@ -120,18 +139,20 @@ export function getBatch(store: Store, id: string): Batch {
   return batch;
 }
 
+/** 把一行（分类 + 月份；店内没有月份）挪到前一张或后一张单上。 */
 export function moveBatchGroup(
   store: Store,
   id: string,
   category: Category,
   direction: -1 | 1,
+  period?: string,
 ): Batch {
   const batch = getBatch(store, id);
   assertDraft(batch);
   return updateBatchLayout(
     store,
     id,
-    withPdfMetrics((metrics) => moveGroup(batch.sheets, category, direction, metrics)),
+    withPdfMetrics((metrics) => moveGroup(batch.sheets, category, direction, metrics, period)),
   );
 }
 
@@ -320,13 +341,14 @@ function assertLayoutWithMetrics(
   if (!Array.isArray(sheets) || sheets.length === 0) {
     throw new Error('INVALID_LAYOUT');
   }
+  // 一行是一个「分类 + 月份」（店内没有月份，就是分类）
   const expected = new Map(
-    groupItems(batch.items).map((group) => [group.category, group]),
+    groupItems(batch.items).map((group) => [groupKey(group), group]),
   );
   const existingNotes = new Map(batch.sheets.map((sheet) => [sheet.id, sheet.noteId]));
   const seenSheetIds = new Set<string>();
-  // 一个分类可能被拆成几部分排在不同的报销单上，按出现的先后收集
-  const partsByCategory = new Map<Category, FormGroup[]>();
+  // 一行可能被拆成几部分排在不同的报销单上，按出现的先后收集
+  const partsByKey = new Map<string, FormGroup[]>();
   for (const [index, sheet] of sheets.entries()) {
     if (
       sheet === null ||
@@ -355,23 +377,24 @@ function assertLayoutWithMetrics(
     if (!sheetFits(sheet.groups, metrics)) {
       throw new Error('CATEGORY_TOO_LARGE');
     }
-    const categoriesOnSheet = new Set<Category>();
+    const keysOnSheet = new Set<string>();
     for (const group of sheet.groups) {
-      // 同一个分类的各部分一定在不同的报销单上
-      if (!expected.has(group.category) || categoriesOnSheet.has(group.category)) {
+      const key = groupKey(group);
+      // 同一行的各部分一定在不同的报销单上
+      if (!expected.has(key) || keysOnSheet.has(key)) {
         throw new Error('INVALID_LAYOUT');
       }
-      categoriesOnSheet.add(group.category);
-      const parts = partsByCategory.get(group.category) ?? [];
+      keysOnSheet.add(key);
+      const parts = partsByKey.get(key) ?? [];
       parts.push(group);
-      partsByCategory.set(group.category, parts);
+      partsByKey.set(key, parts);
     }
   }
-  if (partsByCategory.size !== expected.size) {
+  if (partsByKey.size !== expected.size) {
     throw new Error('INVALID_LAYOUT');
   }
-  for (const [category, original] of expected) {
-    const parts = partsByCategory.get(category);
+  for (const [key, original] of expected) {
+    const parts = partsByKey.get(key);
     if (parts === undefined || !coversGroup(parts, original)) {
       throw new Error('INVALID_LAYOUT');
     }
@@ -428,6 +451,7 @@ function isFormGroup(value: unknown): value is FormSheet['groups'][number] {
   const group = value as Record<string, unknown>;
   return (
     typeof group.category === 'string' &&
+    (group.period === undefined || isPeriod(group.period)) &&
     (group.part === undefined || (typeof group.part === 'number' && Number.isSafeInteger(group.part) && group.part >= 1)) &&
     typeof group.totalFen === 'number' &&
     Number.isSafeInteger(group.totalFen) &&
